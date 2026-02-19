@@ -185,17 +185,25 @@ func renderCodeLine(dl DiffLine, filename string, styles Styles, t theme.Theme, 
 	indicator := " "
 	var bgColor string
 	var numStyle lipgloss.Style
+	var indStyle lipgloss.Style
+	var bgStyle lipgloss.Style
 	switch dl.Type {
 	case LineAdded:
 		indicator = "+"
 		bgColor = t.AddedBg
 		numStyle = styles.DiffLineNumAdded
+		indStyle = styles.DiffAdded
+		bgStyle = styles.DiffAddedBg
 	case LineRemoved:
 		indicator = "-"
 		bgColor = t.RemovedBg
 		numStyle = styles.DiffLineNumRemoved
+		indStyle = styles.DiffRemoved
+		bgStyle = styles.DiffRemovedBg
 	default:
 		numStyle = styles.DiffLineNum
+		indStyle = styles.DiffContext
+		bgStyle = lipgloss.NewStyle()
 	}
 
 	nums := numStyle.Render(oldNum + " " + newNum)
@@ -203,19 +211,16 @@ func renderCodeLine(dl DiffLine, filename string, styles Styles, t theme.Theme, 
 	// Syntax highlight the content
 	highlighted := highlightLine(dl.Content, filename, bgColor)
 
-	// Build the code portion with full-width background
+	// Build: colored indicator + highlighted content + bg padding to fill width
 	codeWidth := width - lineNumWidth*2 - 3 // nums + spaces
-	var codeLine string
-	switch dl.Type {
-	case LineAdded:
-		codeLine = styles.DiffAdded.Width(codeWidth).Render(indicator + " " + highlighted)
-	case LineRemoved:
-		codeLine = styles.DiffRemoved.Width(codeWidth).Render(indicator + " " + highlighted)
-	default:
-		codeLine = styles.DiffContext.Width(codeWidth).Render(indicator + " " + highlighted)
+	prefix := indStyle.Render(indicator + " ")
+	contentWidth := lipgloss.Width(prefix) + lipgloss.Width(highlighted)
+	padding := ""
+	if pad := codeWidth - contentWidth; pad > 0 {
+		padding = bgStyle.Render(strings.Repeat(" ", pad))
 	}
 
-	return nums + " " + codeLine
+	return nums + " " + prefix + highlighted + padding
 }
 
 func fmtLineNum(n int) string {
@@ -236,8 +241,13 @@ func RenderNewFile(content, filename string, styles Styles, t theme.Theme, width
 		num := i + 1
 		nums := styles.DiffLineNumAdded.Render("     " + fmt.Sprintf("%4d", num))
 		highlighted := highlightLine(line, filename, t.AddedBg)
-		code := styles.DiffAdded.Width(codeWidth).Render("+ " + highlighted)
-		b.WriteString(nums + " " + code)
+		prefix := styles.DiffAdded.Render("+ ")
+		contentWidth := lipgloss.Width(prefix) + lipgloss.Width(highlighted)
+		padding := ""
+		if pad := codeWidth - contentWidth; pad > 0 {
+			padding = styles.DiffAddedBg.Render(strings.Repeat(" ", pad))
+		}
+		b.WriteString(nums + " " + prefix + highlighted + padding)
 		b.WriteByte('\n')
 	}
 	return b.String()

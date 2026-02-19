@@ -22,6 +22,8 @@ type Styles struct {
 	// Diff
 	DiffAdded           lipgloss.Style
 	DiffRemoved         lipgloss.Style
+	DiffAddedBg         lipgloss.Style // bg-only, for padding highlighted lines
+	DiffRemovedBg       lipgloss.Style // bg-only, for padding highlighted lines
 	DiffContext         lipgloss.Style
 	DiffHunkHeader      lipgloss.Style
 	DiffLineNum         lipgloss.Style
@@ -73,6 +75,10 @@ func NewStyles(t theme.Theme) Styles {
 			Background(lipgloss.Color(t.AddedBg)),
 		DiffRemoved: lipgloss.NewStyle().
 			Foreground(lipgloss.Color(t.RemovedFg)).
+			Background(lipgloss.Color(t.RemovedBg)),
+		DiffAddedBg: lipgloss.NewStyle().
+			Background(lipgloss.Color(t.AddedBg)),
+		DiffRemovedBg: lipgloss.NewStyle().
 			Background(lipgloss.Color(t.RemovedBg)),
 		DiffContext: lipgloss.NewStyle().
 			Foreground(lipgloss.Color(t.Fg)),
