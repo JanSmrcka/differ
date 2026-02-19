@@ -30,35 +30,35 @@ differ commit     # review staged + commit
 
 ### File List
 
-| Key | Action |
-|-----|--------|
-| `j/k` | navigate files |
-| `enter` / `l` | view diff |
-| `tab` | stage/unstage file |
-| `a` | stage all |
-| `c` | commit (AI-generated message via `claude`) |
-| `e` | open in editor (nvim via tmux) |
-| `g/G` | first/last file |
-| `q` | quit |
+| Key           | Action                                     |
+| ------------- | ------------------------------------------ |
+| `j/k`         | navigate files                             |
+| `enter` / `l` | view diff                                  |
+| `tab`         | stage/unstage file                         |
+| `a`           | stage all                                  |
+| `c`           | commit (AI-generated message via `claude`) |
+| `e`           | open in editor (nvim via tmux)             |
+| `g/G`         | first/last file                            |
+| `q`           | quit                                       |
 
 ### Diff View
 
-| Key | Action |
-|-----|--------|
-| `j/k` | scroll |
-| `d/u` | half page down/up |
-| `g/G` | top/bottom |
-| `n/p` | next/prev file |
-| `tab` | stage/unstage |
-| `e` | open in editor |
+| Key         | Action            |
+| ----------- | ----------------- |
+| `j/k`       | scroll            |
+| `d/u`       | half page down/up |
+| `g/G`       | top/bottom        |
+| `n/p`       | next/prev file    |
+| `tab`       | stage/unstage     |
+| `e`         | open in editor    |
 | `esc` / `h` | back to file list |
 
 ### Commit Mode
 
-| Key | Action |
-|-----|--------|
+| Key     | Action         |
+| ------- | -------------- |
 | `enter` | confirm commit |
-| `esc` | cancel |
+| `esc`   | cancel         |
 
 ## AI Commit Messages
 
@@ -82,6 +82,18 @@ Config file: `~/.config/differ/config.json`
   "commit_msg_prompt": "Write a concise git commit message for this diff:"
 }
 ```
+
+## Tips
+
+### Tmux floating window
+
+Bind differ to a key in tmux for quick access as a popup overlay:
+
+```tmux
+bind g display-popup -E -w 90% -h 90% "cd #{pane_current_path} && differ"
+```
+
+Press `prefix + g` to open differ in a floating window over your current session. It closes automatically on quit.
 
 ## Features
 
