@@ -8,8 +8,10 @@ import (
 
 // Config holds user preferences.
 type Config struct {
-	Theme    string `json:"theme"`
-	TabWidth int    `json:"tab_width"`
+	Theme           string `json:"theme"`
+	TabWidth        int    `json:"tab_width"`
+	CommitMsgCmd    string `json:"commit_msg_cmd"`
+	CommitMsgPrompt string `json:"commit_msg_prompt"`
 }
 
 // Default returns the default configuration.

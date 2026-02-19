@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/jansmrcka/differ/internal/config"
 	"github.com/jansmrcka/differ/internal/git"
 	"github.com/jansmrcka/differ/internal/theme"
 )
@@ -46,6 +47,7 @@ type commitMsgGeneratedMsg struct {
 // Model is the main Bubble Tea model for the diff viewer.
 type Model struct {
 	repo       *git.Repo
+	cfg        config.Config
 	files      []fileItem
 	styles     Styles
 	theme      theme.Theme
@@ -73,6 +75,7 @@ type fileItem struct {
 // NewModel creates the main diff viewer model.
 func NewModel(
 	repo *git.Repo,
+	cfg config.Config,
 	changes []git.FileChange,
 	untracked []string,
 	styles Styles,
@@ -88,6 +91,7 @@ func NewModel(
 
 	return Model{
 		repo:        repo,
+		cfg:         cfg,
 		files:       files,
 		styles:      styles,
 		theme:       t,
@@ -427,8 +431,12 @@ func (m Model) commitCmd(message string) tea.Cmd {
 	}
 }
 
+const defaultCommitMsgCmd = "claude -p"
+const defaultCommitMsgPrompt = "Write a concise git commit message (one line, no quotes, use conventional commit prefixes like feat:, fix:, chore:, refactor: etc when appropriate) for this diff:"
+
 func (m Model) generateCommitMsgCmd() tea.Cmd {
 	repo := m.repo
+	cfg := m.cfg
 	return func() tea.Msg {
 		diff, err := repo.StagedDiff()
 		if err != nil {
@@ -437,16 +445,27 @@ func (m Model) generateCommitMsgCmd() tea.Cmd {
 		if strings.TrimSpace(diff) == "" {
 			return commitMsgGeneratedMsg{err: fmt.Errorf("empty staged diff")}
 		}
-		// Truncate diff to avoid overwhelming claude
 		const maxDiff = 8000
 		if len(diff) > maxDiff {
 			diff = diff[:maxDiff] + "\n... (truncated)"
 		}
-		prompt := "Write a concise git commit message (one line, no quotes, use conventional commit prefixes like feat:, fix:, chore:, refactor: etc when appropriate) for this diff:\n\n" + diff
-		cmd := exec.Command("claude", "-p", prompt)
+
+		promptPrefix := defaultCommitMsgPrompt
+		if cfg.CommitMsgPrompt != "" {
+			promptPrefix = cfg.CommitMsgPrompt
+		}
+		prompt := promptPrefix + "\n\n" + diff
+
+		cmdStr := defaultCommitMsgCmd
+		if cfg.CommitMsgCmd != "" {
+			cmdStr = cfg.CommitMsgCmd
+		}
+		parts := strings.Fields(cmdStr)
+		args := append(parts[1:], prompt)
+		cmd := exec.Command(parts[0], args...)
 		out, err := cmd.Output()
 		if err != nil {
-			return commitMsgGeneratedMsg{err: fmt.Errorf("claude: %w", err)}
+			return commitMsgGeneratedMsg{err: fmt.Errorf("%s: %w", parts[0], err)}
 		}
 		msg := strings.TrimSpace(string(out))
 		return commitMsgGeneratedMsg{message: msg}

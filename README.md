@@ -77,7 +77,9 @@ Config file: `~/.config/differ/config.json`
 
 ```json
 {
-  "theme": "dark"
+  "theme": "dark",
+  "commit_msg_cmd": "claude -p",
+  "commit_msg_prompt": "Write a concise git commit message for this diff:"
 }
 ```
 

@@ -94,7 +94,7 @@ func runDiff(cmd *cobra.Command, args []string) error {
 	t := resolveTheme(cfg)
 	styles := ui.NewStyles(t)
 
-	model := ui.NewModel(repo, files, untracked, styles, t, flagStaged, flagRef)
+	model := ui.NewModel(repo, cfg, files, untracked, styles, t, flagStaged, flagRef)
 	if flagCommit {
 		model.StartInCommitMode()
 	}
@@ -134,7 +134,7 @@ func runCommit(cmd *cobra.Command, args []string) error {
 	t := resolveTheme(cfg)
 	styles := ui.NewStyles(t)
 
-	model := ui.NewModel(repo, files, nil, styles, t, true, "")
+	model := ui.NewModel(repo, cfg, files, nil, styles, t, true, "")
 	model.StartInCommitMode()
 	p := tea.NewProgram(model, tea.WithAltScreen())
 	_, err = p.Run()
