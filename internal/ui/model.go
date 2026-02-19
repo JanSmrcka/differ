@@ -400,10 +400,19 @@ func (m Model) commitCmd(message string) tea.Cmd {
 func (m Model) mainHeight() int { return m.height - 2 }
 func (m Model) diffWidth() int  { return m.width - fileListWidth - 1 }
 
+const (
+	minWidth  = 60
+	minHeight = 10
+)
+
 // View renders the full UI.
 func (m Model) View() string {
 	if m.width == 0 || !m.ready {
 		return ""
+	}
+	if m.width < minWidth || m.height < minHeight {
+		return fmt.Sprintf("Terminal too small (%dx%d). Minimum: %dx%d",
+			m.width, m.height, minWidth, minHeight)
 	}
 
 	mainH := m.mainHeight()
@@ -499,6 +508,12 @@ func (m Model) renderStatusBar() string {
 	branch := m.repo.BranchName()
 	info := fmt.Sprintf(" ⎇ %s", branch)
 
+	if m.ref != "" {
+		info += fmt.Sprintf("  ref:%s", m.ref)
+	}
+	if m.stagedOnly {
+		info += "  [staged only]"
+	}
 	if m.statusMsg != "" {
 		info += "  " + m.statusMsg
 	}

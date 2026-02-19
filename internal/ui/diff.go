@@ -34,6 +34,8 @@ type ParsedDiff struct {
 	Binary bool
 }
 
+const maxDiffLines = 10000
+
 // ParseDiff parses raw unified diff output into structured lines.
 func ParseDiff(raw string) ParsedDiff {
 	if strings.Contains(raw, "Binary files") && strings.Contains(raw, "differ") {
@@ -44,6 +46,13 @@ func ParseDiff(raw string) ParsedDiff {
 	oldNum, newNum := 0, 0
 
 	for _, line := range strings.Split(raw, "\n") {
+		if len(lines) >= maxDiffLines {
+			lines = append(lines, DiffLine{
+				Type: LineHunkHeader, Content: fmt.Sprintf("… truncated (%d+ lines)", maxDiffLines),
+				OldNum: -1, NewNum: -1,
+			})
+			break
+		}
 		dl := parseDiffLine(line, &oldNum, &newNum)
 		if dl != nil {
 			lines = append(lines, *dl)

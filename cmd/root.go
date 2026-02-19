@@ -17,6 +17,7 @@ var (
 	flagStaged bool
 	flagRef    string
 	flagTheme  string
+	flagCommit bool
 )
 
 var rootCmd = &cobra.Command{
@@ -40,6 +41,7 @@ var commitCmd = &cobra.Command{
 func init() {
 	rootCmd.Flags().BoolVarP(&flagStaged, "staged", "s", false, "show only staged changes")
 	rootCmd.Flags().StringVarP(&flagRef, "ref", "r", "", "compare against branch/tag/commit")
+	rootCmd.Flags().BoolVarP(&flagCommit, "commit", "c", false, "enter commit mode after review")
 	rootCmd.Flags().StringVar(&flagTheme, "theme", "", "color theme (dark, light)")
 	rootCmd.AddCommand(logCmd, commitCmd)
 }
@@ -91,6 +93,9 @@ func runDiff(cmd *cobra.Command, args []string) error {
 	styles := ui.NewStyles(t)
 
 	model := ui.NewModel(repo, files, untracked, styles, t, flagStaged, flagRef)
+	if flagCommit {
+		model.StartInCommitMode()
+	}
 	p := tea.NewProgram(model, tea.WithAltScreen())
 	_, err = p.Run()
 	return err

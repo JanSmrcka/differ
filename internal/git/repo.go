@@ -96,7 +96,14 @@ func (r *Repo) ChangedFiles(staged bool, ref string) ([]FileChange, error) {
 	}
 
 	// Staged changes
-	stagedFiles, err := r.diffNameStatus("--cached")
+	var stagedFiles []FileChange
+	var err error
+	if r.HasCommits() {
+		stagedFiles, err = r.diffNameStatus("--cached")
+	} else {
+		// No commits yet — diff staged against empty tree
+		stagedFiles, err = r.diffNameStatusEmptyTree()
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -163,6 +170,10 @@ func (r *Repo) StageFile(path string) error {
 
 // UnstageFile unstages a file.
 func (r *Repo) UnstageFile(path string) error {
+	if !r.HasCommits() {
+		_, err := r.run("rm", "--cached", "--", path)
+		return err
+	}
 	_, err := r.run("reset", "HEAD", "--", path)
 	return err
 }
@@ -190,8 +201,14 @@ func (r *Repo) Log(n int) ([]Commit, error) {
 }
 
 // CommitDiff returns the full diff for a commit.
+// For the root commit (no parent), uses diff-tree against empty tree.
 func (r *Repo) CommitDiff(hash string) (string, error) {
-	return r.run("diff", hash+"~1", hash, "--no-ext-diff", "--color=never")
+	out, err := r.run("diff", hash+"~1", hash, "--no-ext-diff", "--color=never")
+	if err != nil {
+		// Root commit — diff against empty tree
+		return r.run("diff-tree", "-p", "--root", "--no-ext-diff", "--color=never", hash)
+	}
+	return out, nil
 }
 
 // CommitDiffFiles returns files changed in a commit.
@@ -212,6 +229,16 @@ func (r *Repo) run(args ...string) (string, error) {
 		return "", err
 	}
 	return string(out), nil
+}
+
+// diffNameStatusEmptyTree lists staged files when there are no commits yet.
+func (r *Repo) diffNameStatusEmptyTree() ([]FileChange, error) {
+	// 4b825dc... is git's well-known empty tree hash
+	out, err := r.run("diff-index", "--name-status", "--cached", "4b825dc642cb6eb9a060e54bf899d69f82c6b18f")
+	if err != nil {
+		return nil, err
+	}
+	return parseNameStatus(out), nil
 }
 
 // diffNameStatus runs git diff --name-status with optional extra args.
