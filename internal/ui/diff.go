@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/jansmrcka/differ/internal/theme"
 )
 
 // DiffLineType classifies a line in a unified diff.
@@ -117,49 +118,62 @@ func parseHunkHeader(line string, oldNum, newNum *int) {
 }
 
 // RenderDiff renders parsed diff lines into a styled string.
-func RenderDiff(parsed ParsedDiff, styles Styles, width int) string {
+func RenderDiff(parsed ParsedDiff, filename string, styles Styles, t theme.Theme, width int) string {
 	if parsed.Binary {
 		return RenderBinaryFile(styles, width)
 	}
+	initChromaStyle(t.ChromaStyle)
 
 	var b strings.Builder
 	for _, dl := range parsed.Lines {
-		b.WriteString(renderDiffLine(dl, styles, width))
+		b.WriteString(renderDiffLine(dl, filename, styles, t, width))
 		b.WriteByte('\n')
 	}
 	return b.String()
 }
 
-func renderDiffLine(dl DiffLine, styles Styles, width int) string {
+func renderDiffLine(dl DiffLine, filename string, styles Styles, t theme.Theme, width int) string {
 	switch dl.Type {
 	case LineHunkHeader:
 		return styles.DiffHunkHeader.Width(width).Render(dl.Content)
 	case LineFileHeader:
 		return styles.DiffFileHeader.Render(dl.Content)
 	default:
-		return renderCodeLine(dl, styles, width)
+		return renderCodeLine(dl, filename, styles, t, width)
 	}
 }
 
-func renderCodeLine(dl DiffLine, styles Styles, width int) string {
+func renderCodeLine(dl DiffLine, filename string, styles Styles, t theme.Theme, width int) string {
 	oldNum := fmtLineNum(dl.OldNum)
 	newNum := fmtLineNum(dl.NewNum)
 	nums := styles.DiffLineNum.Render(oldNum + " " + newNum)
 
 	indicator := " "
-	var lineStyle lipgloss.Style
+	var bgColor string
 	switch dl.Type {
 	case LineAdded:
 		indicator = "+"
-		lineStyle = styles.DiffAdded
+		bgColor = t.AddedBg
 	case LineRemoved:
 		indicator = "-"
-		lineStyle = styles.DiffRemoved
-	default:
-		lineStyle = styles.DiffContext
+		bgColor = t.RemovedBg
 	}
 
-	content := lineStyle.Render(indicator + " " + dl.Content)
+	// Apply syntax highlighting with preserved background
+	highlighted := highlightLine(dl.Content, filename, bgColor)
+
+	// Style the indicator
+	var indStyle lipgloss.Style
+	switch dl.Type {
+	case LineAdded:
+		indStyle = styles.DiffAdded
+	case LineRemoved:
+		indStyle = styles.DiffRemoved
+	default:
+		indStyle = styles.DiffContext
+	}
+
+	content := indStyle.Render(indicator+" ") + highlighted
 	return nums + " " + content
 }
 
@@ -171,7 +185,9 @@ func fmtLineNum(n int) string {
 }
 
 // RenderNewFile renders file content as an all-added diff (for untracked files).
-func RenderNewFile(content string, styles Styles, width int) string {
+func RenderNewFile(content, filename string, styles Styles, t theme.Theme, width int) string {
+	initChromaStyle(t.ChromaStyle)
+
 	var b strings.Builder
 	b.WriteString(styles.DiffFileHeader.Render("new file"))
 	b.WriteByte('\n')
@@ -179,8 +195,9 @@ func RenderNewFile(content string, styles Styles, width int) string {
 	for i, line := range strings.Split(content, "\n") {
 		num := i + 1
 		nums := styles.DiffLineNum.Render("     " + fmt.Sprintf("%4d", num))
-		styled := styles.DiffAdded.Render("+ " + line)
-		b.WriteString(nums + " " + styled)
+		highlighted := highlightLine(line, filename, t.AddedBg)
+		ind := styles.DiffAdded.Render("+ ")
+		b.WriteString(nums + " " + ind + highlighted)
 		b.WriteByte('\n')
 	}
 	return b.String()

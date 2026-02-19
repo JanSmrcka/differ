@@ -196,26 +196,28 @@ func (m Model) loadDiffCmd() tea.Cmd {
 	f := m.files[idx]
 	repo := m.repo
 	styles := m.styles
+	t := m.theme
 	staged := f.change.Staged
 	ref := m.ref
 	diffW := m.width - fileListWidth - 1
+	filename := f.change.Path
 
 	return func() tea.Msg {
 		var content string
 		if f.untracked {
-			raw, err := repo.ReadFileContent(f.change.Path)
+			raw, err := repo.ReadFileContent(filename)
 			if err != nil {
 				content = styles.DiffHunkHeader.Render("Error reading file: " + err.Error())
 			} else {
-				content = RenderNewFile(raw, styles, diffW)
+				content = RenderNewFile(raw, filename, styles, t, diffW)
 			}
 		} else {
-			raw, err := repo.DiffFile(f.change.Path, staged, ref)
+			raw, err := repo.DiffFile(filename, staged, ref)
 			if err != nil {
 				content = styles.DiffHunkHeader.Render("Error loading diff: " + err.Error())
 			} else {
 				parsed := ParseDiff(raw)
-				content = RenderDiff(parsed, styles, diffW)
+				content = RenderDiff(parsed, filename, styles, t, diffW)
 			}
 		}
 		return diffLoadedMsg{content: content, index: idx}
