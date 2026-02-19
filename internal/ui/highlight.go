@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"fmt"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -83,7 +82,7 @@ func highlightLine(content, filename, bgColor string) string {
 // tokenForeground extracts the hex foreground color from a chroma style entry.
 func tokenForeground(entry chroma.StyleEntry) string {
 	if entry.Colour.IsSet() {
-		return fmt.Sprintf("#%06x", entry.Colour&0xFFFFFF)
+		return entry.Colour.String()
 	}
 	return ""
 }
