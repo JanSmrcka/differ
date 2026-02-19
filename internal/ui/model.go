@@ -442,7 +442,7 @@ func (m Model) generateCommitMsgCmd() tea.Cmd {
 		if len(diff) > maxDiff {
 			diff = diff[:maxDiff] + "\n... (truncated)"
 		}
-		prompt := "Write a concise git commit message (one line, no quotes, no prefix like 'feat:') for this diff:\n\n" + diff
+		prompt := "Write a concise git commit message (one line, no quotes, use conventional commit prefixes like feat:, fix:, chore:, refactor: etc when appropriate) for this diff:\n\n" + diff
 		cmd := exec.Command("claude", "-p", prompt)
 		out, err := cmd.Output()
 		if err != nil {
