@@ -31,11 +31,17 @@ var logCmd = &cobra.Command{
 	RunE:  runLog,
 }
 
+var commitCmd = &cobra.Command{
+	Use:   "commit",
+	Short: "Review staged changes and commit",
+	RunE:  runCommit,
+}
+
 func init() {
 	rootCmd.Flags().BoolVarP(&flagStaged, "staged", "s", false, "show only staged changes")
 	rootCmd.Flags().StringVarP(&flagRef, "ref", "r", "", "compare against branch/tag/commit")
 	rootCmd.Flags().StringVar(&flagTheme, "theme", "", "color theme (dark, light)")
-	rootCmd.AddCommand(logCmd)
+	rootCmd.AddCommand(logCmd, commitCmd)
 }
 
 // Execute runs the root CLI command.
@@ -85,6 +91,32 @@ func runDiff(cmd *cobra.Command, args []string) error {
 	styles := ui.NewStyles(t)
 
 	model := ui.NewModel(repo, files, untracked, styles, t, flagStaged, flagRef)
+	p := tea.NewProgram(model, tea.WithAltScreen())
+	_, err = p.Run()
+	return err
+}
+
+func runCommit(cmd *cobra.Command, args []string) error {
+	repo, err := git.NewRepo(".")
+	if err != nil {
+		return err
+	}
+
+	files, err := repo.ChangedFiles(true, "")
+	if err != nil {
+		return err
+	}
+	if len(files) == 0 {
+		fmt.Println("No staged changes to commit.")
+		return nil
+	}
+
+	cfg := config.Load()
+	t := resolveTheme(cfg)
+	styles := ui.NewStyles(t)
+
+	model := ui.NewModel(repo, files, nil, styles, t, true, "")
+	model.StartInCommitMode()
 	p := tea.NewProgram(model, tea.WithAltScreen())
 	_, err = p.Run()
 	return err

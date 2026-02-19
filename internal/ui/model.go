@@ -103,8 +103,18 @@ func buildFileItems(changes []git.FileChange, untracked []string) []fileItem {
 	return files
 }
 
+// StartInCommitMode sets the model to open directly in commit mode.
+func (m *Model) StartInCommitMode() {
+	m.mode = modeCommit
+	m.commitInput.Focus()
+}
+
 func (m Model) Init() tea.Cmd {
-	return m.loadDiffCmd()
+	cmds := []tea.Cmd{m.loadDiffCmd()}
+	if m.mode == modeCommit {
+		cmds = append(cmds, textinput.Blink)
+	}
+	return tea.Batch(cmds...)
 }
 
 // Update dispatches messages to the appropriate mode handler.
