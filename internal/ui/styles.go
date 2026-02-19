@@ -78,8 +78,7 @@ func NewStyles(t theme.Theme) Styles {
 			Foreground(lipgloss.Color(t.Fg)),
 		DiffHunkHeader: lipgloss.NewStyle().
 			Foreground(lipgloss.Color(t.HunkFg)).
-			Background(lipgloss.Color(t.HunkBg)).
-			Italic(true),
+			Faint(true),
 		DiffLineNum: lipgloss.NewStyle().
 			Foreground(lipgloss.Color(t.LineNumFg)),
 		DiffLineNumAdded: lipgloss.NewStyle().

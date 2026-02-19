@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -495,10 +496,11 @@ func (m Model) renderFileItem(f fileItem, selected bool) string {
 	}
 
 	statusStyled := m.styleStatus(status, f.change.Status)
-	name := truncatePath(f.change.Path, fileListWidth-10)
+	name := filepath.Base(f.change.Path)
 	if f.change.OldPath != "" {
-		name = truncatePath(f.change.OldPath+" → "+f.change.Path, fileListWidth-10)
+		name = filepath.Base(f.change.OldPath) + " → " + filepath.Base(f.change.Path)
 	}
+	name = truncatePath(name, fileListWidth-10)
 
 	line := fmt.Sprintf("%s%s %s", staged, statusStyled, name)
 	if selected {

@@ -170,10 +170,12 @@ func renderDiffLine(dl DiffLine, filename string, styles Styles, t theme.Theme, 
 }
 
 func renderHunkLine(dl DiffLine, styles Styles, width int) string {
-	// Render as a subtle separator with context
-	prefix := styles.DiffLineNum.Render("         ")
-	text := " " + dl.Content
-	return prefix + styles.DiffHunkHeader.Width(width - 9).Render(text)
+	prefix := styles.DiffLineNum.Render("    ···  ")
+	text := dl.Content
+	if text != "" {
+		text = " " + text
+	}
+	return prefix + styles.DiffHunkHeader.Render(text)
 }
 
 func renderCodeLine(dl DiffLine, filename string, styles Styles, t theme.Theme, width int) string {
