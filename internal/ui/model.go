@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -37,6 +38,11 @@ type commitDoneMsg struct {
 	err error
 }
 
+type commitMsgGeneratedMsg struct {
+	message string
+	err     error
+}
+
 // Model is the main Bubble Tea model for the diff viewer.
 type Model struct {
 	repo       *git.Repo
@@ -51,10 +57,12 @@ type Model struct {
 	prevCurs    int
 	viewport    viewport.Model
 	commitInput textinput.Model
-	statusMsg   string
-	width       int
-	height      int
-	ready       bool
+	statusMsg    string
+	generatingMsg bool
+	width        int
+	height       int
+	ready        bool
+	SelectedFile string // set on "open in editor" action, read after Run()
 }
 
 type fileItem struct {
@@ -129,6 +137,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleFilesRefreshed(msg)
 	case commitDoneMsg:
 		return m.handleCommitDone(msg)
+	case commitMsgGeneratedMsg:
+		return m.handleCommitMsgGenerated(msg)
 	case tea.KeyMsg:
 		switch m.mode {
 		case modeFileList:
@@ -182,6 +192,17 @@ func (m Model) handleCommitDone(msg commitDoneMsg) (tea.Model, tea.Cmd) {
 	return m, m.refreshFilesCmd()
 }
 
+func (m Model) handleCommitMsgGenerated(msg commitMsgGeneratedMsg) (tea.Model, tea.Cmd) {
+	m.generatingMsg = false
+	if msg.err != nil {
+		m.statusMsg = "ai msg failed: " + msg.err.Error()
+		return m, nil
+	}
+	m.commitInput.SetValue(msg.message)
+	m.commitInput.CursorEnd()
+	return m, nil
+}
+
 // File list mode
 func (m Model) updateFileListMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m.statusMsg = ""
@@ -203,6 +224,11 @@ func (m Model) updateFileListMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter", "l", "right":
 		m.mode = modeDiff
 		return m, nil
+	case "e":
+		if m.cursor < len(m.files) {
+			m.SelectedFile = m.files[m.cursor].change.Path
+		}
+		return m, tea.Quit
 	case "tab":
 		return m.toggleStage()
 	case "a":
@@ -229,6 +255,11 @@ func (m Model) updateDiffMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.nextFile()
 	case "p":
 		return m.prevFile()
+	case "e":
+		if m.cursor < len(m.files) {
+			m.SelectedFile = m.files[m.cursor].change.Path
+		}
+		return m, tea.Quit
 	case "tab":
 		return m.toggleStage()
 	}
@@ -303,8 +334,10 @@ func (m Model) enterCommitMode() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.mode = modeCommit
+	m.generatingMsg = true
+	m.statusMsg = "generating commit message..."
 	m.commitInput.Focus()
-	return m, textinput.Blink
+	return m, tea.Batch(textinput.Blink, m.generateCommitMsgCmd())
 }
 
 func (m Model) nextFile() (tea.Model, tea.Cmd) {
@@ -394,6 +427,32 @@ func (m Model) commitCmd(message string) tea.Cmd {
 	}
 }
 
+func (m Model) generateCommitMsgCmd() tea.Cmd {
+	repo := m.repo
+	return func() tea.Msg {
+		diff, err := repo.StagedDiff()
+		if err != nil {
+			return commitMsgGeneratedMsg{err: fmt.Errorf("git diff: %w", err)}
+		}
+		if strings.TrimSpace(diff) == "" {
+			return commitMsgGeneratedMsg{err: fmt.Errorf("empty staged diff")}
+		}
+		// Truncate diff to avoid overwhelming claude
+		const maxDiff = 8000
+		if len(diff) > maxDiff {
+			diff = diff[:maxDiff] + "\n... (truncated)"
+		}
+		prompt := "Write a concise git commit message (one line, no quotes, no prefix like 'feat:') for this diff:\n\n" + diff
+		cmd := exec.Command("claude", "-p", prompt)
+		out, err := cmd.Output()
+		if err != nil {
+			return commitMsgGeneratedMsg{err: fmt.Errorf("claude: %w", err)}
+		}
+		msg := strings.TrimSpace(string(out))
+		return commitMsgGeneratedMsg{message: msg}
+	}
+}
+
 // Layout: header(1) + content + status(1) + help(1) = height
 func (m Model) contentHeight() int { return m.height - 3 }
 func (m Model) diffWidth() int     { return m.width - fileListWidth - 1 }
@@ -471,7 +530,11 @@ func (m Model) renderBorder(height int) string {
 	if len(border) > 0 {
 		border = border[:len(border)-1]
 	}
-	return m.styles.Border.Render(border)
+	style := m.styles.Border
+	if m.mode == modeDiff {
+		style = m.styles.BorderFocus
+	}
+	return style.Render(border)
 }
 
 func (m Model) renderFileList(height int) string {
@@ -561,6 +624,7 @@ func (m Model) renderHelpBar() string {
 			{"d/u", "½ page"},
 			{"n/p", "next/prev"},
 			{"tab", "stage"},
+			{"e", "edit"},
 			{"esc", "back"},
 			{"q", "quit"},
 		}
@@ -570,6 +634,7 @@ func (m Model) renderHelpBar() string {
 			{"enter", "view diff"},
 			{"tab", "stage/unstage"},
 			{"a", "stage all"},
+			{"e", "edit"},
 			{"c", "commit"},
 			{"q", "quit"},
 		}
@@ -586,6 +651,10 @@ func (m Model) renderHelpBar() string {
 
 func (m Model) renderCommitBar() string {
 	prompt := m.styles.HelpKey.Render(" commit: ")
+	if m.generatingMsg {
+		hint := m.styles.HelpDesc.Render("generating...  esc cancel")
+		return lipgloss.NewStyle().Width(m.width).Render(prompt + hint)
+	}
 	input := m.commitInput.View()
 	esc := "  " + m.styles.HelpDesc.Render("esc cancel · enter commit")
 	return lipgloss.NewStyle().Width(m.width).Render(prompt + input + esc)

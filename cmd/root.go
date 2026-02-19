@@ -3,6 +3,8 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 
 	"github.com/jansmrcka/differ/internal/config"
 	"github.com/jansmrcka/differ/internal/git"
@@ -97,8 +99,20 @@ func runDiff(cmd *cobra.Command, args []string) error {
 		model.StartInCommitMode()
 	}
 	p := tea.NewProgram(model, tea.WithAltScreen())
-	_, err = p.Run()
-	return err
+	finalModel, err := p.Run()
+	if err != nil {
+		return err
+	}
+	if m, ok := finalModel.(ui.Model); ok && m.SelectedFile != "" {
+		return openInTmux(m.SelectedFile, repo.Dir())
+	}
+	return nil
+}
+
+func openInTmux(file, repoRoot string) error {
+	absPath := filepath.Join(repoRoot, file)
+	cmd := exec.Command("tmux", "new-window", "-c", repoRoot, "nvim", absPath)
+	return cmd.Run()
 }
 
 func runCommit(cmd *cobra.Command, args []string) error {

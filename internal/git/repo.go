@@ -184,6 +184,11 @@ func (r *Repo) StageAll() error {
 	return err
 }
 
+// StagedDiff returns the full diff of staged changes.
+func (r *Repo) StagedDiff() (string, error) {
+	return r.run("diff", "--cached", "--no-ext-diff", "--color=never")
+}
+
 // Commit creates a commit with the given message.
 func (r *Repo) Commit(msg string) error {
 	_, err := r.run("commit", "-m", msg)

@@ -31,11 +31,12 @@ type Styles struct {
 	DiffLineNumRemoved  lipgloss.Style
 
 	// Chrome
-	HeaderBar lipgloss.Style
-	StatusBar lipgloss.Style
-	HelpKey   lipgloss.Style
-	HelpDesc  lipgloss.Style
-	Border    lipgloss.Style
+	HeaderBar   lipgloss.Style
+	StatusBar   lipgloss.Style
+	HelpKey     lipgloss.Style
+	HelpDesc    lipgloss.Style
+	Border      lipgloss.Style
+	BorderFocus lipgloss.Style
 
 	// Commit input
 	CommitInput lipgloss.Style
@@ -110,6 +111,8 @@ func NewStyles(t theme.Theme) Styles {
 			Foreground(lipgloss.Color(t.HelpDescFg)),
 		Border: lipgloss.NewStyle().
 			Foreground(lipgloss.Color(t.BorderFg)),
+		BorderFocus: lipgloss.NewStyle().
+			Foreground(lipgloss.Color(t.AccentFg)),
 
 		CommitInput: lipgloss.NewStyle().
 			Foreground(lipgloss.Color(t.Fg)),
