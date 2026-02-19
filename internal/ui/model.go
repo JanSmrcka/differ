@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -21,10 +22,18 @@ const (
 
 const fileListWidth = 35
 
-// diffLoadedMsg carries rendered diff content for the viewport.
+// Messages
 type diffLoadedMsg struct {
 	content string
 	index   int
+}
+
+type filesRefreshedMsg struct {
+	files []fileItem
+}
+
+type commitDoneMsg struct {
+	err error
 }
 
 // Model is the main Bubble Tea model for the diff viewer.
@@ -36,13 +45,15 @@ type Model struct {
 	stagedOnly bool
 	ref        string
 
-	mode     viewMode
-	cursor   int
-	prevCurs int // tracks cursor to detect change
-	viewport viewport.Model
-	width    int
-	height   int
-	ready    bool // viewport initialized
+	mode        viewMode
+	cursor      int
+	prevCurs    int
+	viewport    viewport.Model
+	commitInput textinput.Model
+	statusMsg   string // transient status message
+	width       int
+	height      int
+	ready       bool
 }
 
 type fileItem struct {
@@ -60,6 +71,25 @@ func NewModel(
 	stagedOnly bool,
 	ref string,
 ) Model {
+	files := buildFileItems(changes, untracked)
+
+	ti := textinput.New()
+	ti.Placeholder = "commit message..."
+	ti.CharLimit = 200
+
+	return Model{
+		repo:        repo,
+		files:       files,
+		styles:      styles,
+		theme:       t,
+		stagedOnly:  stagedOnly,
+		ref:         ref,
+		prevCurs:    -1,
+		commitInput: ti,
+	}
+}
+
+func buildFileItems(changes []git.FileChange, untracked []string) []fileItem {
 	var files []fileItem
 	for _, c := range changes {
 		files = append(files, fileItem{change: c})
@@ -70,15 +100,7 @@ func NewModel(
 			untracked: true,
 		})
 	}
-	return Model{
-		repo:       repo,
-		files:      files,
-		styles:     styles,
-		theme:      t,
-		stagedOnly: stagedOnly,
-		ref:        ref,
-		prevCurs:   -1, // force initial load
-	}
+	return files
 }
 
 func (m Model) Init() tea.Cmd {
@@ -92,12 +114,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleResize(msg)
 	case diffLoadedMsg:
 		return m.handleDiffLoaded(msg)
+	case filesRefreshedMsg:
+		return m.handleFilesRefreshed(msg)
+	case commitDoneMsg:
+		return m.handleCommitDone(msg)
 	case tea.KeyMsg:
 		switch m.mode {
 		case modeFileList:
 			return m.updateFileListMode(msg)
 		case modeDiff:
 			return m.updateDiffMode(msg)
+		case modeCommit:
+			return m.updateCommitMode(msg)
 		}
 	}
 	return m, nil
@@ -106,8 +134,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) handleResize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 	m.width = msg.Width
 	m.height = msg.Height
-	mainH := m.height - 2
-	diffW := m.width - fileListWidth - 1 // 1 for border
+	mainH := m.mainHeight()
+	diffW := m.diffWidth()
 	m.viewport = viewport.New(diffW, mainH)
 	m.ready = true
 	return m, m.loadDiffCmd()
@@ -121,7 +149,33 @@ func (m Model) handleDiffLoaded(msg diffLoadedMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m Model) handleFilesRefreshed(msg filesRefreshedMsg) (tea.Model, tea.Cmd) {
+	m.files = msg.files
+	if m.cursor >= len(m.files) {
+		m.cursor = max(0, len(m.files)-1)
+	}
+	m.prevCurs = -1
+	if len(m.files) == 0 {
+		m.viewport.SetContent("")
+		return m, nil
+	}
+	return m, m.loadDiffCmd()
+}
+
+func (m Model) handleCommitDone(msg commitDoneMsg) (tea.Model, tea.Cmd) {
+	m.mode = modeFileList
+	if msg.err != nil {
+		m.statusMsg = "commit failed: " + msg.err.Error()
+		return m, nil
+	}
+	m.statusMsg = "committed!"
+	m.commitInput.Reset()
+	return m, m.refreshFilesCmd()
+}
+
+// File list mode
 func (m Model) updateFileListMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	m.statusMsg = ""
 	switch msg.String() {
 	case "q", "ctrl+c":
 		return m, tea.Quit
@@ -140,8 +194,13 @@ func (m Model) updateFileListMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter", "l", "right":
 		m.mode = modeDiff
 		return m, nil
+	case "tab":
+		return m.toggleStage()
+	case "a":
+		return m.stageAll()
+	case "c":
+		return m.enterCommitMode()
 	}
-	// Load diff if cursor changed
 	if m.cursor != m.prevCurs {
 		m.prevCurs = m.cursor
 		return m, m.loadDiffCmd()
@@ -149,11 +208,10 @@ func (m Model) updateFileListMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// Diff view mode
 func (m Model) updateDiffMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "q":
-		return m, tea.Quit
-	case "ctrl+c":
+	case "q", "ctrl+c":
 		return m, tea.Quit
 	case "esc", "h", "left":
 		m.mode = modeFileList
@@ -162,11 +220,83 @@ func (m Model) updateDiffMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.nextFile()
 	case "p":
 		return m.prevFile()
+	case "tab":
+		return m.toggleStage()
 	}
-	// Forward to viewport for scrolling (j/k/d/u/g/G etc)
 	var cmd tea.Cmd
 	m.viewport, cmd = m.viewport.Update(msg)
 	return m, cmd
+}
+
+// Commit mode
+func (m Model) updateCommitMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.mode = modeFileList
+		m.commitInput.Reset()
+		return m, nil
+	case "enter":
+		msg := m.commitInput.Value()
+		if strings.TrimSpace(msg) == "" {
+			m.statusMsg = "empty commit message"
+			return m, nil
+		}
+		return m, m.commitCmd(msg)
+	}
+	var cmd tea.Cmd
+	m.commitInput, cmd = m.commitInput.Update(msg)
+	return m, cmd
+}
+
+// Stage/unstage operations
+func (m Model) toggleStage() (tea.Model, tea.Cmd) {
+	if m.stagedOnly || m.ref != "" || len(m.files) == 0 {
+		return m, nil
+	}
+	f := m.files[m.cursor]
+	repo := m.repo
+	path := f.change.Path
+
+	return m, func() tea.Msg {
+		if f.change.Staged {
+			_ = repo.UnstageFile(path)
+		} else {
+			_ = repo.StageFile(path)
+		}
+		return m.buildRefreshedFiles()
+	}
+}
+
+func (m Model) stageAll() (tea.Model, tea.Cmd) {
+	if m.stagedOnly || m.ref != "" {
+		return m, nil
+	}
+	repo := m.repo
+	return m, func() tea.Msg {
+		_ = repo.StageAll()
+		return m.buildRefreshedFiles()
+	}
+}
+
+func (m Model) enterCommitMode() (tea.Model, tea.Cmd) {
+	if m.ref != "" {
+		return m, nil
+	}
+	// Check if there are staged files
+	hasStaged := false
+	for _, f := range m.files {
+		if f.change.Staged {
+			hasStaged = true
+			break
+		}
+	}
+	if !hasStaged {
+		m.statusMsg = "no staged files"
+		return m, nil
+	}
+	m.mode = modeCommit
+	m.commitInput.Focus()
+	return m, textinput.Blink
 }
 
 func (m Model) nextFile() (tea.Model, tea.Cmd) {
@@ -187,7 +317,7 @@ func (m Model) prevFile() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// loadDiffCmd returns a command that loads and renders the diff for the current file.
+// Commands
 func (m Model) loadDiffCmd() tea.Cmd {
 	if len(m.files) == 0 {
 		return nil
@@ -199,7 +329,7 @@ func (m Model) loadDiffCmd() tea.Cmd {
 	t := m.theme
 	staged := f.change.Staged
 	ref := m.ref
-	diffW := m.width - fileListWidth - 1
+	diffW := m.diffWidth()
 	filename := f.change.Path
 
 	return func() tea.Msg {
@@ -207,14 +337,14 @@ func (m Model) loadDiffCmd() tea.Cmd {
 		if f.untracked {
 			raw, err := repo.ReadFileContent(filename)
 			if err != nil {
-				content = styles.DiffHunkHeader.Render("Error reading file: " + err.Error())
+				content = styles.DiffHunkHeader.Render("Error: " + err.Error())
 			} else {
 				content = RenderNewFile(raw, filename, styles, t, diffW)
 			}
 		} else {
 			raw, err := repo.DiffFile(filename, staged, ref)
 			if err != nil {
-				content = styles.DiffHunkHeader.Render("Error loading diff: " + err.Error())
+				content = styles.DiffHunkHeader.Render("Error: " + err.Error())
 			} else {
 				parsed := ParseDiff(raw)
 				content = RenderDiff(parsed, filename, styles, t, diffW)
@@ -224,31 +354,72 @@ func (m Model) loadDiffCmd() tea.Cmd {
 	}
 }
 
+func (m Model) refreshFilesCmd() tea.Cmd {
+	repo := m.repo
+	stagedOnly := m.stagedOnly
+	ref := m.ref
+
+	return func() tea.Msg {
+		files, _ := repo.ChangedFiles(stagedOnly, ref)
+		var untracked []string
+		if !stagedOnly && ref == "" {
+			untracked, _ = repo.UntrackedFiles()
+		}
+		return filesRefreshedMsg{files: buildFileItems(files, untracked)}
+	}
+}
+
+func (m Model) buildRefreshedFiles() filesRefreshedMsg {
+	files, _ := m.repo.ChangedFiles(m.stagedOnly, m.ref)
+	var untracked []string
+	if !m.stagedOnly && m.ref == "" {
+		untracked, _ = m.repo.UntrackedFiles()
+	}
+	return filesRefreshedMsg{files: buildFileItems(files, untracked)}
+}
+
+func (m Model) commitCmd(message string) tea.Cmd {
+	repo := m.repo
+	return func() tea.Msg {
+		err := repo.Commit(message)
+		return commitDoneMsg{err: err}
+	}
+}
+
+// Layout helpers
+func (m Model) mainHeight() int { return m.height - 2 }
+func (m Model) diffWidth() int  { return m.width - fileListWidth - 1 }
+
 // View renders the full UI.
 func (m Model) View() string {
 	if m.width == 0 || !m.ready {
 		return ""
 	}
 
-	mainH := m.height - 2
+	mainH := m.mainHeight()
 
 	fileList := m.renderFileList(mainH)
 	filePanel := lipgloss.NewStyle().Width(fileListWidth).Height(mainH).Render(fileList)
 
 	border := m.renderBorder(mainH)
-	diffPanel := lipgloss.NewStyle().Width(m.width - fileListWidth - 1).Height(mainH).Render(m.viewport.View())
+	diffPanel := lipgloss.NewStyle().
+		Width(m.diffWidth()).Height(mainH).
+		Render(m.viewport.View())
 
 	main := lipgloss.JoinHorizontal(lipgloss.Top, filePanel, border, diffPanel)
 	statusBar := m.renderStatusBar()
 	helpBar := m.renderHelpBar()
 
+	if m.mode == modeCommit {
+		return lipgloss.JoinVertical(lipgloss.Left, main, statusBar, m.renderCommitBar())
+	}
 	return lipgloss.JoinVertical(lipgloss.Left, main, statusBar, helpBar)
 }
 
 func (m Model) renderBorder(height int) string {
 	border := strings.Repeat("│\n", height)
 	if len(border) > 0 {
-		border = border[:len(border)-1] // trim trailing newline
+		border = border[:len(border)-1]
 	}
 	return m.styles.Border.Render(border)
 }
@@ -259,8 +430,7 @@ func (m Model) renderFileList(height int) string {
 		if i >= height {
 			break
 		}
-		line := m.renderFileItem(f, i == m.cursor)
-		b.WriteString(line)
+		b.WriteString(m.renderFileItem(f, i == m.cursor))
 		if i < len(m.files)-1 {
 			b.WriteByte('\n')
 		}
@@ -269,7 +439,7 @@ func (m Model) renderFileList(height int) string {
 }
 
 func (m Model) renderFileItem(f fileItem, selected bool) string {
-	status := statusIcon(f.change.Status)
+	status := string(f.change.Status)
 	staged := "  "
 	if f.change.Staged {
 		staged = m.styles.StagedIcon.Render("● ")
@@ -315,13 +485,13 @@ func (m Model) styleStatus(icon string, status git.FileStatus) string {
 	}
 }
 
-func statusIcon(s git.FileStatus) string {
-	return string(s)
-}
-
 func (m Model) renderStatusBar() string {
 	branch := m.repo.BranchName()
 	info := fmt.Sprintf(" ⎇ %s", branch)
+
+	if m.statusMsg != "" {
+		info += "  " + m.statusMsg
+	}
 
 	fileInfo := ""
 	if len(m.files) > 0 && m.cursor < len(m.files) {
@@ -333,7 +503,14 @@ func (m Model) renderStatusBar() string {
 		fileInfo = fmt.Sprintf("  %s%s", f.change.Path, tag)
 	}
 
-	right := fmt.Sprintf("%d files ", len(m.files))
+	stagedCount := 0
+	for _, f := range m.files {
+		if f.change.Staged {
+			stagedCount++
+		}
+	}
+
+	right := fmt.Sprintf("%d staged  %d files ", stagedCount, len(m.files))
 	gap := m.width - lipgloss.Width(info) - lipgloss.Width(fileInfo) - lipgloss.Width(right)
 	if gap < 0 {
 		gap = 0
@@ -350,7 +527,8 @@ func (m Model) renderHelpBar() string {
 		pairs = []struct{ key, desc string }{
 			{"j/k", "scroll"},
 			{"d/u", "½ page"},
-			{"n/p", "next/prev file"},
+			{"n/p", "next/prev"},
+			{"tab", "stage"},
 			{"esc", "back"},
 			{"q", "quit"},
 		}
@@ -358,6 +536,9 @@ func (m Model) renderHelpBar() string {
 		pairs = []struct{ key, desc string }{
 			{"j/k", "navigate"},
 			{"enter", "view diff"},
+			{"tab", "stage/unstage"},
+			{"a", "stage all"},
+			{"c", "commit"},
 			{"q", "quit"},
 		}
 	}
@@ -369,4 +550,11 @@ func (m Model) renderHelpBar() string {
 	}
 	bar := " " + strings.Join(parts, "  ·  ")
 	return lipgloss.NewStyle().Width(m.width).Render(bar)
+}
+
+func (m Model) renderCommitBar() string {
+	prompt := m.styles.HelpKey.Render(" commit: ")
+	input := m.commitInput.View()
+	esc := "  " + m.styles.HelpDesc.Render("esc cancel · enter commit")
+	return lipgloss.NewStyle().Width(m.width).Render(prompt + input + esc)
 }
