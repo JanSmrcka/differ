@@ -14,7 +14,16 @@ type Theme struct {
 	HunkFg    string
 
 	// Line numbers
-	LineNumFg string
+	LineNumFg       string
+	LineNumAddedFg  string
+	LineNumRemovedFg string
+
+	// Header bar
+	HeaderBg string
+	HeaderFg string
+
+	// Hunk
+	HunkBg string
 
 	// File list
 	SelectedBg string
@@ -58,7 +67,14 @@ func DarkTheme() Theme {
 		RemovedBg: "#2d1214",
 		HunkFg:    "#58a6ff",
 
-		LineNumFg: "#484f58",
+		LineNumFg:        "#484f58",
+		LineNumAddedFg:   "#2ea043",
+		LineNumRemovedFg: "#da3633",
+
+		HeaderBg: "#161b22",
+		HeaderFg: "#58a6ff",
+
+		HunkBg: "#161b22",
 
 		SelectedBg: "#161b22",
 		SelectedFg: "#f0f6fc",
@@ -93,7 +109,14 @@ func LightTheme() Theme {
 		RemovedBg: "#ffebe9",
 		HunkFg:    "#0969da",
 
-		LineNumFg: "#8c959f",
+		LineNumFg:        "#8c959f",
+		LineNumAddedFg:   "#1a7f37",
+		LineNumRemovedFg: "#cf222e",
+
+		HeaderBg: "#f6f8fa",
+		HeaderFg: "#0969da",
+
+		HunkBg: "#f6f8fa",
 
 		SelectedBg: "#f6f8fa",
 		SelectedFg: "#1f2328",

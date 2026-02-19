@@ -63,21 +63,22 @@ func ParseDiff(raw string) ParsedDiff {
 
 func parseDiffLine(line string, oldNum, newNum *int) *DiffLine {
 	switch {
-	case strings.HasPrefix(line, "diff --git"):
-		return &DiffLine{Type: LineFileHeader, Content: line, OldNum: -1, NewNum: -1}
-	case strings.HasPrefix(line, "index "),
+	case strings.HasPrefix(line, "diff --git"),
+		strings.HasPrefix(line, "index "),
 		strings.HasPrefix(line, "new file"),
 		strings.HasPrefix(line, "deleted file"),
 		strings.HasPrefix(line, "similarity"),
 		strings.HasPrefix(line, "rename"),
 		strings.HasPrefix(line, "old mode"),
-		strings.HasPrefix(line, "new mode"):
-		return &DiffLine{Type: LineFileHeader, Content: line, OldNum: -1, NewNum: -1}
-	case strings.HasPrefix(line, "--- "), strings.HasPrefix(line, "+++ "):
-		return &DiffLine{Type: LineFileHeader, Content: line, OldNum: -1, NewNum: -1}
+		strings.HasPrefix(line, "new mode"),
+		strings.HasPrefix(line, "--- "),
+		strings.HasPrefix(line, "+++ "):
+		// Skip raw git headers — we show a clean file banner instead
+		return nil
 	case strings.HasPrefix(line, "@@"):
 		parseHunkHeader(line, oldNum, newNum)
-		return &DiffLine{Type: LineHunkHeader, Content: line, OldNum: -1, NewNum: -1}
+		content := extractHunkContext(line)
+		return &DiffLine{Type: LineHunkHeader, Content: content, OldNum: -1, NewNum: -1}
 	case strings.HasPrefix(line, "+"):
 		dl := &DiffLine{Type: LineAdded, Content: line[1:], OldNum: -1, NewNum: *newNum}
 		*newNum++
@@ -87,11 +88,10 @@ func parseDiffLine(line string, oldNum, newNum *int) *DiffLine {
 		*oldNum++
 		return dl
 	case strings.HasPrefix(line, `\`):
-		return nil // "\ No newline at end of file"
+		return nil
 	case line == "":
 		return nil
 	default:
-		// Context line (starts with space or no prefix)
 		content := line
 		if strings.HasPrefix(line, " ") {
 			content = line[1:]
@@ -103,9 +103,26 @@ func parseDiffLine(line string, oldNum, newNum *int) *DiffLine {
 	}
 }
 
+// extractHunkContext pulls the function/context part from a hunk header.
+// "@@ -13,6 +13,7 @@ func main() {" → "func main() {"
+// "@@ -13,6 +13,7 @@" → ""
+func extractHunkContext(line string) string {
+	parts := strings.SplitN(line, "@@", 3)
+	if len(parts) == 3 {
+		ctx := strings.TrimSpace(parts[2])
+		if ctx != "" {
+			return ctx
+		}
+	}
+	// Show the range info as fallback
+	if len(parts) >= 2 {
+		return strings.TrimSpace(parts[1])
+	}
+	return line
+}
+
 // parseHunkHeader extracts line numbers from @@ -old,count +new,count @@
 func parseHunkHeader(line string, oldNum, newNum *int) {
-	// Find the ranges between @@ markers
 	parts := strings.SplitN(line, "@@", 3)
 	if len(parts) < 2 {
 		return
@@ -126,6 +143,8 @@ func parseHunkHeader(line string, oldNum, newNum *int) {
 	}
 }
 
+const lineNumWidth = 4
+
 // RenderDiff renders parsed diff lines into a styled string.
 func RenderDiff(parsed ParsedDiff, filename string, styles Styles, t theme.Theme, width int) string {
 	if parsed.Binary {
@@ -144,46 +163,57 @@ func RenderDiff(parsed ParsedDiff, filename string, styles Styles, t theme.Theme
 func renderDiffLine(dl DiffLine, filename string, styles Styles, t theme.Theme, width int) string {
 	switch dl.Type {
 	case LineHunkHeader:
-		return styles.DiffHunkHeader.Width(width).Render(dl.Content)
-	case LineFileHeader:
-		return styles.DiffFileHeader.Render(dl.Content)
+		return renderHunkLine(dl, styles, width)
 	default:
 		return renderCodeLine(dl, filename, styles, t, width)
 	}
 }
 
+func renderHunkLine(dl DiffLine, styles Styles, width int) string {
+	// Render as a subtle separator with context
+	prefix := styles.DiffLineNum.Render("         ")
+	text := " " + dl.Content
+	return prefix + styles.DiffHunkHeader.Width(width - 9).Render(text)
+}
+
 func renderCodeLine(dl DiffLine, filename string, styles Styles, t theme.Theme, width int) string {
 	oldNum := fmtLineNum(dl.OldNum)
 	newNum := fmtLineNum(dl.NewNum)
-	nums := styles.DiffLineNum.Render(oldNum + " " + newNum)
 
 	indicator := " "
 	var bgColor string
+	var numStyle lipgloss.Style
 	switch dl.Type {
 	case LineAdded:
 		indicator = "+"
 		bgColor = t.AddedBg
+		numStyle = styles.DiffLineNumAdded
 	case LineRemoved:
 		indicator = "-"
 		bgColor = t.RemovedBg
+		numStyle = styles.DiffLineNumRemoved
+	default:
+		numStyle = styles.DiffLineNum
 	}
 
-	// Apply syntax highlighting with preserved background
+	nums := numStyle.Render(oldNum + " " + newNum)
+
+	// Syntax highlight the content
 	highlighted := highlightLine(dl.Content, filename, bgColor)
 
-	// Style the indicator
-	var indStyle lipgloss.Style
+	// Build the code portion with full-width background
+	codeWidth := width - lineNumWidth*2 - 3 // nums + spaces
+	var codeLine string
 	switch dl.Type {
 	case LineAdded:
-		indStyle = styles.DiffAdded
+		codeLine = styles.DiffAdded.Width(codeWidth).Render(indicator + " " + highlighted)
 	case LineRemoved:
-		indStyle = styles.DiffRemoved
+		codeLine = styles.DiffRemoved.Width(codeWidth).Render(indicator + " " + highlighted)
 	default:
-		indStyle = styles.DiffContext
+		codeLine = styles.DiffContext.Width(codeWidth).Render(indicator + " " + highlighted)
 	}
 
-	content := indStyle.Render(indicator+" ") + highlighted
-	return nums + " " + content
+	return nums + " " + codeLine
 }
 
 func fmtLineNum(n int) string {
@@ -198,15 +228,14 @@ func RenderNewFile(content, filename string, styles Styles, t theme.Theme, width
 	initChromaStyle(t.ChromaStyle)
 
 	var b strings.Builder
-	b.WriteString(styles.DiffFileHeader.Render("new file"))
-	b.WriteByte('\n')
+	codeWidth := width - lineNumWidth*2 - 3
 
 	for i, line := range strings.Split(content, "\n") {
 		num := i + 1
-		nums := styles.DiffLineNum.Render("     " + fmt.Sprintf("%4d", num))
+		nums := styles.DiffLineNumAdded.Render("     " + fmt.Sprintf("%4d", num))
 		highlighted := highlightLine(line, filename, t.AddedBg)
-		ind := styles.DiffAdded.Render("+ ")
-		b.WriteString(nums + " " + ind + highlighted)
+		code := styles.DiffAdded.Width(codeWidth).Render("+ " + highlighted)
+		b.WriteString(nums + " " + code)
 		b.WriteByte('\n')
 	}
 	return b.String()
@@ -214,5 +243,5 @@ func RenderNewFile(content, filename string, styles Styles, t theme.Theme, width
 
 // RenderBinaryFile renders a placeholder for binary files.
 func RenderBinaryFile(styles Styles, width int) string {
-	return styles.DiffHunkHeader.Width(width).Render("Binary file — cannot display diff")
+	return styles.DiffHunkHeader.Width(width).Render("  Binary file — cannot display diff")
 }

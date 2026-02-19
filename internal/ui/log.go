@@ -150,6 +150,9 @@ func renderCommitDiff(raw string, styles Styles, t theme.Theme, width int) strin
 				b.WriteString(RenderDiff(parsed, currentFile, styles, t, width))
 			}
 			currentFile = extractFilename(line)
+			// Add file separator
+			b.WriteString(styles.HeaderBar.Width(width).Render(" " + currentFile))
+			b.WriteByte('\n')
 			currentLines = []string{line}
 		} else {
 			currentLines = append(currentLines, line)

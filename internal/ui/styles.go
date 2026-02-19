@@ -20,19 +20,20 @@ type Styles struct {
 	StatusUntracked lipgloss.Style
 
 	// Diff
-	DiffAdded      lipgloss.Style
-	DiffRemoved    lipgloss.Style
-	DiffContext    lipgloss.Style
-	DiffHunkHeader lipgloss.Style
-	DiffFileHeader lipgloss.Style
-	DiffLineNum    lipgloss.Style
+	DiffAdded           lipgloss.Style
+	DiffRemoved         lipgloss.Style
+	DiffContext         lipgloss.Style
+	DiffHunkHeader      lipgloss.Style
+	DiffLineNum         lipgloss.Style
+	DiffLineNumAdded    lipgloss.Style
+	DiffLineNumRemoved  lipgloss.Style
 
 	// Chrome
+	HeaderBar lipgloss.Style
 	StatusBar lipgloss.Style
 	HelpKey   lipgloss.Style
 	HelpDesc  lipgloss.Style
 	Border    lipgloss.Style
-	Panel     lipgloss.Style
 
 	// Commit input
 	CommitInput lipgloss.Style
@@ -45,11 +46,13 @@ type Styles struct {
 func NewStyles(t theme.Theme) Styles {
 	return Styles{
 		FileItem: lipgloss.NewStyle().
-			Foreground(lipgloss.Color(t.Fg)),
+			Foreground(lipgloss.Color(t.Fg)).
+			PaddingLeft(1),
 		FileSelected: lipgloss.NewStyle().
 			Foreground(lipgloss.Color(t.SelectedFg)).
 			Background(lipgloss.Color(t.SelectedBg)).
-			Bold(true),
+			Bold(true).
+			PaddingLeft(1),
 		StagedIcon: lipgloss.NewStyle().
 			Foreground(lipgloss.Color(t.StagedFg)).
 			Bold(true),
@@ -75,13 +78,23 @@ func NewStyles(t theme.Theme) Styles {
 			Foreground(lipgloss.Color(t.Fg)),
 		DiffHunkHeader: lipgloss.NewStyle().
 			Foreground(lipgloss.Color(t.HunkFg)).
-			Bold(true),
-		DiffFileHeader: lipgloss.NewStyle().
-			Foreground(lipgloss.Color(t.AccentFg)).
-			Bold(true),
+			Background(lipgloss.Color(t.HunkBg)).
+			Italic(true),
 		DiffLineNum: lipgloss.NewStyle().
 			Foreground(lipgloss.Color(t.LineNumFg)),
+		DiffLineNumAdded: lipgloss.NewStyle().
+			Foreground(lipgloss.Color(t.LineNumAddedFg)).
+			Background(lipgloss.Color(t.AddedBg)),
+		DiffLineNumRemoved: lipgloss.NewStyle().
+			Foreground(lipgloss.Color(t.LineNumRemovedFg)).
+			Background(lipgloss.Color(t.RemovedBg)),
 
+		HeaderBar: lipgloss.NewStyle().
+			Background(lipgloss.Color(t.HeaderBg)).
+			Foreground(lipgloss.Color(t.HeaderFg)).
+			Bold(true).
+			PaddingLeft(1).
+			PaddingRight(1),
 		StatusBar: lipgloss.NewStyle().
 			Background(lipgloss.Color(t.StatusBarBg)).
 			Foreground(lipgloss.Color(t.StatusBarFg)),
@@ -92,7 +105,6 @@ func NewStyles(t theme.Theme) Styles {
 			Foreground(lipgloss.Color(t.HelpDescFg)),
 		Border: lipgloss.NewStyle().
 			Foreground(lipgloss.Color(t.BorderFg)),
-		Panel: lipgloss.NewStyle(),
 
 		CommitInput: lipgloss.NewStyle().
 			Foreground(lipgloss.Color(t.Fg)),

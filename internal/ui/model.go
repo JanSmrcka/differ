@@ -50,7 +50,7 @@ type Model struct {
 	prevCurs    int
 	viewport    viewport.Model
 	commitInput textinput.Model
-	statusMsg   string // transient status message
+	statusMsg   string
 	width       int
 	height      int
 	ready       bool
@@ -144,9 +144,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) handleResize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 	m.width = msg.Width
 	m.height = msg.Height
-	mainH := m.mainHeight()
-	diffW := m.diffWidth()
-	m.viewport = viewport.New(diffW, mainH)
+	m.viewport = viewport.New(m.diffWidth(), m.contentHeight())
 	m.ready = true
 	return m, m.loadDiffCmd()
 }
@@ -292,7 +290,6 @@ func (m Model) enterCommitMode() (tea.Model, tea.Cmd) {
 	if m.ref != "" {
 		return m, nil
 	}
-	// Check if there are staged files
 	hasStaged := false
 	for _, f := range m.files {
 		if f.change.Staged {
@@ -396,9 +393,9 @@ func (m Model) commitCmd(message string) tea.Cmd {
 	}
 }
 
-// Layout helpers
-func (m Model) mainHeight() int { return m.height - 2 }
-func (m Model) diffWidth() int  { return m.width - fileListWidth - 1 }
+// Layout: header(1) + content + status(1) + help(1) = height
+func (m Model) contentHeight() int { return m.height - 3 }
+func (m Model) diffWidth() int     { return m.width - fileListWidth - 1 }
 
 const (
 	minWidth  = 60
@@ -415,24 +412,57 @@ func (m Model) View() string {
 			m.width, m.height, minWidth, minHeight)
 	}
 
-	mainH := m.mainHeight()
+	header := m.renderHeader()
+	contentH := m.contentHeight()
 
-	fileList := m.renderFileList(mainH)
-	filePanel := lipgloss.NewStyle().Width(fileListWidth).Height(mainH).Render(fileList)
+	fileList := m.renderFileList(contentH)
+	filePanel := lipgloss.NewStyle().
+		Width(fileListWidth).Height(contentH).
+		Render(fileList)
 
-	border := m.renderBorder(mainH)
+	border := m.renderBorder(contentH)
 	diffPanel := lipgloss.NewStyle().
-		Width(m.diffWidth()).Height(mainH).
+		Width(m.diffWidth()).Height(contentH).
 		Render(m.viewport.View())
 
 	main := lipgloss.JoinHorizontal(lipgloss.Top, filePanel, border, diffPanel)
 	statusBar := m.renderStatusBar()
-	helpBar := m.renderHelpBar()
 
 	if m.mode == modeCommit {
-		return lipgloss.JoinVertical(lipgloss.Left, main, statusBar, m.renderCommitBar())
+		return lipgloss.JoinVertical(lipgloss.Left, header, main, statusBar, m.renderCommitBar())
 	}
-	return lipgloss.JoinVertical(lipgloss.Left, main, statusBar, helpBar)
+	helpBar := m.renderHelpBar()
+	return lipgloss.JoinVertical(lipgloss.Left, header, main, statusBar, helpBar)
+}
+
+func (m Model) renderHeader() string {
+	branch := m.repo.BranchName()
+	left := m.styles.HeaderBar.Render(" " + branch)
+
+	mode := ""
+	if m.ref != "" {
+		mode = m.styles.Accent.Render("  ref:" + m.ref)
+	} else if m.stagedOnly {
+		mode = m.styles.Accent.Render("  staged only")
+	}
+
+	right := ""
+	if len(m.files) > 0 && m.cursor < len(m.files) {
+		f := m.files[m.cursor]
+		name := f.change.Path
+		if f.change.Staged {
+			name += " [staged]"
+		}
+		right = name
+	}
+
+	gap := m.width - lipgloss.Width(left) - lipgloss.Width(mode) - lipgloss.Width(right) - 1
+	if gap < 0 {
+		gap = 0
+	}
+
+	bar := left + mode + strings.Repeat(" ", gap) + right + " "
+	return m.styles.StatusBar.Width(m.width).Render(bar)
 }
 
 func (m Model) renderBorder(height int) string {
@@ -465,9 +495,9 @@ func (m Model) renderFileItem(f fileItem, selected bool) string {
 	}
 
 	statusStyled := m.styleStatus(status, f.change.Status)
-	name := truncatePath(f.change.Path, fileListWidth-8)
+	name := truncatePath(f.change.Path, fileListWidth-10)
 	if f.change.OldPath != "" {
-		name = truncatePath(f.change.OldPath+" → "+f.change.Path, fileListWidth-8)
+		name = truncatePath(f.change.OldPath+" → "+f.change.Path, fileListWidth-10)
 	}
 
 	line := fmt.Sprintf("%s%s %s", staged, statusStyled, name)
@@ -505,29 +535,6 @@ func (m Model) styleStatus(icon string, status git.FileStatus) string {
 }
 
 func (m Model) renderStatusBar() string {
-	branch := m.repo.BranchName()
-	info := fmt.Sprintf(" ⎇ %s", branch)
-
-	if m.ref != "" {
-		info += fmt.Sprintf("  ref:%s", m.ref)
-	}
-	if m.stagedOnly {
-		info += "  [staged only]"
-	}
-	if m.statusMsg != "" {
-		info += "  " + m.statusMsg
-	}
-
-	fileInfo := ""
-	if len(m.files) > 0 && m.cursor < len(m.files) {
-		f := m.files[m.cursor]
-		tag := ""
-		if f.change.Staged {
-			tag = " [staged]"
-		}
-		fileInfo = fmt.Sprintf("  %s%s", f.change.Path, tag)
-	}
-
 	stagedCount := 0
 	for _, f := range m.files {
 		if f.change.Staged {
@@ -535,14 +542,12 @@ func (m Model) renderStatusBar() string {
 		}
 	}
 
-	right := fmt.Sprintf("%d staged  %d files ", stagedCount, len(m.files))
-	gap := m.width - lipgloss.Width(info) - lipgloss.Width(fileInfo) - lipgloss.Width(right)
-	if gap < 0 {
-		gap = 0
+	left := fmt.Sprintf(" %d staged  %d files", stagedCount, len(m.files))
+	if m.statusMsg != "" {
+		left += "  " + m.statusMsg
 	}
 
-	bar := info + fileInfo + strings.Repeat(" ", gap) + right
-	return m.styles.StatusBar.Width(m.width).Render(bar)
+	return m.styles.StatusBar.Width(m.width).Render(left)
 }
 
 func (m Model) renderHelpBar() string {
