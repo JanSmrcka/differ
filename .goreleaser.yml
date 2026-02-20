@@ -1,0 +1,35 @@
+version: 2
+
+builds:
+  - env: [CGO_ENABLED=0]
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w
+      - -X github.com/jansmrcka/differ/cmd.version={{.Version}}
+
+archives:
+  - format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  filters:
+    exclude: ["^docs:", "^ci:", "^chore:"]
+
+brews:
+  - repository:
+      owner: jansmrcka
+      name: homebrew-tap
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
+    directory: Formula
+    homepage: https://github.com/jansmrcka/differ
+    description: Terminal UI git diff viewer
+    license: MIT
+    install: |
+      bin.install "differ"
+    test: |
+      system "#{bin}/differ", "--version"

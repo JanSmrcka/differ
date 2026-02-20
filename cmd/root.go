@@ -15,6 +15,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+var version = "dev"
+
 var (
 	flagStaged bool
 	flagRef    string
@@ -23,9 +25,10 @@ var (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "differ",
-	Short: "Git diff TUI viewer",
-	RunE:  runDiff,
+	Use:     "differ",
+	Short:   "Git diff TUI viewer",
+	Version: version,
+	RunE:    runDiff,
 }
 
 var logCmd = &cobra.Command{

@@ -5,6 +5,12 @@ Terminal UI git diff viewer built with Go and Bubble Tea. Two-panel layout: file
 ## Install
 
 ```bash
+brew install jansmrcka/tap/differ
+```
+
+Or via Go:
+
+```bash
 go install github.com/jansmrcka/differ@latest
 ```
 
