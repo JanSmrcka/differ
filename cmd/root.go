@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime/debug"
 
 	"github.com/jansmrcka/differ/internal/config"
 	"github.com/jansmrcka/differ/internal/git"
@@ -15,6 +16,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+var version = "dev"
+
 var (
 	flagStaged bool
 	flagRef    string
@@ -23,9 +26,10 @@ var (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "differ",
-	Short: "Git diff TUI viewer",
-	RunE:  runDiff,
+	Use:     "differ",
+	Short:   "Git diff TUI viewer",
+	Version: version,
+	RunE:    runDiff,
 }
 
 var logCmd = &cobra.Command{
@@ -41,6 +45,11 @@ var commitCmd = &cobra.Command{
 }
 
 func init() {
+	if version == "dev" {
+		if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
+			version = info.Main.Version
+		}
+	}
 	rootCmd.Flags().BoolVarP(&flagStaged, "staged", "s", false, "show only staged changes")
 	rootCmd.Flags().StringVarP(&flagRef, "ref", "r", "", "compare against branch/tag/commit")
 	rootCmd.Flags().BoolVarP(&flagCommit, "commit", "c", false, "enter commit mode after review")

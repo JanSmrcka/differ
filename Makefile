@@ -1,13 +1,19 @@
-.PHONY: build install test clean
+.PHONY: build install test clean release-dry-run
+
+VERSION ?= dev
+LDFLAGS := -s -w -X github.com/jansmrcka/differ/cmd.version=$(VERSION)
 
 build:
-	go build -ldflags "-s -w" -o bin/differ .
+	go build -ldflags "$(LDFLAGS)" -o bin/differ .
 
 install:
-	go install .
+	go install -ldflags "$(LDFLAGS)" .
 
 test:
 	go test ./...
 
 clean:
-	rm -rf bin/
+	rm -rf bin/ dist/
+
+release-dry-run:
+	goreleaser release --snapshot --clean
