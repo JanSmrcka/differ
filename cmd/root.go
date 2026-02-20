@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime/debug"
 
 	"github.com/jansmrcka/differ/internal/config"
 	"github.com/jansmrcka/differ/internal/git"
@@ -44,6 +45,11 @@ var commitCmd = &cobra.Command{
 }
 
 func init() {
+	if version == "dev" {
+		if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
+			version = info.Main.Version
+		}
+	}
 	rootCmd.Flags().BoolVarP(&flagStaged, "staged", "s", false, "show only staged changes")
 	rootCmd.Flags().StringVarP(&flagRef, "ref", "r", "", "compare against branch/tag/commit")
 	rootCmd.Flags().BoolVarP(&flagCommit, "commit", "c", false, "enter commit mode after review")
