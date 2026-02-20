@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -289,5 +290,41 @@ func TestUpdateBranchMode_Esc(t *testing.T) {
 	rm := result.(Model)
 	if rm.mode != modeFileList {
 		t.Errorf("mode=%d after esc, want modeFileList", rm.mode)
+	}
+}
+
+func TestHandleBranchesLoaded_Error(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t, nil)
+	msg := branchesLoadedMsg{err: fmt.Errorf("permission denied")}
+	result, _ := m.handleBranchesLoaded(msg)
+	rm := result.(Model)
+	if rm.mode != modeFileList {
+		t.Error("should stay in file list mode on error")
+	}
+	if !strings.Contains(rm.statusMsg, "permission denied") {
+		t.Errorf("statusMsg=%q, want error message", rm.statusMsg)
+	}
+}
+
+func TestBranchListScroll(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t, nil)
+	m.mode = modeBranchPicker
+	// height=30, contentHeight=27. Put cursor beyond visible area.
+	branches := make([]string, 40)
+	for i := range branches {
+		branches[i] = fmt.Sprintf("branch-%02d", i)
+	}
+	m.branches = branches
+	m.branchCursor = 35
+	m.branchOffset = 35 - 27 + 1 // 9
+
+	out := m.renderBranchList(m.contentHeight())
+	if !strings.Contains(out, "branch-35") {
+		t.Error("branch list should show cursor branch when scrolled")
+	}
+	if strings.Contains(out, "branch-00") {
+		t.Error("branch list should not show first branch when scrolled down")
 	}
 }

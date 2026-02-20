@@ -52,6 +52,7 @@ type commitMsgGeneratedMsg struct {
 type branchesLoadedMsg struct {
 	branches []string
 	current  string
+	err      error
 }
 
 type branchSwitchedMsg struct {
@@ -84,6 +85,7 @@ type Model struct {
 	// Branch picker state
 	branches      []string
 	branchCursor  int
+	branchOffset  int
 	currentBranch string
 }
 
@@ -261,7 +263,7 @@ func (m Model) enterBranchMode() (tea.Model, tea.Cmd) {
 	return m, func() tea.Msg {
 		branches, err := repo.ListBranches()
 		if err != nil {
-			return branchesLoadedMsg{}
+			return branchesLoadedMsg{err: err}
 		}
 		current := repo.BranchName()
 		return branchesLoadedMsg{branches: branches, current: current}
@@ -269,6 +271,10 @@ func (m Model) enterBranchMode() (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleBranchesLoaded(msg branchesLoadedMsg) (tea.Model, tea.Cmd) {
+	if msg.err != nil {
+		m.statusMsg = "branch list failed: " + msg.err.Error()
+		return m, nil
+	}
 	if len(msg.branches) == 0 {
 		m.statusMsg = "no branches"
 		return m, nil
@@ -277,6 +283,7 @@ func (m Model) handleBranchesLoaded(msg branchesLoadedMsg) (tea.Model, tea.Cmd) 
 	m.branches = msg.branches
 	m.currentBranch = msg.current
 	m.branchCursor = 0
+	m.branchOffset = 0
 	for i, b := range m.branches {
 		if b == msg.current {
 			m.branchCursor = i
@@ -406,6 +413,7 @@ func (m Model) updateBranchMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "g":
 		m.branchCursor = 0
+		m.branchOffset = 0
 	case "G":
 		m.branchCursor = max(0, len(m.branches)-1)
 	case "enter":
@@ -420,6 +428,15 @@ func (m Model) updateBranchMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		repo := m.repo
 		return m, func() tea.Msg {
 			return branchSwitchedMsg{err: repo.CheckoutBranch(selected)}
+		}
+	}
+	// Keep cursor in visible window
+	h := m.contentHeight()
+	if h > 0 {
+		if m.branchCursor < m.branchOffset {
+			m.branchOffset = m.branchCursor
+		} else if m.branchCursor >= m.branchOffset+h {
+			m.branchOffset = m.branchCursor - h + 1
 		}
 	}
 	return m, nil
@@ -769,12 +786,14 @@ func (m Model) renderFileItem(f fileItem, selected bool) string {
 
 func (m Model) renderBranchList(height int) string {
 	var b strings.Builder
-	for i, branch := range m.branches {
-		if i >= height {
-			break
-		}
+	end := m.branchOffset + height
+	if end > len(m.branches) {
+		end = len(m.branches)
+	}
+	for i := m.branchOffset; i < end; i++ {
+		branch := m.branches[i]
 		b.WriteString(m.renderBranchItem(branch, i == m.branchCursor, branch == m.currentBranch))
-		if i < len(m.branches)-1 {
+		if i < end-1 {
 			b.WriteByte('\n')
 		}
 	}
