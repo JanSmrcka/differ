@@ -85,6 +85,25 @@ func (r *Repo) BranchName() string {
 	return name
 }
 
+// ListBranches returns local branch names.
+func (r *Repo) ListBranches() ([]string, error) {
+	out, err := r.run("branch", "--format=%(refname:short)")
+	if err != nil {
+		return nil, err
+	}
+	out = strings.TrimSpace(out)
+	if out == "" {
+		return nil, nil
+	}
+	return strings.Split(out, "\n"), nil
+}
+
+// CheckoutBranch switches to the named branch.
+func (r *Repo) CheckoutBranch(name string) error {
+	_, err := r.run("switch", name)
+	return err
+}
+
 // ChangedFiles returns files changed in the working tree or index.
 // If staged is true, only returns staged changes.
 // If ref is non-empty, compares against that ref.

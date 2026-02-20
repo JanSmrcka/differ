@@ -447,6 +447,67 @@ func TestCommitDiff(t *testing.T) {
 	}
 }
 
+func TestListBranches(t *testing.T) {
+	t.Parallel()
+	repo := setupTestRepo(t)
+	addCommit(t, repo, "f.txt", "v1", "init")
+	gitRun(t, repo.Dir(), "branch", "feature-a")
+	gitRun(t, repo.Dir(), "branch", "feature-b")
+
+	branches, err := repo.ListBranches()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(branches) != 3 {
+		t.Fatalf("expected 3 branches, got %d: %v", len(branches), branches)
+	}
+}
+
+func TestListBranches_NoCommits(t *testing.T) {
+	t.Parallel()
+	repo := setupTestRepo(t)
+
+	branches, err := repo.ListBranches()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(branches) != 0 {
+		t.Errorf("expected 0 branches, got %d", len(branches))
+	}
+}
+
+func TestCheckoutBranch(t *testing.T) {
+	t.Parallel()
+	repo := setupTestRepo(t)
+	addCommit(t, repo, "f.txt", "v1", "init")
+	gitRun(t, repo.Dir(), "branch", "other")
+
+	if err := repo.CheckoutBranch("other"); err != nil {
+		t.Fatal(err)
+	}
+	if got := repo.BranchName(); got != "other" {
+		t.Errorf("branch=%q, want %q", got, "other")
+	}
+}
+
+func TestCheckoutBranch_Dirty(t *testing.T) {
+	t.Parallel()
+	repo := setupTestRepo(t)
+	addCommit(t, repo, "f.txt", "v1", "init")
+	// Create branch with different content for the same file
+	gitRun(t, repo.Dir(), "branch", "other")
+	gitRun(t, repo.Dir(), "checkout", "other")
+	addCommit(t, repo, "f.txt", "v2-other", "other change")
+	gitRun(t, repo.Dir(), "checkout", "-")
+	// Now dirty the file so switch conflicts
+	writeFile(t, repo, "f.txt", "dirty")
+
+	err := repo.CheckoutBranch("other")
+	if err == nil {
+		t.Error("expected error switching with dirty worktree")
+	}
+}
+
 func TestCommitDiffFiles(t *testing.T) {
 	t.Parallel()
 	repo := setupTestRepo(t)
