@@ -7,29 +7,45 @@ import (
 	"testing"
 )
 
-// setupTestRepo creates a temp dir with git init + user config.
+// gitEnv returns env vars that fully isolate git from host config.
+// HOME is set to fakeHome so ~/.gitconfig is never read.
+func gitEnv(fakeHome string) []string {
+	return []string{
+		"HOME=" + fakeHome,
+		"GIT_CONFIG_NOSYSTEM=1",
+		"GIT_CONFIG_GLOBAL=/dev/null",
+		"GIT_AUTHOR_NAME=test",
+		"GIT_AUTHOR_EMAIL=test@test.com",
+		"GIT_COMMITTER_NAME=test",
+		"GIT_COMMITTER_EMAIL=test@test.com",
+		"PATH=" + os.Getenv("PATH"),
+	}
+}
+
+// setupTestRepo creates a temp dir with git init + repo-local config,
+// fully isolated from host git configuration.
 func setupTestRepo(t *testing.T) *Repo {
 	t.Helper()
 	dir := t.TempDir()
+	fakeHome := t.TempDir()
+	env := gitEnv(fakeHome)
+
 	run := func(args ...string) {
 		t.Helper()
 		cmd := exec.Command("git", args...)
 		cmd.Dir = dir
-		cmd.Env = append(os.Environ(),
-			"GIT_CONFIG_NOSYSTEM=1",
-			"GIT_AUTHOR_NAME=test",
-			"GIT_AUTHOR_EMAIL=test@test.com",
-			"GIT_COMMITTER_NAME=test",
-			"GIT_COMMITTER_EMAIL=test@test.com",
-		)
+		cmd.Env = env
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
 	}
 	run("init")
+	// Repo-local config overrides host settings for Repo.run() calls
 	run("config", "user.name", "test")
 	run("config", "user.email", "test@test.com")
+	run("config", "commit.gpgsign", "false")
+	run("config", "core.hooksPath", filepath.Join(fakeHome, "no-hooks"))
 
 	repo, err := NewRepo(dir)
 	if err != nil {
@@ -49,12 +65,7 @@ func gitRun(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(),
-		"GIT_AUTHOR_NAME=test",
-		"GIT_AUTHOR_EMAIL=test@test.com",
-		"GIT_COMMITTER_NAME=test",
-		"GIT_COMMITTER_EMAIL=test@test.com",
-	)
+	cmd.Env = gitEnv(os.Getenv("HOME"))
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, out)
 	}
