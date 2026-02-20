@@ -85,11 +85,6 @@ func runDiff(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	if len(files) == 0 && len(untracked) == 0 {
-		fmt.Println("No changes found.")
-		return nil
-	}
-
 	cfg := config.Load()
 	t := resolveTheme(cfg)
 	styles := ui.NewStyles(t)
