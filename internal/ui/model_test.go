@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/jansmrcka/differ/internal/config"
 	"github.com/jansmrcka/differ/internal/git"
 	"github.com/jansmrcka/differ/internal/theme"
@@ -196,5 +197,97 @@ func TestRenderHelpBar_DiffMode(t *testing.T) {
 		if !strings.Contains(bar, key) {
 			t.Errorf("diff help should contain %q", key)
 		}
+	}
+}
+
+func TestRenderHelpBar_BranchMode(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t, nil)
+	m.mode = modeBranchPicker
+	bar := m.renderHelpBar()
+	for _, key := range []string{"j/k", "enter", "esc", "q"} {
+		if !strings.Contains(bar, key) {
+			t.Errorf("branch help should contain %q", key)
+		}
+	}
+}
+
+func TestRenderHelpBar_FileListShowsBranches(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t, nil)
+	m.mode = modeFileList
+	bar := m.renderHelpBar()
+	if !strings.Contains(bar, "b") {
+		t.Error("file list help should contain b for branches")
+	}
+}
+
+func TestRenderBranchList(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t, nil)
+	m.branches = []string{"main", "feature-a", "feature-b"}
+	m.currentBranch = "main"
+	m.branchCursor = 0
+	out := m.renderBranchList(10)
+	if !strings.Contains(out, "main") {
+		t.Error("branch list should contain main")
+	}
+	if !strings.Contains(out, "feature-a") {
+		t.Error("branch list should contain feature-a")
+	}
+	if !strings.Contains(out, "*") {
+		t.Error("branch list should mark current branch with *")
+	}
+}
+
+func TestRenderBranchItem_ContainsName(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t, nil)
+	item := m.renderBranchItem("feature-branch", true, false)
+	if !strings.Contains(item, "feature-branch") {
+		t.Error("branch item should contain branch name")
+	}
+}
+
+func TestRenderBranchItem_Current(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t, nil)
+	item := m.renderBranchItem("main", false, true)
+	if !strings.Contains(item, "*") {
+		t.Error("current branch should have * prefix")
+	}
+}
+
+func TestUpdateBranchMode_Navigation(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t, nil)
+	m.mode = modeBranchPicker
+	m.branches = []string{"main", "dev", "feature"}
+	m.branchCursor = 0
+
+	result, _ := m.updateBranchMode(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	rm := result.(Model)
+	if rm.branchCursor != 1 {
+		t.Errorf("cursor=%d after j, want 1", rm.branchCursor)
+	}
+
+	result, _ = rm.updateBranchMode(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+	rm = result.(Model)
+	if rm.branchCursor != 0 {
+		t.Errorf("cursor=%d after k, want 0", rm.branchCursor)
+	}
+}
+
+func TestUpdateBranchMode_Esc(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t, nil)
+	m.mode = modeBranchPicker
+	m.branches = []string{"main"}
+	m.branchCursor = 0
+
+	result, _ := m.updateBranchMode(tea.KeyMsg{Type: tea.KeyEscape})
+	rm := result.(Model)
+	if rm.mode != modeFileList {
+		t.Errorf("mode=%d after esc, want modeFileList", rm.mode)
 	}
 }

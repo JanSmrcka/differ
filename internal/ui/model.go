@@ -22,6 +22,7 @@ const (
 	modeFileList viewMode = iota
 	modeDiff
 	modeCommit
+	modeBranchPicker
 )
 
 const fileListWidth = 35
@@ -48,6 +49,15 @@ type commitMsgGeneratedMsg struct {
 	err     error
 }
 
+type branchesLoadedMsg struct {
+	branches []string
+	current  string
+}
+
+type branchSwitchedMsg struct {
+	err error
+}
+
 // Model is the main Bubble Tea model for the diff viewer.
 type Model struct {
 	repo       *git.Repo
@@ -70,6 +80,11 @@ type Model struct {
 	height       int
 	ready        bool
 	SelectedFile string // set on "open in editor" action, read after Run()
+
+	// Branch picker state
+	branches      []string
+	branchCursor  int
+	currentBranch string
 }
 
 type fileItem struct {
@@ -163,6 +178,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleCommitDone(msg)
 	case commitMsgGeneratedMsg:
 		return m.handleCommitMsgGenerated(msg)
+	case branchesLoadedMsg:
+		return m.handleBranchesLoaded(msg)
+	case branchSwitchedMsg:
+		return m.handleBranchSwitched(msg)
 	case savePrefDoneMsg:
 		if msg.err != nil {
 			m.statusMsg = "config save failed"
@@ -176,6 +195,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateDiffMode(msg)
 		case modeCommit:
 			return m.updateCommitMode(msg)
+		case modeBranchPicker:
+			return m.updateBranchMode(msg)
 		}
 	}
 	return m, nil
@@ -235,6 +256,48 @@ func (m Model) handleCommitMsgGenerated(msg commitMsgGeneratedMsg) (tea.Model, t
 	return m, nil
 }
 
+func (m Model) enterBranchMode() (tea.Model, tea.Cmd) {
+	repo := m.repo
+	return m, func() tea.Msg {
+		branches, err := repo.ListBranches()
+		if err != nil {
+			return branchesLoadedMsg{}
+		}
+		current := repo.BranchName()
+		return branchesLoadedMsg{branches: branches, current: current}
+	}
+}
+
+func (m Model) handleBranchesLoaded(msg branchesLoadedMsg) (tea.Model, tea.Cmd) {
+	if len(msg.branches) == 0 {
+		m.statusMsg = "no branches"
+		return m, nil
+	}
+	m.mode = modeBranchPicker
+	m.branches = msg.branches
+	m.currentBranch = msg.current
+	m.branchCursor = 0
+	for i, b := range m.branches {
+		if b == msg.current {
+			m.branchCursor = i
+			break
+		}
+	}
+	return m, nil
+}
+
+func (m Model) handleBranchSwitched(msg branchSwitchedMsg) (tea.Model, tea.Cmd) {
+	m.mode = modeFileList
+	if msg.err != nil {
+		m.statusMsg = "switch failed: " + msg.err.Error()
+		return m, nil
+	}
+	m.statusMsg = "switched to " + m.repo.BranchName()
+	m.prevCurs = -1
+	m.cursor = 0
+	return m, m.refreshFilesCmd()
+}
+
 func tickCmd() tea.Cmd {
 	return tea.Tick(pollInterval, func(t time.Time) tea.Msg {
 		return tickMsg(t)
@@ -242,7 +305,7 @@ func tickCmd() tea.Cmd {
 }
 
 func (m Model) handleTick() (tea.Model, tea.Cmd) {
-	if m.mode == modeCommit || m.generatingMsg {
+	if m.mode == modeCommit || m.mode == modeBranchPicker || m.generatingMsg {
 		return m, tickCmd()
 	}
 	return m, tea.Batch(m.refreshFilesCmd(), tickCmd())
@@ -280,6 +343,8 @@ func (m Model) updateFileListMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.stageAll()
 	case "c":
 		return m.enterCommitMode()
+	case "b":
+		return m.enterBranchMode()
 	case "v":
 		m.splitDiff = !m.splitDiff
 		m.prevCurs = -1
@@ -309,6 +374,8 @@ func (m Model) updateDiffMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.SelectedFile = m.files[m.cursor].change.Path
 		}
 		return m, tea.Quit
+	case "b":
+		return m.enterBranchMode()
 	case "tab":
 		return m.toggleStage()
 	case "v":
@@ -319,6 +386,43 @@ func (m Model) updateDiffMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.viewport, cmd = m.viewport.Update(msg)
 	return m, cmd
+}
+
+// Branch picker mode
+func (m Model) updateBranchMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "b":
+		m.mode = modeFileList
+		return m, nil
+	case "q", "ctrl+c":
+		return m, tea.Quit
+	case "j", "down":
+		if m.branchCursor < len(m.branches)-1 {
+			m.branchCursor++
+		}
+	case "k", "up":
+		if m.branchCursor > 0 {
+			m.branchCursor--
+		}
+	case "g":
+		m.branchCursor = 0
+	case "G":
+		m.branchCursor = max(0, len(m.branches)-1)
+	case "enter":
+		if m.branchCursor >= len(m.branches) {
+			return m, nil
+		}
+		selected := m.branches[m.branchCursor]
+		if selected == m.currentBranch {
+			m.mode = modeFileList
+			return m, nil
+		}
+		repo := m.repo
+		return m, func() tea.Msg {
+			return branchSwitchedMsg{err: repo.CheckoutBranch(selected)}
+		}
+	}
+	return m, nil
 }
 
 // Commit mode
@@ -561,7 +665,12 @@ func (m Model) View() string {
 	header := m.renderHeader()
 	contentH := m.contentHeight()
 
-	fileList := m.renderFileList(contentH)
+	var fileList string
+	if m.mode == modeBranchPicker {
+		fileList = m.renderBranchList(contentH)
+	} else {
+		fileList = m.renderFileList(contentH)
+	}
 	filePanel := lipgloss.NewStyle().
 		Width(fileListWidth).Height(contentH).
 		Render(fileList)
@@ -658,6 +767,33 @@ func (m Model) renderFileItem(f fileItem, selected bool) string {
 	return m.styles.FileItem.Width(fileListWidth).Render(line)
 }
 
+func (m Model) renderBranchList(height int) string {
+	var b strings.Builder
+	for i, branch := range m.branches {
+		if i >= height {
+			break
+		}
+		b.WriteString(m.renderBranchItem(branch, i == m.branchCursor, branch == m.currentBranch))
+		if i < len(m.branches)-1 {
+			b.WriteByte('\n')
+		}
+	}
+	return b.String()
+}
+
+func (m Model) renderBranchItem(name string, selected, current bool) string {
+	prefix := "  "
+	if current {
+		prefix = m.styles.StagedIcon.Render("* ")
+	}
+	name = truncatePath(name, fileListWidth-4)
+	line := prefix + name
+	if selected {
+		return m.styles.FileSelected.Width(fileListWidth).Render(line)
+	}
+	return m.styles.FileItem.Width(fileListWidth).Render(line)
+}
+
 func truncatePath(path string, maxW int) string {
 	if lipgloss.Width(path) <= maxW {
 		return path
@@ -715,7 +851,15 @@ func (m Model) renderHelpBar() string {
 			{"v", "split"},
 			{"tab", "stage"},
 			{"e", "edit"},
+			{"b", "branches"},
 			{"esc", "back"},
+			{"q", "quit"},
+		}
+	case modeBranchPicker:
+		pairs = []struct{ key, desc string }{
+			{"j/k", "navigate"},
+			{"enter", "switch"},
+			{"esc", "cancel"},
 			{"q", "quit"},
 		}
 	default:
@@ -726,6 +870,7 @@ func (m Model) renderHelpBar() string {
 			{"tab", "stage/unstage"},
 			{"a", "stage all"},
 			{"e", "edit"},
+			{"b", "branches"},
 			{"c", "commit"},
 			{"q", "quit"},
 		}
