@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -24,6 +25,9 @@ const (
 )
 
 const fileListWidth = 35
+const pollInterval = 2 * time.Second
+
+type tickMsg time.Time
 
 // Messages
 type diffLoadedMsg struct {
@@ -116,6 +120,18 @@ func buildFileItems(changes []git.FileChange, untracked []string) []fileItem {
 	return files
 }
 
+func filesEqual(a, b []fileItem) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 // StartInCommitMode sets the model to open directly in commit mode.
 func (m *Model) StartInCommitMode() {
 	m.mode = modeCommit
@@ -123,7 +139,7 @@ func (m *Model) StartInCommitMode() {
 }
 
 func (m Model) Init() tea.Cmd {
-	cmds := []tea.Cmd{m.loadDiffCmd()}
+	cmds := []tea.Cmd{m.loadDiffCmd(), tickCmd()}
 	if m.mode == modeCommit {
 		cmds = append(cmds, textinput.Blink)
 	}
@@ -135,6 +151,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		return m.handleResize(msg)
+	case tickMsg:
+		return m.handleTick()
 	case diffLoadedMsg:
 		return m.handleDiffLoaded(msg)
 	case filesRefreshedMsg:
@@ -173,6 +191,9 @@ func (m Model) handleDiffLoaded(msg diffLoadedMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleFilesRefreshed(msg filesRefreshedMsg) (tea.Model, tea.Cmd) {
+	if filesEqual(m.files, msg.files) {
+		return m, nil
+	}
 	m.files = msg.files
 	if m.cursor >= len(m.files) {
 		m.cursor = max(0, len(m.files)-1)
@@ -205,6 +226,19 @@ func (m Model) handleCommitMsgGenerated(msg commitMsgGeneratedMsg) (tea.Model, t
 	m.commitInput.SetValue(msg.message)
 	m.commitInput.CursorEnd()
 	return m, nil
+}
+
+func tickCmd() tea.Cmd {
+	return tea.Tick(pollInterval, func(t time.Time) tea.Msg {
+		return tickMsg(t)
+	})
+}
+
+func (m Model) handleTick() (tea.Model, tea.Cmd) {
+	if m.mode == modeCommit || m.generatingMsg {
+		return m, tickCmd()
+	}
+	return m, tea.Batch(m.refreshFilesCmd(), tickCmd())
 }
 
 // File list mode
