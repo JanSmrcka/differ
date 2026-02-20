@@ -410,7 +410,7 @@ func renderSplitSide(dl *DiffLine, filename string, styles Styles, t theme.Theme
 	highlighted := highlightLine(dl.Content, filename, bgColor)
 	prefix := indStyle.Render(indicator + " ")
 
-	codeWidth := panelW - splitLineNumWidth - 3
+	codeWidth := max(0, panelW-splitLineNumWidth-3)
 	contentWidth := lipgloss.Width(prefix) + lipgloss.Width(highlighted)
 	padding := ""
 	if pad := codeWidth - contentWidth; pad > 0 {
