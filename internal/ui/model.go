@@ -192,7 +192,7 @@ func (m Model) handleDiffLoaded(msg diffLoadedMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) handleFilesRefreshed(msg filesRefreshedMsg) (tea.Model, tea.Cmd) {
 	if filesEqual(m.files, msg.files) {
-		return m, nil
+		return m, m.loadDiffCmd()
 	}
 	m.files = msg.files
 	if m.cursor >= len(m.files) {
