@@ -12,6 +12,7 @@ type Config struct {
 	TabWidth        int    `json:"tab_width"`
 	CommitMsgCmd    string `json:"commit_msg_cmd"`
 	CommitMsgPrompt string `json:"commit_msg_prompt"`
+	SplitDiff       bool   `json:"split_diff"`
 }
 
 // Default returns the default configuration.
