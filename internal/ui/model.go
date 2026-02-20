@@ -65,6 +65,7 @@ type Model struct {
 	commitInput textinput.Model
 	statusMsg    string
 	generatingMsg bool
+	splitDiff    bool
 	width        int
 	height       int
 	ready        bool
@@ -101,6 +102,7 @@ func NewModel(
 		theme:       t,
 		stagedOnly:  stagedOnly,
 		ref:         ref,
+		splitDiff:   cfg.SplitDiff,
 		prevCurs:    -1,
 		commitInput: ti,
 	}
@@ -273,6 +275,10 @@ func (m Model) updateFileListMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.stageAll()
 	case "c":
 		return m.enterCommitMode()
+	case "v":
+		m.splitDiff = !m.splitDiff
+		m.prevCurs = -1
+		return m, tea.Batch(m.loadDiffCmd(), m.saveSplitPrefCmd())
 	}
 	if m.cursor != m.prevCurs {
 		m.prevCurs = m.cursor
@@ -300,6 +306,10 @@ func (m Model) updateDiffMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case "tab":
 		return m.toggleStage()
+	case "v":
+		m.splitDiff = !m.splitDiff
+		m.prevCurs = -1
+		return m, tea.Batch(m.loadDiffCmd(), m.saveSplitPrefCmd())
 	}
 	var cmd tea.Cmd
 	m.viewport, cmd = m.viewport.Update(msg)
@@ -410,6 +420,7 @@ func (m Model) loadDiffCmd() tea.Cmd {
 	ref := m.ref
 	diffW := m.diffWidth()
 	filename := f.change.Path
+	splitMode := m.splitDiff && diffW >= minSplitWidth
 
 	return func() tea.Msg {
 		var content string
@@ -417,6 +428,8 @@ func (m Model) loadDiffCmd() tea.Cmd {
 			raw, err := repo.ReadFileContent(filename)
 			if err != nil {
 				content = styles.DiffHunkHeader.Render("Error: " + err.Error())
+			} else if splitMode {
+				content = RenderNewFileSplit(raw, filename, styles, t, diffW)
 			} else {
 				content = RenderNewFile(raw, filename, styles, t, diffW)
 			}
@@ -426,7 +439,11 @@ func (m Model) loadDiffCmd() tea.Cmd {
 				content = styles.DiffHunkHeader.Render("Error: " + err.Error())
 			} else {
 				parsed := ParseDiff(raw)
-				content = RenderDiff(parsed, filename, styles, t, diffW)
+				if splitMode {
+					content = RenderSplitDiff(parsed, filename, styles, t, diffW)
+				} else {
+					content = RenderDiff(parsed, filename, styles, t, diffW)
+				}
 			}
 		}
 		return diffLoadedMsg{content: content, index: idx}
@@ -455,6 +472,16 @@ func (m Model) buildRefreshedFiles() filesRefreshedMsg {
 		untracked, _ = m.repo.UntrackedFiles()
 	}
 	return filesRefreshedMsg{files: buildFileItems(files, untracked)}
+}
+
+func (m Model) saveSplitPrefCmd() tea.Cmd {
+	cfg := m.cfg
+	split := m.splitDiff
+	return func() tea.Msg {
+		cfg.SplitDiff = split
+		_ = config.Save(cfg)
+		return nil
+	}
 }
 
 func (m Model) commitCmd(message string) tea.Cmd {
@@ -661,6 +688,9 @@ func (m Model) renderStatusBar() string {
 	}
 
 	left := fmt.Sprintf(" %d staged  %d files", stagedCount, len(m.files))
+	if m.splitDiff {
+		left += "  split"
+	}
 	if m.statusMsg != "" {
 		left += "  " + m.statusMsg
 	}
@@ -676,6 +706,7 @@ func (m Model) renderHelpBar() string {
 			{"j/k", "scroll"},
 			{"d/u", "½ page"},
 			{"n/p", "next/prev"},
+			{"v", "split"},
 			{"tab", "stage"},
 			{"e", "edit"},
 			{"esc", "back"},
@@ -685,6 +716,7 @@ func (m Model) renderHelpBar() string {
 		pairs = []struct{ key, desc string }{
 			{"j/k", "navigate"},
 			{"enter", "view diff"},
+			{"v", "split"},
 			{"tab", "stage/unstage"},
 			{"a", "stage all"},
 			{"e", "edit"},

@@ -257,3 +257,165 @@ func RenderNewFile(content, filename string, styles Styles, t theme.Theme, width
 func RenderBinaryFile(styles Styles, width int) string {
 	return styles.DiffHunkHeader.Width(width).Render("  Binary file — cannot display diff")
 }
+
+// --- Split (side-by-side) diff ---
+
+const minSplitWidth = 60
+
+// SplitLine pairs left (old) and right (new) sides for side-by-side display.
+type SplitLine struct {
+	Left  *DiffLine // nil = blank padding
+	Right *DiffLine // nil = blank padding
+}
+
+// PairLines converts unified diff lines into paired split lines.
+func PairLines(lines []DiffLine) []SplitLine {
+	var result []SplitLine
+	i := 0
+	for i < len(lines) {
+		dl := lines[i]
+		switch dl.Type {
+		case LineHunkHeader:
+			result = append(result, SplitLine{Left: &dl})
+			i++
+		case LineContext:
+			result = append(result, SplitLine{Left: &dl, Right: &dl})
+			i++
+		case LineRemoved:
+			// Collect contiguous removed, then contiguous added
+			var removed, added []DiffLine
+			for i < len(lines) && lines[i].Type == LineRemoved {
+				removed = append(removed, lines[i])
+				i++
+			}
+			for i < len(lines) && lines[i].Type == LineAdded {
+				added = append(added, lines[i])
+				i++
+			}
+			maxLen := len(removed)
+			if len(added) > maxLen {
+				maxLen = len(added)
+			}
+			for j := 0; j < maxLen; j++ {
+				var l, r *DiffLine
+				if j < len(removed) {
+					l = &removed[j]
+				}
+				if j < len(added) {
+					r = &added[j]
+				}
+				result = append(result, SplitLine{Left: l, Right: r})
+			}
+		case LineAdded:
+			// Orphan added (no preceding removed)
+			result = append(result, SplitLine{Right: &dl})
+			i++
+		default:
+			i++
+		}
+	}
+	return result
+}
+
+// RenderSplitDiff renders parsed diff in side-by-side layout.
+func RenderSplitDiff(parsed ParsedDiff, filename string, styles Styles, t theme.Theme, width int) string {
+	if parsed.Binary {
+		return RenderBinaryFile(styles, width)
+	}
+	initChromaStyle(t.ChromaStyle)
+
+	pairs := PairLines(parsed.Lines)
+	panelW := (width - 1) / 2 // 1 char for separator
+
+	var b strings.Builder
+	for _, sl := range pairs {
+		// Hunk headers span full width
+		if sl.Left != nil && sl.Left.Type == LineHunkHeader {
+			b.WriteString(renderHunkLine(*sl.Left, styles, width))
+			b.WriteByte('\n')
+			continue
+		}
+		left := renderSplitSide(sl.Left, filename, styles, t, panelW, true)
+		right := renderSplitSide(sl.Right, filename, styles, t, panelW, false)
+		b.WriteString(left)
+		b.WriteString(styles.Border.Render("│"))
+		b.WriteString(right)
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
+// RenderNewFileSplit renders untracked file content in split layout (all-added on right).
+func RenderNewFileSplit(content, filename string, styles Styles, t theme.Theme, width int) string {
+	initChromaStyle(t.ChromaStyle)
+
+	panelW := (width - 1) / 2
+	var b strings.Builder
+	for i, line := range strings.Split(content, "\n") {
+		dl := DiffLine{Type: LineAdded, Content: line, OldNum: -1, NewNum: i + 1}
+		left := renderSplitSide(nil, filename, styles, t, panelW, true)
+		right := renderSplitSide(&dl, filename, styles, t, panelW, false)
+		b.WriteString(left)
+		b.WriteString(styles.Border.Render("│"))
+		b.WriteString(right)
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
+const splitLineNumWidth = 4
+
+func renderSplitSide(dl *DiffLine, filename string, styles Styles, t theme.Theme, panelW int, isLeft bool) string {
+	if dl == nil {
+		if panelW > 0 {
+			return strings.Repeat(" ", panelW)
+		}
+		return ""
+	}
+
+	// Pick line number
+	num := dl.OldNum
+	if !isLeft {
+		num = dl.NewNum
+	}
+	numStr := fmtLineNum(num)
+
+	// Style selection
+	indicator := " "
+	var bgColor string
+	var numStyle lipgloss.Style
+	var indStyle lipgloss.Style
+	var bgStyle lipgloss.Style
+
+	switch dl.Type {
+	case LineAdded:
+		indicator = "+"
+		bgColor = t.AddedBg
+		numStyle = styles.DiffLineNumAdded
+		indStyle = styles.DiffAdded
+		bgStyle = styles.DiffAddedBg
+	case LineRemoved:
+		indicator = "-"
+		bgColor = t.RemovedBg
+		numStyle = styles.DiffLineNumRemoved
+		indStyle = styles.DiffRemoved
+		bgStyle = styles.DiffRemovedBg
+	default:
+		numStyle = styles.DiffLineNum
+		indStyle = styles.DiffContext
+		bgStyle = lipgloss.NewStyle()
+	}
+
+	nums := numStyle.Render(numStr)
+	highlighted := highlightLine(dl.Content, filename, bgColor)
+	prefix := indStyle.Render(indicator + " ")
+
+	codeWidth := panelW - splitLineNumWidth - 3
+	contentWidth := lipgloss.Width(prefix) + lipgloss.Width(highlighted)
+	padding := ""
+	if pad := codeWidth - contentWidth; pad > 0 {
+		padding = bgStyle.Render(strings.Repeat(" ", pad))
+	}
+
+	return nums + " " + prefix + highlighted + padding
+}
