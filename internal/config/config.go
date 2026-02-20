@@ -26,11 +26,16 @@ func Default() Config {
 // Load reads config from ~/.config/differ/config.json.
 // Returns defaults if file doesn't exist.
 func Load() Config {
-	cfg := Default()
 	path, err := configPath()
 	if err != nil {
-		return cfg
+		return Default()
 	}
+	return LoadFrom(path)
+}
+
+// LoadFrom reads config from the given path. Returns defaults on error.
+func LoadFrom(path string) Config {
+	cfg := Default()
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return cfg
@@ -45,6 +50,11 @@ func Save(cfg Config) error {
 	if err != nil {
 		return err
 	}
+	return SaveTo(cfg, path)
+}
+
+// SaveTo writes config to the given path, creating parent dirs as needed.
+func SaveTo(cfg Config, path string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}

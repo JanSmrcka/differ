@@ -163,6 +163,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleCommitDone(msg)
 	case commitMsgGeneratedMsg:
 		return m.handleCommitMsgGenerated(msg)
+	case savePrefDoneMsg:
+		if msg.err != nil {
+			m.statusMsg = "config save failed"
+		}
+		return m, nil
 	case tea.KeyMsg:
 		switch m.mode {
 		case modeFileList:
@@ -474,13 +479,14 @@ func (m Model) buildRefreshedFiles() filesRefreshedMsg {
 	return filesRefreshedMsg{files: buildFileItems(files, untracked)}
 }
 
+type savePrefDoneMsg struct{ err error }
+
 func (m Model) saveSplitPrefCmd() tea.Cmd {
 	cfg := m.cfg
 	split := m.splitDiff
 	return func() tea.Msg {
 		cfg.SplitDiff = split
-		_ = config.Save(cfg)
-		return nil
+		return savePrefDoneMsg{err: config.Save(cfg)}
 	}
 }
 
