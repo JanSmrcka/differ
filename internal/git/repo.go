@@ -1,6 +1,7 @@
 package git
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
@@ -27,6 +28,13 @@ type FileChange struct {
 	OldPath string // non-empty for renames
 	Status  FileStatus
 	Staged  bool
+}
+
+// UpstreamInfo holds ahead/behind counts relative to the upstream branch.
+type UpstreamInfo struct {
+	Upstream string // e.g. "origin/main", empty if none
+	Ahead    int
+	Behind   int
 }
 
 // Commit represents a git commit entry.
@@ -101,6 +109,40 @@ func (r *Repo) ListBranches() ([]string, error) {
 // CheckoutBranch switches to the named branch.
 func (r *Repo) CheckoutBranch(name string) error {
 	_, err := r.run("switch", name)
+	return err
+}
+
+// UpstreamStatus returns ahead/behind counts relative to the upstream branch.
+// Returns zero-value UpstreamInfo if no upstream is configured.
+func (r *Repo) UpstreamStatus() UpstreamInfo {
+	upstream, err := r.run("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
+	if err != nil {
+		return UpstreamInfo{}
+	}
+	upstream = strings.TrimSpace(upstream)
+	info := UpstreamInfo{Upstream: upstream}
+
+	out, err := r.run("rev-list", "--left-right", "--count", "HEAD...@{u}")
+	if err != nil {
+		return info
+	}
+	parts := strings.Fields(strings.TrimSpace(out))
+	if len(parts) == 2 {
+		info.Ahead, _ = strconv.Atoi(parts[0])
+		info.Behind, _ = strconv.Atoi(parts[1])
+	}
+	return info
+}
+
+// Push pushes to the upstream branch.
+func (r *Repo) Push() error {
+	_, err := r.runWithStderr("push")
+	return err
+}
+
+// Pull pulls from the upstream branch using fast-forward only.
+func (r *Repo) Pull() error {
+	_, err := r.runWithStderr("pull", "--ff-only")
 	return err
 }
 
@@ -253,6 +295,24 @@ func (r *Repo) run(args ...string) (string, error) {
 		return "", err
 	}
 	return string(out), nil
+}
+
+// runWithStderr executes a git command and returns stdout.
+// On error, includes stderr in the error message for better diagnostics.
+func (r *Repo) runWithStderr(args ...string) (string, error) {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = r.dir
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		msg := strings.TrimSpace(stderr.String())
+		if msg == "" {
+			msg = err.Error()
+		}
+		return "", fmt.Errorf("%s", msg)
+	}
+	return stdout.String(), nil
 }
 
 // diffNameStatusEmptyTree lists staged files when there are no commits yet.

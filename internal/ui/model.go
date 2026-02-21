@@ -59,6 +59,18 @@ type branchSwitchedMsg struct {
 	err error
 }
 
+type upstreamStatusMsg struct {
+	info git.UpstreamInfo
+}
+
+type pushDoneMsg struct {
+	err error
+}
+
+type pullDoneMsg struct {
+	err error
+}
+
 // Model is the main Bubble Tea model for the diff viewer.
 type Model struct {
 	repo       *git.Repo
@@ -87,6 +99,10 @@ type Model struct {
 	branchCursor  int
 	branchOffset  int
 	currentBranch string
+
+	// Push/pull state
+	upstream    git.UpstreamInfo
+	pushConfirm bool
 }
 
 type fileItem struct {
@@ -158,7 +174,7 @@ func (m *Model) StartInCommitMode() {
 }
 
 func (m Model) Init() tea.Cmd {
-	cmds := []tea.Cmd{m.loadDiffCmd(), tickCmd()}
+	cmds := []tea.Cmd{m.loadDiffCmd(), m.fetchUpstreamStatusCmd(), tickCmd()}
 	if m.mode == modeCommit {
 		cmds = append(cmds, textinput.Blink)
 	}
@@ -184,6 +200,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleBranchesLoaded(msg)
 	case branchSwitchedMsg:
 		return m.handleBranchSwitched(msg)
+	case upstreamStatusMsg:
+		m.upstream = msg.info
+		return m, nil
+	case pushDoneMsg:
+		return m.handlePushDone(msg)
+	case pullDoneMsg:
+		return m.handlePullDone(msg)
 	case savePrefDoneMsg:
 		if msg.err != nil {
 			m.statusMsg = "config save failed"
@@ -305,6 +328,45 @@ func (m Model) handleBranchSwitched(msg branchSwitchedMsg) (tea.Model, tea.Cmd) 
 	return m, m.refreshFilesCmd()
 }
 
+func (m Model) handlePushDone(msg pushDoneMsg) (tea.Model, tea.Cmd) {
+	if msg.err != nil {
+		m.statusMsg = "push failed: " + msg.err.Error()
+		return m, nil
+	}
+	m.statusMsg = "pushed!"
+	return m, m.fetchUpstreamStatusCmd()
+}
+
+func (m Model) handlePullDone(msg pullDoneMsg) (tea.Model, tea.Cmd) {
+	if msg.err != nil {
+		m.statusMsg = "pull failed: " + msg.err.Error()
+		return m, nil
+	}
+	m.statusMsg = "pulled!"
+	return m, tea.Batch(m.refreshFilesCmd(), m.fetchUpstreamStatusCmd())
+}
+
+func (m Model) fetchUpstreamStatusCmd() tea.Cmd {
+	repo := m.repo
+	return func() tea.Msg {
+		return upstreamStatusMsg{info: repo.UpstreamStatus()}
+	}
+}
+
+func (m Model) pushCmd() tea.Cmd {
+	repo := m.repo
+	return func() tea.Msg {
+		return pushDoneMsg{err: repo.Push()}
+	}
+}
+
+func (m Model) pullCmd() tea.Cmd {
+	repo := m.repo
+	return func() tea.Msg {
+		return pullDoneMsg{err: repo.Pull()}
+	}
+}
+
 func tickCmd() tea.Cmd {
 	return tea.Tick(pollInterval, func(t time.Time) tea.Msg {
 		return tickMsg(t)
@@ -315,12 +377,30 @@ func (m Model) handleTick() (tea.Model, tea.Cmd) {
 	if m.mode == modeCommit || m.mode == modeBranchPicker || m.generatingMsg {
 		return m, tickCmd()
 	}
-	return m, tea.Batch(m.refreshFilesCmd(), tickCmd())
+	return m, tea.Batch(m.refreshFilesCmd(), m.fetchUpstreamStatusCmd(), tickCmd())
 }
 
 // File list mode
 func (m Model) updateFileListMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m.statusMsg = ""
+
+	// Handle push confirmation before clearing state
+	if msg.String() == "P" {
+		if m.pushConfirm {
+			m.pushConfirm = false
+			m.statusMsg = "pushing..."
+			return m, m.pushCmd()
+		}
+		if m.upstream.Upstream == "" {
+			m.statusMsg = "no upstream configured"
+			return m, nil
+		}
+		m.pushConfirm = true
+		m.statusMsg = "press P again to push to " + m.upstream.Upstream
+		return m, nil
+	}
+	m.pushConfirm = false
+
 	switch msg.String() {
 	case "q", "ctrl+c":
 		return m, tea.Quit
@@ -356,6 +436,13 @@ func (m Model) updateFileListMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.splitDiff = !m.splitDiff
 		m.prevCurs = -1
 		return m, tea.Batch(m.loadDiffCmd(), m.saveSplitPrefCmd())
+	case "F":
+		if m.upstream.Upstream == "" {
+			m.statusMsg = "no upstream configured"
+			return m, nil
+		}
+		m.statusMsg = "pulling..."
+		return m, m.pullCmd()
 	}
 	if m.cursor != m.prevCurs {
 		m.prevCurs = m.cursor
@@ -849,6 +936,9 @@ func (m Model) renderStatusBar() string {
 	}
 
 	left := fmt.Sprintf(" %d staged  %d files", stagedCount, len(m.files))
+	if m.upstream.Upstream != "" && (m.upstream.Ahead > 0 || m.upstream.Behind > 0) {
+		left += fmt.Sprintf("  ↑%d ↓%d", m.upstream.Ahead, m.upstream.Behind)
+	}
 	if m.splitDiff {
 		left += "  split"
 	}
@@ -891,6 +981,8 @@ func (m Model) renderHelpBar() string {
 			{"e", "edit"},
 			{"b", "branches"},
 			{"c", "commit"},
+			{"P", "push"},
+			{"F", "pull"},
 			{"q", "quit"},
 		}
 	}
