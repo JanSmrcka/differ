@@ -13,6 +13,7 @@ type Config struct {
 	CommitMsgCmd    string `json:"commit_msg_cmd"`
 	CommitMsgPrompt string `json:"commit_msg_prompt"`
 	SplitDiff       bool   `json:"split_diff"`
+	EditorCmd       string `json:"editor_cmd"`
 }
 
 // Default returns the default configuration.

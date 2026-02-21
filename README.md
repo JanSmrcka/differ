@@ -43,7 +43,7 @@ differ commit     # review staged + commit
 | `tab`         | stage/unstage file                         |
 | `a`           | stage all                                  |
 | `c`           | commit (AI-generated message via `claude`) |
-| `e`           | open in editor (nvim via tmux)             |
+| `e`           | open in editor (`$EDITOR`, configurable)   |
 | `g/G`         | first/last file                            |
 | `q`           | quit                                       |
 
@@ -85,9 +85,12 @@ Config file: `~/.config/differ/config.json`
 {
   "theme": "dark",
   "commit_msg_cmd": "claude -p",
-  "commit_msg_prompt": "Write a concise git commit message for this diff:"
+  "commit_msg_prompt": "Write a concise git commit message for this diff:",
+  "editor_cmd": "tmux new-window -c {repo} nvim {file}"
 }
 ```
+
+`editor_cmd` supports `{file}` (absolute path) and `{repo}` (repo root) placeholders. Defaults to `$EDITOR {file}` (falls back to `vi`).
 
 ## Tips
 
