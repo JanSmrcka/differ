@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime/debug"
+	"strings"
 
 	"github.com/jansmrcka/differ/internal/config"
 	"github.com/jansmrcka/differ/internal/git"
@@ -108,14 +109,28 @@ func runDiff(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if m, ok := finalModel.(ui.Model); ok && m.SelectedFile != "" {
-		return openInTmux(m.SelectedFile, repo.Dir())
+		return openInEditor(cfg.EditorCmd, m.SelectedFile, repo.Dir())
 	}
 	return nil
 }
 
-func openInTmux(file, repoRoot string) error {
+func openInEditor(editorCmd, file, repoRoot string) error {
 	absPath := filepath.Join(repoRoot, file)
-	cmd := exec.Command("tmux", "new-window", "-c", repoRoot, "nvim", absPath)
+	if editorCmd == "" {
+		editor := os.Getenv("EDITOR")
+		if editor == "" {
+			editor = "vi"
+		}
+		editorCmd = editor + " {file}"
+	}
+	expanded := strings.ReplaceAll(editorCmd, "{file}", absPath)
+	expanded = strings.ReplaceAll(expanded, "{repo}", repoRoot)
+	parts := strings.Fields(expanded)
+	cmd := exec.Command(parts[0], parts[1:]...)
+	cmd.Dir = repoRoot
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
 	return cmd.Run()
 }
 
