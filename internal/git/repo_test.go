@@ -631,3 +631,35 @@ func TestCreateBranch_NoCommits(t *testing.T) {
 		t.Error("expected error creating branch in empty repo")
 	}
 }
+
+func TestPushSetUpstream(t *testing.T) {
+	t.Parallel()
+	// Create a bare "remote" repo
+	bare := t.TempDir()
+	cmd := exec.Command("git", "init", "--bare", bare)
+	cmd.Env = gitEnv(t.TempDir())
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("bare init: %v\n%s", err, out)
+	}
+
+	repo := setupTestRepo(t)
+	addCommit(t, repo, "f.txt", "v1", "init")
+	gitRun(t, repo.Dir(), "remote", "add", "origin", bare)
+
+	// No upstream yet
+	info := repo.UpstreamStatus()
+	if info.Upstream != "" {
+		t.Fatalf("expected no upstream, got %q", info.Upstream)
+	}
+
+	// Push with set-upstream
+	if err := repo.PushSetUpstream("origin", "master"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Now upstream should be configured
+	info = repo.UpstreamStatus()
+	if info.Upstream == "" {
+		t.Error("upstream should be configured after PushSetUpstream")
+	}
+}

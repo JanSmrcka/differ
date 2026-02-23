@@ -148,6 +148,12 @@ func (r *Repo) Push() error {
 	return err
 }
 
+// PushSetUpstream pushes and sets the upstream tracking branch.
+func (r *Repo) PushSetUpstream(remote, branch string) error {
+	_, err := r.runWithStderr("push", "--set-upstream", remote, branch)
+	return err
+}
+
 // Pull pulls from the upstream branch using fast-forward only.
 func (r *Repo) Pull() error {
 	_, err := r.runWithStderr("pull", "--ff-only")

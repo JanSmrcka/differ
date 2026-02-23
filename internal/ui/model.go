@@ -448,6 +448,17 @@ func (m Model) pushCmd() tea.Cmd {
 	}
 }
 
+func (m Model) pushSetUpstreamCmd() tea.Cmd {
+	repo := m.repo
+	branch := m.currentBranch
+	if branch == "" {
+		branch = repo.BranchName()
+	}
+	return func() tea.Msg {
+		return pushDoneMsg{err: repo.PushSetUpstream("origin", branch)}
+	}
+}
+
 func (m Model) pullCmd() tea.Cmd {
 	repo := m.repo
 	return func() tea.Msg {
@@ -477,10 +488,18 @@ func (m Model) updateFileListMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.pushConfirm {
 			m.pushConfirm = false
 			m.statusMsg = "pushing..."
+			if m.upstream.Upstream == "" {
+				return m, m.pushSetUpstreamCmd()
+			}
 			return m, m.pushCmd()
 		}
 		if m.upstream.Upstream == "" {
-			m.statusMsg = "no upstream configured"
+			branch := m.currentBranch
+			if branch == "" {
+				branch = m.repo.BranchName()
+			}
+			m.pushConfirm = true
+			m.statusMsg = "press P again to push --set-upstream origin " + branch
 			return m, nil
 		}
 		m.pushConfirm = true

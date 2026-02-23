@@ -754,3 +754,46 @@ func TestView_BranchCreating_ShowsCreateBar(t *testing.T) {
 		t.Error("create bar should show 'enter create' hint")
 	}
 }
+
+func TestPush_NoUpstream_OffersSetUpstream(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t, nil)
+	m.mode = modeFileList
+	m.upstream = git.UpstreamInfo{} // no upstream
+	m.currentBranch = "feature-x"
+
+	// First P should offer set-upstream, not block
+	result, _ := m.updateFileListMode(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'P'}})
+	rm := result.(Model)
+	if !strings.Contains(rm.statusMsg, "set-upstream") {
+		t.Errorf("statusMsg=%q, should mention set-upstream", rm.statusMsg)
+	}
+	if !rm.pushConfirm {
+		t.Error("should enter push confirm state")
+	}
+	if !strings.Contains(rm.statusMsg, "feature-x") {
+		t.Errorf("statusMsg=%q, should mention branch name", rm.statusMsg)
+	}
+}
+
+func TestPush_NoUpstream_ConfirmPushes(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t, nil)
+	m.mode = modeFileList
+	m.upstream = git.UpstreamInfo{} // no upstream
+	m.pushConfirm = true
+	m.currentBranch = "feature-x"
+
+	// Second P should issue a push cmd
+	result, cmd := m.updateFileListMode(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'P'}})
+	rm := result.(Model)
+	if rm.pushConfirm {
+		t.Error("pushConfirm should be cleared")
+	}
+	if !strings.Contains(rm.statusMsg, "pushing") {
+		t.Errorf("statusMsg=%q, should say pushing", rm.statusMsg)
+	}
+	if cmd == nil {
+		t.Error("expected push cmd")
+	}
+}
