@@ -578,3 +578,56 @@ func TestCommitDiffFiles(t *testing.T) {
 		t.Errorf("Path=%q, want f.txt", files[0].Path)
 	}
 }
+
+func TestCreateBranch(t *testing.T) {
+	t.Parallel()
+	repo := setupTestRepo(t)
+	addCommit(t, repo, "f.txt", "v1", "init")
+
+	if err := repo.CreateBranch("feature-x"); err != nil {
+		t.Fatal(err)
+	}
+	branches, _ := repo.ListBranches()
+	found := false
+	for _, b := range branches {
+		if b == "feature-x" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("created branch not in list: %v", branches)
+	}
+}
+
+func TestCreateBranch_AlreadyExists(t *testing.T) {
+	t.Parallel()
+	repo := setupTestRepo(t)
+	addCommit(t, repo, "f.txt", "v1", "init")
+	gitRun(t, repo.Dir(), "branch", "dup")
+
+	err := repo.CreateBranch("dup")
+	if err == nil {
+		t.Error("expected error creating duplicate branch")
+	}
+}
+
+func TestCreateBranch_InvalidName(t *testing.T) {
+	t.Parallel()
+	repo := setupTestRepo(t)
+	addCommit(t, repo, "f.txt", "v1", "init")
+
+	err := repo.CreateBranch("bad..name")
+	if err == nil {
+		t.Error("expected error for invalid branch name")
+	}
+}
+
+func TestCreateBranch_NoCommits(t *testing.T) {
+	t.Parallel()
+	repo := setupTestRepo(t)
+
+	err := repo.CreateBranch("nope")
+	if err == nil {
+		t.Error("expected error creating branch in empty repo")
+	}
+}
