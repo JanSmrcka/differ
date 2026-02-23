@@ -98,10 +98,12 @@ type Model struct {
 	lastDiffContent string
 
 	// Branch picker state
-	branches      []string
-	branchCursor  int
-	branchOffset  int
-	currentBranch string
+	branches         []string
+	filteredBranches []string // nil = show all
+	branchCursor     int
+	branchOffset     int
+	currentBranch    string
+	branchFilter     textinput.Model
 
 	// Push/pull state
 	upstream    git.UpstreamInfo
@@ -130,17 +132,23 @@ func NewModel(
 	ti.Placeholder = "commit message..."
 	ti.CharLimit = 200
 
+	bf := textinput.New()
+	bf.Placeholder = "filter..."
+	bf.CharLimit = 100
+	bf.Width = fileListWidth - 8
+
 	return Model{
-		repo:        repo,
-		cfg:         cfg,
-		files:       files,
-		styles:      styles,
-		theme:       t,
-		stagedOnly:  stagedOnly,
-		ref:         ref,
-		splitDiff:   cfg.SplitDiff,
-		prevCurs:    -1,
-		commitInput: ti,
+		repo:         repo,
+		cfg:          cfg,
+		files:        files,
+		styles:       styles,
+		theme:        t,
+		stagedOnly:   stagedOnly,
+		ref:          ref,
+		splitDiff:    cfg.SplitDiff,
+		prevCurs:     -1,
+		commitInput:  ti,
+		branchFilter: bf,
 	}
 }
 
@@ -311,6 +319,27 @@ func (m Model) handleCommitMsgGenerated(msg commitMsgGeneratedMsg) (tea.Model, t
 	return m, nil
 }
 
+func (m Model) activeBranches() []string {
+	if m.filteredBranches != nil {
+		return m.filteredBranches
+	}
+	return m.branches
+}
+
+func filterBranches(branches []string, query string) []string {
+	if query == "" {
+		return nil
+	}
+	q := strings.ToLower(query)
+	out := []string{}
+	for _, b := range branches {
+		if strings.Contains(strings.ToLower(b), q) {
+			out = append(out, b)
+		}
+	}
+	return out
+}
+
 func (m Model) enterBranchMode() (tea.Model, tea.Cmd) {
 	repo := m.repo
 	return m, func() tea.Msg {
@@ -343,11 +372,17 @@ func (m Model) handleBranchesLoaded(msg branchesLoadedMsg) (tea.Model, tea.Cmd) 
 			break
 		}
 	}
-	return m, nil
+	m.filteredBranches = nil
+	m.branchFilter.Reset()
+	m.branchFilter.Focus()
+	return m, textinput.Blink
 }
 
 func (m Model) handleBranchSwitched(msg branchSwitchedMsg) (tea.Model, tea.Cmd) {
 	m.mode = modeFileList
+	m.filteredBranches = nil
+	m.branchFilter.Reset()
+	m.branchFilter.Blur()
 	if msg.err != nil {
 		m.statusMsg = "switch failed: " + msg.err.Error()
 		return m, nil
@@ -517,29 +552,39 @@ func (m Model) updateDiffMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // Branch picker mode
 func (m Model) updateBranchMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "esc", "b":
-		m.mode = modeFileList
-		return m, nil
-	case "q", "ctrl+c":
-		return m, tea.Quit
-	case "j", "down":
-		if m.branchCursor < len(m.branches)-1 {
-			m.branchCursor++
+	case "esc":
+		if m.branchFilter.Value() != "" {
+			m.branchFilter.Reset()
+			m.filteredBranches = nil
+			m.branchCursor = 0
+			m.branchOffset = 0
+			return m, nil
 		}
-	case "k", "up":
+		m.mode = modeFileList
+		m.branchFilter.Blur()
+		return m, nil
+	case "ctrl+c":
+		return m, tea.Quit
+	case "up", "ctrl+k":
 		if m.branchCursor > 0 {
 			m.branchCursor--
 		}
-	case "g":
-		m.branchCursor = 0
-		m.branchOffset = 0
-	case "G":
-		m.branchCursor = max(0, len(m.branches)-1)
+		m = m.clampBranchScroll()
+		return m, nil
+	case "down", "ctrl+j":
+		list := m.activeBranches()
+		if m.branchCursor < len(list)-1 {
+			m.branchCursor++
+		}
+		m = m.clampBranchScroll()
+		return m, nil
 	case "enter":
-		if m.branchCursor >= len(m.branches) {
+		list := m.activeBranches()
+		if m.branchCursor >= len(list) || len(list) == 0 {
 			return m, nil
 		}
-		selected := m.branches[m.branchCursor]
+		selected := list[m.branchCursor]
+		m.branchFilter.Blur()
 		if selected == m.currentBranch {
 			m.mode = modeFileList
 			return m, nil
@@ -549,16 +594,30 @@ func (m Model) updateBranchMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return branchSwitchedMsg{err: repo.CheckoutBranch(selected)}
 		}
 	}
-	// Keep cursor in visible window
-	h := m.contentHeight()
-	if h > 0 {
-		if m.branchCursor < m.branchOffset {
-			m.branchOffset = m.branchCursor
-		} else if m.branchCursor >= m.branchOffset+h {
-			m.branchOffset = m.branchCursor - h + 1
-		}
+
+	// All other keys go to the filter input
+	prevVal := m.branchFilter.Value()
+	var cmd tea.Cmd
+	m.branchFilter, cmd = m.branchFilter.Update(msg)
+	if m.branchFilter.Value() != prevVal {
+		m.filteredBranches = filterBranches(m.branches, m.branchFilter.Value())
+		m.branchCursor = 0
+		m.branchOffset = 0
 	}
-	return m, nil
+	return m, cmd
+}
+
+func (m Model) clampBranchScroll() Model {
+	h := m.contentHeight() - 1 // -1 for filter bar
+	if h <= 0 {
+		return m
+	}
+	if m.branchCursor < m.branchOffset {
+		m.branchOffset = m.branchCursor
+	} else if m.branchCursor >= m.branchOffset+h {
+		m.branchOffset = m.branchCursor - h + 1
+	}
+	return m
 }
 
 // Commit mode
@@ -910,18 +969,49 @@ func (m Model) renderFileItem(f fileItem, selected bool) string {
 
 func (m Model) renderBranchList(height int) string {
 	var b strings.Builder
-	end := m.branchOffset + height
-	if end > len(m.branches) {
-		end = len(m.branches)
+
+	// Filter bar (row 0)
+	b.WriteString(m.renderBranchFilterBar())
+	b.WriteByte('\n')
+
+	list := m.activeBranches()
+	itemH := height - 1 // reserve 1 row for filter bar
+
+	if len(list) == 0 {
+		noMatch := m.styles.HelpDesc.Render("  no matches")
+		b.WriteString(m.styles.FileItem.Width(fileListWidth).Render(noMatch))
+		return b.String()
+	}
+
+	end := m.branchOffset + itemH
+	if end > len(list) {
+		end = len(list)
 	}
 	for i := m.branchOffset; i < end; i++ {
-		branch := m.branches[i]
+		branch := list[i]
 		b.WriteString(m.renderBranchItem(branch, i == m.branchCursor, branch == m.currentBranch))
 		if i < end-1 {
 			b.WriteByte('\n')
 		}
 	}
 	return b.String()
+}
+
+func (m Model) renderBranchFilterBar() string {
+	list := m.activeBranches()
+	count := fmt.Sprintf("%d/%d", len(list), len(m.branches))
+	countStyled := m.styles.HelpDesc.Render(count)
+	countW := lipgloss.Width(countStyled)
+
+	input := m.branchFilter.View()
+	inputW := lipgloss.Width(input)
+
+	gap := fileListWidth - inputW - countW - 1
+	if gap < 0 {
+		gap = 0
+	}
+	line := input + strings.Repeat(" ", gap) + countStyled
+	return lipgloss.NewStyle().Width(fileListWidth).Render(line)
 }
 
 func (m Model) renderBranchItem(name string, selected, current bool) string {
@@ -1003,10 +1093,10 @@ func (m Model) renderHelpBar() string {
 		}
 	case modeBranchPicker:
 		pairs = []struct{ key, desc string }{
-			{"j/k", "navigate"},
+			{"type", "filter"},
+			{"↑/↓/^j/^k", "navigate"},
 			{"enter", "switch"},
-			{"esc", "cancel"},
-			{"q", "quit"},
+			{"esc", "clear/close"},
 		}
 	default:
 		pairs = []struct{ key, desc string }{

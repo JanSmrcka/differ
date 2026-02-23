@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/jansmrcka/differ/internal/config"
 	"github.com/jansmrcka/differ/internal/git"
@@ -134,13 +135,19 @@ func TestDiffWidth(t *testing.T) {
 func newTestModel(t *testing.T, files []fileItem) Model {
 	t.Helper()
 	th := theme.Themes["dark"]
+	bf := textinput.New()
+	bf.Placeholder = "filter..."
+	bf.CharLimit = 100
+	bf.Width = fileListWidth - 8
 	return Model{
-		files:  files,
-		styles: NewStyles(th),
-		theme:  th,
-		cfg:    config.Default(),
-		width:  120,
-		height: 30,
+		files:        files,
+		styles:       NewStyles(th),
+		theme:        th,
+		cfg:          config.Default(),
+		width:        120,
+		height:       30,
+		commitInput:  textinput.New(),
+		branchFilter: bf,
 	}
 }
 
@@ -206,7 +213,7 @@ func TestRenderHelpBar_BranchMode(t *testing.T) {
 	m := newTestModel(t, nil)
 	m.mode = modeBranchPicker
 	bar := m.renderHelpBar()
-	for _, key := range []string{"j/k", "enter", "esc", "q"} {
+	for _, key := range []string{"↑/↓/^j/^k", "enter", "esc", "filter"} {
 		if !strings.Contains(bar, key) {
 			t.Errorf("branch help should contain %q", key)
 		}
@@ -276,16 +283,16 @@ func TestUpdateBranchMode_Navigation(t *testing.T) {
 	m.branches = []string{"main", "dev", "feature"}
 	m.branchCursor = 0
 
-	result, _ := m.updateBranchMode(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	result, _ := m.updateBranchMode(tea.KeyMsg{Type: tea.KeyDown})
 	rm := result.(Model)
 	if rm.branchCursor != 1 {
-		t.Errorf("cursor=%d after j, want 1", rm.branchCursor)
+		t.Errorf("cursor=%d after down, want 1", rm.branchCursor)
 	}
 
-	result, _ = rm.updateBranchMode(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+	result, _ = rm.updateBranchMode(tea.KeyMsg{Type: tea.KeyUp})
 	rm = result.(Model)
 	if rm.branchCursor != 0 {
-		t.Errorf("cursor=%d after k, want 0", rm.branchCursor)
+		t.Errorf("cursor=%d after up, want 0", rm.branchCursor)
 	}
 }
 
@@ -367,14 +374,14 @@ func TestBranchListScroll(t *testing.T) {
 	t.Parallel()
 	m := newTestModel(t, nil)
 	m.mode = modeBranchPicker
-	// height=30, contentHeight=27. Put cursor beyond visible area.
+	// height=30, contentHeight=27, itemH=26 (minus filter bar).
 	branches := make([]string, 40)
 	for i := range branches {
 		branches[i] = fmt.Sprintf("branch-%02d", i)
 	}
 	m.branches = branches
 	m.branchCursor = 35
-	m.branchOffset = 35 - 27 + 1 // 9
+	m.branchOffset = 35 - 26 + 1 // 10
 
 	out := m.renderBranchList(m.contentHeight())
 	if !strings.Contains(out, "branch-35") {
@@ -382,5 +389,168 @@ func TestBranchListScroll(t *testing.T) {
 	}
 	if strings.Contains(out, "branch-00") {
 		t.Error("branch list should not show first branch when scrolled down")
+	}
+}
+
+func TestFilterBranches(t *testing.T) {
+	t.Parallel()
+	branches := []string{"main", "feature-auth", "feature-ui", "bugfix-login", "dev"}
+
+	t.Run("empty query returns nil", func(t *testing.T) {
+		t.Parallel()
+		if got := filterBranches(branches, ""); got != nil {
+			t.Errorf("expected nil, got %v", got)
+		}
+	})
+	t.Run("substring match", func(t *testing.T) {
+		t.Parallel()
+		got := filterBranches(branches, "feature")
+		if len(got) != 2 {
+			t.Fatalf("expected 2 matches, got %d: %v", len(got), got)
+		}
+	})
+	t.Run("case insensitive", func(t *testing.T) {
+		t.Parallel()
+		got := filterBranches(branches, "FEATURE")
+		if len(got) != 2 {
+			t.Fatalf("expected 2 matches, got %d: %v", len(got), got)
+		}
+	})
+	t.Run("no match", func(t *testing.T) {
+		t.Parallel()
+		got := filterBranches(branches, "zzz")
+		if len(got) != 0 {
+			t.Fatalf("expected 0 matches, got %d: %v", len(got), got)
+		}
+	})
+}
+
+func TestUpdateBranchMode_TypeFilters(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t, nil)
+	m.mode = modeBranchPicker
+	m.branches = []string{"main", "feature-auth", "feature-ui", "dev"}
+	m.branchFilter.Focus()
+
+	// Type 'f' — should filter to feature branches
+	result, _ := m.updateBranchMode(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
+	rm := result.(Model)
+	if rm.filteredBranches == nil {
+		t.Fatal("filteredBranches should not be nil after typing")
+	}
+	if len(rm.filteredBranches) != 2 {
+		t.Errorf("expected 2 filtered branches, got %d", len(rm.filteredBranches))
+	}
+	if rm.branchCursor != 0 {
+		t.Errorf("cursor should reset to 0, got %d", rm.branchCursor)
+	}
+}
+
+func TestUpdateBranchMode_EscClearsFilter(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t, nil)
+	m.mode = modeBranchPicker
+	m.branches = []string{"main", "feature-auth", "dev"}
+	m.branchFilter.Focus()
+	m.branchFilter.SetValue("feat")
+	m.filteredBranches = filterBranches(m.branches, "feat")
+
+	result, _ := m.updateBranchMode(tea.KeyMsg{Type: tea.KeyEscape})
+	rm := result.(Model)
+	// First esc clears filter, stays in branch picker
+	if rm.mode != modeBranchPicker {
+		t.Errorf("mode=%d, want modeBranchPicker", rm.mode)
+	}
+	if rm.branchFilter.Value() != "" {
+		t.Errorf("filter should be cleared, got %q", rm.branchFilter.Value())
+	}
+	if rm.filteredBranches != nil {
+		t.Error("filteredBranches should be nil after clearing")
+	}
+}
+
+func TestUpdateBranchMode_EscClosesWhenEmpty(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t, nil)
+	m.mode = modeBranchPicker
+	m.branches = []string{"main"}
+	m.branchFilter.Focus()
+	// Filter is empty — esc should close
+	result, _ := m.updateBranchMode(tea.KeyMsg{Type: tea.KeyEscape})
+	rm := result.(Model)
+	if rm.mode != modeFileList {
+		t.Errorf("mode=%d, want modeFileList", rm.mode)
+	}
+}
+
+func TestUpdateBranchMode_ArrowsInFilteredList(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t, nil)
+	m.mode = modeBranchPicker
+	m.branches = []string{"main", "feature-auth", "feature-ui", "dev"}
+	m.filteredBranches = []string{"feature-auth", "feature-ui"}
+	m.branchCursor = 0
+
+	result, _ := m.updateBranchMode(tea.KeyMsg{Type: tea.KeyDown})
+	rm := result.(Model)
+	if rm.branchCursor != 1 {
+		t.Errorf("cursor=%d after down, want 1", rm.branchCursor)
+	}
+	// Should not go past end of filtered list
+	result, _ = rm.updateBranchMode(tea.KeyMsg{Type: tea.KeyDown})
+	rm = result.(Model)
+	if rm.branchCursor != 1 {
+		t.Errorf("cursor=%d, should not exceed filtered list", rm.branchCursor)
+	}
+}
+
+func TestUpdateBranchMode_CtrlJK(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t, nil)
+	m.mode = modeBranchPicker
+	m.branches = []string{"main", "dev", "feature"}
+	m.branchCursor = 0
+
+	// ctrl+j moves down
+	result, _ := m.updateBranchMode(tea.KeyMsg{Type: tea.KeyCtrlJ})
+	rm := result.(Model)
+	if rm.branchCursor != 1 {
+		t.Errorf("cursor=%d after ctrl+j, want 1", rm.branchCursor)
+	}
+
+	// ctrl+k moves up
+	result, _ = rm.updateBranchMode(tea.KeyMsg{Type: tea.KeyCtrlK})
+	rm = result.(Model)
+	if rm.branchCursor != 0 {
+		t.Errorf("cursor=%d after ctrl+k, want 0", rm.branchCursor)
+	}
+}
+
+func TestRenderBranchList_ShowsFilterBar(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t, nil)
+	m.mode = modeBranchPicker
+	m.branches = []string{"main", "dev"}
+	m.branchCursor = 0
+	out := m.renderBranchList(10)
+	// Should contain the match count
+	if !strings.Contains(out, "2/2") {
+		t.Error("branch list should show match count")
+	}
+}
+
+func TestRenderBranchList_NoMatches(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t, nil)
+	m.mode = modeBranchPicker
+	m.branches = []string{"main", "dev"}
+	m.filteredBranches = []string{} // empty filter result
+	m.branchFilter.SetValue("zzz")
+	out := m.renderBranchList(10)
+	if !strings.Contains(out, "no matches") {
+		t.Error("should show 'no matches' placeholder")
+	}
+	if !strings.Contains(out, "0/2") {
+		t.Error("should show 0/2 count")
 	}
 }
