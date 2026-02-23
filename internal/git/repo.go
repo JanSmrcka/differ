@@ -339,7 +339,7 @@ func (r *Repo) diffNameStatusEmptyTree() ([]FileChange, error) {
 
 // diffNameStatus runs git diff --name-status with optional extra args.
 func (r *Repo) diffNameStatus(extraArgs ...string) ([]FileChange, error) {
-	args := append([]string{"diff", "--name-status"}, extraArgs...)
+	args := append([]string{"diff", "--name-status", "--no-ext-diff", "--color=never"}, extraArgs...)
 	out, err := r.run(args...)
 	if err != nil {
 		return nil, err
@@ -358,7 +358,7 @@ func (r *Repo) diffNumStat(extraArgs ...string) (map[string]lineStats, error) {
 
 // changedFilesRef returns files changed compared to a ref.
 func (r *Repo) changedFilesRef(ref string) ([]FileChange, error) {
-	out, err := r.run("diff", "--name-status", ref)
+	out, err := r.run("diff", "--name-status", "--no-ext-diff", "--color=never", ref)
 	if err != nil {
 		return nil, err
 	}
@@ -386,12 +386,34 @@ func parseNumStat(out string) map[string]lineStats {
 		if len(parts) < 3 {
 			continue
 		}
-		path := parts[len(parts)-1]
+		path := parseNumStatPath(parts[len(parts)-1])
 		added := parseNumStatInt(parts[0])
 		deleted := parseNumStatInt(parts[1])
 		stats[path] = lineStats{added: added, deleted: deleted}
 	}
 	return stats
+}
+
+func parseNumStatPath(path string) string {
+	if !strings.Contains(path, " => ") {
+		return path
+	}
+	if strings.Contains(path, "{") && strings.Contains(path, "}") {
+		open := strings.Index(path, "{")
+		close := strings.LastIndex(path, "}")
+		if open >= 0 && close > open {
+			inside := path[open+1 : close]
+			parts := strings.SplitN(inside, " => ", 2)
+			if len(parts) == 2 {
+				return path[:open] + parts[1] + path[close+1:]
+			}
+		}
+	}
+	parts := strings.SplitN(path, " => ", 2)
+	if len(parts) == 2 {
+		return parts[1]
+	}
+	return path
 }
 
 func parseNumStatInt(s string) int {
