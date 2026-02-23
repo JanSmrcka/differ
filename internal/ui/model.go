@@ -252,6 +252,7 @@ func (m Model) handleResize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 	m.width = msg.Width
 	m.height = msg.Height
 	m.viewport = viewport.New(m.diffWidth(), m.contentHeight())
+	m.lastDiffContent = "" // force re-apply after viewport recreation
 	m.ready = true
 	return m, m.loadDiffCmd(true)
 }
