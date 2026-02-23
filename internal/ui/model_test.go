@@ -336,11 +336,14 @@ func TestHandleResize_ClearsDiffCache(t *testing.T) {
 		t.Error("handleResize should clear lastDiffContent to force re-apply")
 	}
 
-	// Now handleDiffLoaded with same content should apply (not skip)
+	// handleDiffLoaded with same content should apply (not skip) after resize
 	result2, _ := rm.handleDiffLoaded(diffLoadedMsg{content: "old diff", index: 0})
 	rm2 := result2.(Model)
 	if rm2.lastDiffContent != "old diff" {
 		t.Error("handleDiffLoaded should apply content after resize cleared cache")
+	}
+	if !strings.Contains(rm2.viewport.View(), "old diff") {
+		t.Errorf("viewport should contain reapplied content, got %q", rm2.viewport.View())
 	}
 }
 
