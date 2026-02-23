@@ -139,6 +139,9 @@ func newTestModel(t *testing.T, files []fileItem) Model {
 	bf.Placeholder = "filter..."
 	bf.CharLimit = 100
 	bf.Width = fileListWidth - 8
+	bi := textinput.New()
+	bi.Placeholder = "branch name..."
+	bi.CharLimit = 100
 	return Model{
 		files:        files,
 		styles:       NewStyles(th),
@@ -148,6 +151,7 @@ func newTestModel(t *testing.T, files []fileItem) Model {
 		height:       30,
 		commitInput:  textinput.New(),
 		branchFilter: bf,
+		branchInput:  bi,
 	}
 }
 
@@ -552,5 +556,244 @@ func TestRenderBranchList_NoMatches(t *testing.T) {
 	}
 	if !strings.Contains(out, "0/2") {
 		t.Error("should show 0/2 count")
+	}
+}
+
+func TestUpdateBranchMode_CtrlN_EntersCreateMode(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t, nil)
+	m.mode = modeBranchPicker
+	m.branches = []string{"main", "dev"}
+	m.branchCursor = 0
+	m.branchFilter.Focus()
+
+	result, cmd := m.updateBranchMode(tea.KeyMsg{Type: tea.KeyCtrlN})
+	rm := result.(Model)
+	if !rm.branchCreating {
+		t.Error("ctrl+n should set branchCreating=true")
+	}
+	if rm.mode != modeBranchPicker {
+		t.Error("should stay in branch picker mode")
+	}
+	if cmd == nil {
+		t.Error("expected textinput.Blink cmd")
+	}
+}
+
+func TestUpdateBranchMode_CreateMode_RoutesToInput(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t, nil)
+	m.mode = modeBranchPicker
+	m.branchCreating = true
+	m.branchInput.Focus()
+	m.branches = []string{"main"}
+
+	// Typing 'j' should go to text input, not move branch cursor
+	result, _ := m.updateBranchMode(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	rm := result.(Model)
+	if rm.branchInput.Value() != "j" {
+		t.Errorf("input=%q, want %q", rm.branchInput.Value(), "j")
+	}
+}
+
+func TestUpdateBranchMode_CreateMode_Esc_Cancels(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t, nil)
+	m.mode = modeBranchPicker
+	m.branchCreating = true
+	m.branchInput.Focus()
+	m.branchInput.SetValue("feature-x")
+	m.branches = []string{"main"}
+
+	result, _ := m.updateBranchMode(tea.KeyMsg{Type: tea.KeyEscape})
+	rm := result.(Model)
+	if rm.branchCreating {
+		t.Error("esc should cancel branch creation")
+	}
+	if rm.branchInput.Value() != "" {
+		t.Error("input should be reset on cancel")
+	}
+}
+
+func TestUpdateBranchMode_CreateMode_CtrlC_Cancels(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t, nil)
+	m.mode = modeBranchPicker
+	m.branchCreating = true
+	m.branchInput.Focus()
+	m.branches = []string{"main"}
+
+	result, _ := m.updateBranchMode(tea.KeyMsg{Type: tea.KeyCtrlC})
+	rm := result.(Model)
+	if rm.branchCreating {
+		t.Error("ctrl+c should cancel branch creation, not quit")
+	}
+}
+
+func TestUpdateBranchMode_CreateMode_Enter_EmptyName(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t, nil)
+	m.mode = modeBranchPicker
+	m.branchCreating = true
+	m.branchInput.Focus()
+	m.branches = []string{"main"}
+
+	result, cmd := m.updateBranchMode(tea.KeyMsg{Type: tea.KeyEnter})
+	rm := result.(Model)
+	if !strings.Contains(rm.statusMsg, "empty") {
+		t.Errorf("statusMsg=%q, want empty branch name error", rm.statusMsg)
+	}
+	if cmd != nil {
+		t.Error("should not issue cmd on empty name")
+	}
+}
+
+func TestUpdateBranchMode_CreateMode_Enter_SubmitsCmd(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t, nil)
+	m.mode = modeBranchPicker
+	m.branchCreating = true
+	m.branchInput.Focus()
+	m.branchInput.SetValue("feature-x")
+	m.branches = []string{"main"}
+
+	_, cmd := m.updateBranchMode(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Error("expected async create branch cmd")
+	}
+}
+
+func TestHandleBranchCreated_Success(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t, nil)
+	m.mode = modeBranchPicker
+	m.branchCreating = true
+
+	result, cmd := m.handleBranchCreated(branchCreatedMsg{name: "feature-x"})
+	rm := result.(Model)
+	if rm.mode != modeFileList {
+		t.Errorf("mode=%d, want modeFileList", rm.mode)
+	}
+	if rm.branchCreating {
+		t.Error("branchCreating should be false")
+	}
+	if !strings.Contains(rm.statusMsg, "feature-x") {
+		t.Errorf("statusMsg=%q, want branch name", rm.statusMsg)
+	}
+	if cmd == nil {
+		t.Error("expected refresh files cmd")
+	}
+}
+
+func TestHandleBranchCreated_Error(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t, nil)
+	m.mode = modeBranchPicker
+	m.branchCreating = true
+
+	result, cmd := m.handleBranchCreated(branchCreatedMsg{
+		name: "bad",
+		err:  fmt.Errorf("already exists"),
+	})
+	rm := result.(Model)
+	if rm.mode != modeBranchPicker {
+		t.Error("should stay in branch picker on error")
+	}
+	if !strings.Contains(rm.statusMsg, "already exists") {
+		t.Errorf("statusMsg=%q, want error", rm.statusMsg)
+	}
+	if cmd != nil {
+		t.Error("should not issue cmd on error")
+	}
+}
+
+func TestRenderHelpBar_BranchMode_ShowsNewKey(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t, nil)
+	m.mode = modeBranchPicker
+	bar := m.renderHelpBar()
+	if !strings.Contains(bar, "^n") {
+		t.Error("branch help should contain ^n for new branch")
+	}
+	if !strings.Contains(bar, "new") {
+		t.Error("branch help should contain 'new' description")
+	}
+}
+
+func TestRenderBranchCreateBar(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t, nil)
+	m.branchCreating = true
+	m.branchInput.Focus()
+	bar := m.renderBranchCreateBar()
+	if !strings.Contains(bar, "branch") {
+		t.Error("create bar should contain 'branch' prompt")
+	}
+	if !strings.Contains(bar, "esc") {
+		t.Error("create bar should show esc hint")
+	}
+	if !strings.Contains(bar, "enter") {
+		t.Error("create bar should show enter hint")
+	}
+}
+
+func TestView_BranchCreating_ShowsCreateBar(t *testing.T) {
+	t.Parallel()
+	// View() calls renderHeader() which needs a real repo for BranchName()
+	// Use renderBranchCreateBar() directly to test view integration
+	m := newTestModel(t, nil)
+	m.mode = modeBranchPicker
+	m.branchCreating = true
+	m.branchInput.Focus()
+
+	bar := m.renderBranchCreateBar()
+	if !strings.Contains(bar, "new branch") {
+		t.Error("create bar should show 'new branch' prompt")
+	}
+	if !strings.Contains(bar, "enter create") {
+		t.Error("create bar should show 'enter create' hint")
+	}
+}
+
+func TestPush_NoUpstream_OffersSetUpstream(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t, nil)
+	m.mode = modeFileList
+	m.upstream = git.UpstreamInfo{} // no upstream
+	m.currentBranch = "feature-x"
+
+	// First P should offer set-upstream, not block
+	result, _ := m.updateFileListMode(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'P'}})
+	rm := result.(Model)
+	if !strings.Contains(rm.statusMsg, "set-upstream") {
+		t.Errorf("statusMsg=%q, should mention set-upstream", rm.statusMsg)
+	}
+	if !rm.pushConfirm {
+		t.Error("should enter push confirm state")
+	}
+	if !strings.Contains(rm.statusMsg, "feature-x") {
+		t.Errorf("statusMsg=%q, should mention branch name", rm.statusMsg)
+	}
+}
+
+func TestPush_NoUpstream_ConfirmPushes(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t, nil)
+	m.mode = modeFileList
+	m.upstream = git.UpstreamInfo{} // no upstream
+	m.pushConfirm = true
+	m.currentBranch = "feature-x"
+
+	// Second P should issue a push cmd
+	result, cmd := m.updateFileListMode(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'P'}})
+	rm := result.(Model)
+	if rm.pushConfirm {
+		t.Error("pushConfirm should be cleared")
+	}
+	if !strings.Contains(rm.statusMsg, "pushing") {
+		t.Errorf("statusMsg=%q, should say pushing", rm.statusMsg)
+	}
+	if cmd == nil {
+		t.Error("expected push cmd")
 	}
 }

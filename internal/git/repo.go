@@ -108,6 +108,12 @@ func (r *Repo) ListBranches() ([]string, error) {
 	return strings.Split(out, "\n"), nil
 }
 
+// CreateBranch creates a new branch at the current HEAD.
+func (r *Repo) CreateBranch(name string) error {
+	_, err := r.run("branch", name)
+	return err
+}
+
 // CheckoutBranch switches to the named branch.
 func (r *Repo) CheckoutBranch(name string) error {
 	_, err := r.run("switch", name)
@@ -139,6 +145,12 @@ func (r *Repo) UpstreamStatus() UpstreamInfo {
 // Push pushes to the upstream branch.
 func (r *Repo) Push() error {
 	_, err := r.runWithStderr("push")
+	return err
+}
+
+// PushSetUpstream pushes and sets the upstream tracking branch.
+func (r *Repo) PushSetUpstream(remote, branch string) error {
+	_, err := r.runWithStderr("push", "--set-upstream", remote, branch)
 	return err
 }
 

@@ -578,3 +578,88 @@ func TestCommitDiffFiles(t *testing.T) {
 		t.Errorf("Path=%q, want f.txt", files[0].Path)
 	}
 }
+
+func TestCreateBranch(t *testing.T) {
+	t.Parallel()
+	repo := setupTestRepo(t)
+	addCommit(t, repo, "f.txt", "v1", "init")
+
+	if err := repo.CreateBranch("feature-x"); err != nil {
+		t.Fatal(err)
+	}
+	branches, _ := repo.ListBranches()
+	found := false
+	for _, b := range branches {
+		if b == "feature-x" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("created branch not in list: %v", branches)
+	}
+}
+
+func TestCreateBranch_AlreadyExists(t *testing.T) {
+	t.Parallel()
+	repo := setupTestRepo(t)
+	addCommit(t, repo, "f.txt", "v1", "init")
+	gitRun(t, repo.Dir(), "branch", "dup")
+
+	err := repo.CreateBranch("dup")
+	if err == nil {
+		t.Error("expected error creating duplicate branch")
+	}
+}
+
+func TestCreateBranch_InvalidName(t *testing.T) {
+	t.Parallel()
+	repo := setupTestRepo(t)
+	addCommit(t, repo, "f.txt", "v1", "init")
+
+	err := repo.CreateBranch("bad..name")
+	if err == nil {
+		t.Error("expected error for invalid branch name")
+	}
+}
+
+func TestCreateBranch_NoCommits(t *testing.T) {
+	t.Parallel()
+	repo := setupTestRepo(t)
+
+	err := repo.CreateBranch("nope")
+	if err == nil {
+		t.Error("expected error creating branch in empty repo")
+	}
+}
+
+func TestPushSetUpstream(t *testing.T) {
+	t.Parallel()
+	// Create a bare "remote" repo
+	bare := t.TempDir()
+	cmd := exec.Command("git", "init", "--bare", bare)
+	cmd.Env = gitEnv(t.TempDir())
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("bare init: %v\n%s", err, out)
+	}
+
+	repo := setupTestRepo(t)
+	addCommit(t, repo, "f.txt", "v1", "init")
+	gitRun(t, repo.Dir(), "remote", "add", "origin", bare)
+
+	// No upstream yet
+	info := repo.UpstreamStatus()
+	if info.Upstream != "" {
+		t.Fatalf("expected no upstream, got %q", info.Upstream)
+	}
+
+	// Push with set-upstream
+	if err := repo.PushSetUpstream("origin", "master"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Now upstream should be configured
+	info = repo.UpstreamStatus()
+	if info.Upstream == "" {
+		t.Error("upstream should be configured after PushSetUpstream")
+	}
+}

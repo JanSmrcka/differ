@@ -46,7 +46,7 @@ differ commit     # review staged + commit
 | `b`           | open branch picker                         |
 | `v`           | toggle split (side-by-side) diff           |
 | `e`           | open in editor (`$EDITOR`, configurable)   |
-| `P`           | push (press twice to confirm)              |
+| `P`           | push (auto `--set-upstream` if needed)     |
 | `F`           | pull (fast-forward only)                   |
 | `g/G`         | first/last file                            |
 | `q`           | quit                                       |
@@ -74,11 +74,13 @@ differ commit     # review staged + commit
 
 ### Branch Picker
 
-| Key     | Action        |
-| ------- | ------------- |
-| `j/k`   | navigate      |
-| `enter` | switch branch |
-| `esc/b` | cancel        |
+| Key            | Action                    |
+| -------------- | ------------------------- |
+| type           | filter branches           |
+| `↑/↓` / `^j/^k` | navigate                |
+| `enter`        | switch branch             |
+| `ctrl+n`       | create new branch         |
+| `esc`          | clear filter / close      |
 
 ## AI Commit Messages
 
@@ -125,8 +127,9 @@ Press `prefix + g` to open differ in a floating window over your current session
 - Staged/unstaged/untracked file indicators
 - Stage/unstage individual files or all at once
 - Split (side-by-side) diff view
-- Branch picker with keyboard navigation
-- Push/pull with upstream ahead/behind tracking
+- Branch picker with type-to-filter and branch creation (`ctrl+n`)
+- Push with auto `--set-upstream` for new branches
+- Pull with upstream ahead/behind tracking
 - Per-file added/deleted line counts in file list
 - Configurable editor command (`editor_cmd`)
 - Commit flow with AI-generated messages

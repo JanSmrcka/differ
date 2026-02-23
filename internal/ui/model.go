@@ -104,6 +104,8 @@ type Model struct {
 	branchOffset     int
 	currentBranch    string
 	branchFilter     textinput.Model
+	branchCreating   bool
+	branchInput      textinput.Model
 
 	// Push/pull state
 	upstream    git.UpstreamInfo
@@ -137,6 +139,10 @@ func NewModel(
 	bf.CharLimit = 100
 	bf.Width = fileListWidth - 8
 
+	bi := textinput.New()
+	bi.Placeholder = "branch name..."
+	bi.CharLimit = 100
+
 	return Model{
 		repo:         repo,
 		cfg:          cfg,
@@ -149,6 +155,7 @@ func NewModel(
 		prevCurs:     -1,
 		commitInput:  ti,
 		branchFilter: bf,
+		branchInput:  bi,
 	}
 }
 
@@ -229,6 +236,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleBranchesLoaded(msg)
 	case branchSwitchedMsg:
 		return m.handleBranchSwitched(msg)
+	case branchCreatedMsg:
+		return m.handleBranchCreated(msg)
 	case upstreamStatusMsg:
 		m.upstream = msg.info
 		return m, nil
@@ -393,6 +402,20 @@ func (m Model) handleBranchSwitched(msg branchSwitchedMsg) (tea.Model, tea.Cmd) 
 	return m, m.refreshFilesCmd()
 }
 
+func (m Model) handleBranchCreated(msg branchCreatedMsg) (tea.Model, tea.Cmd) {
+	m.branchCreating = false
+	m.branchInput.Reset()
+	if msg.err != nil {
+		m.statusMsg = "create failed: " + msg.err.Error()
+		return m, nil
+	}
+	m.mode = modeFileList
+	m.statusMsg = "created & switched to " + msg.name
+	m.prevCurs = -1
+	m.cursor = 0
+	return m, m.refreshFilesCmd()
+}
+
 func (m Model) handlePushDone(msg pushDoneMsg) (tea.Model, tea.Cmd) {
 	if msg.err != nil {
 		m.statusMsg = "push failed: " + msg.err.Error()
@@ -425,6 +448,17 @@ func (m Model) pushCmd() tea.Cmd {
 	}
 }
 
+func (m Model) pushSetUpstreamCmd() tea.Cmd {
+	repo := m.repo
+	branch := m.currentBranch
+	if branch == "" {
+		branch = repo.BranchName()
+	}
+	return func() tea.Msg {
+		return pushDoneMsg{err: repo.PushSetUpstream("origin", branch)}
+	}
+}
+
 func (m Model) pullCmd() tea.Cmd {
 	repo := m.repo
 	return func() tea.Msg {
@@ -454,10 +488,18 @@ func (m Model) updateFileListMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.pushConfirm {
 			m.pushConfirm = false
 			m.statusMsg = "pushing..."
+			if m.upstream.Upstream == "" {
+				return m, m.pushSetUpstreamCmd()
+			}
 			return m, m.pushCmd()
 		}
 		if m.upstream.Upstream == "" {
-			m.statusMsg = "no upstream configured"
+			branch := m.currentBranch
+			if branch == "" {
+				branch = m.repo.BranchName()
+			}
+			m.pushConfirm = true
+			m.statusMsg = "press P again to push --set-upstream origin " + branch
 			return m, nil
 		}
 		m.pushConfirm = true
@@ -551,7 +593,17 @@ func (m Model) updateDiffMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // Branch picker mode
 func (m Model) updateBranchMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.branchCreating {
+		return m.updateBranchCreateMode(msg)
+	}
+
 	switch msg.String() {
+	case "ctrl+n":
+		m.branchCreating = true
+		m.branchInput.Reset()
+		m.branchInput.Focus()
+		m.branchFilter.Blur()
+		return m, textinput.Blink
 	case "esc":
 		if m.branchFilter.Value() != "" {
 			m.branchFilter.Reset()
@@ -604,6 +656,27 @@ func (m Model) updateBranchMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.branchCursor = 0
 		m.branchOffset = 0
 	}
+	return m, cmd
+}
+
+// Branch create sub-mode
+func (m Model) updateBranchCreateMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "ctrl+c":
+		m.branchCreating = false
+		m.branchInput.Reset()
+		m.branchFilter.Focus()
+		return m, nil
+	case "enter":
+		name := strings.TrimSpace(m.branchInput.Value())
+		if name == "" {
+			m.statusMsg = "empty branch name"
+			return m, nil
+		}
+		return m, m.createBranchCmd(name)
+	}
+	var cmd tea.Cmd
+	m.branchInput, cmd = m.branchInput.Update(msg)
 	return m, cmd
 }
 
@@ -778,6 +851,22 @@ func (m Model) buildRefreshedFiles() filesRefreshedMsg {
 	return filesRefreshedMsg{files: buildFileItems(m.repo, files, untracked)}
 }
 
+type branchCreatedMsg struct {
+	name string
+	err  error
+}
+
+func (m Model) createBranchCmd(name string) tea.Cmd {
+	repo := m.repo
+	return func() tea.Msg {
+		if err := repo.CreateBranch(name); err != nil {
+			return branchCreatedMsg{name: name, err: err}
+		}
+		err := repo.CheckoutBranch(name)
+		return branchCreatedMsg{name: name, err: err}
+	}
+}
+
 type savePrefDoneMsg struct{ err error }
 
 func (m Model) saveSplitPrefCmd() tea.Cmd {
@@ -880,6 +969,9 @@ func (m Model) View() string {
 
 	if m.mode == modeCommit {
 		return lipgloss.JoinVertical(lipgloss.Left, header, main, statusBar, m.renderCommitBar())
+	}
+	if m.mode == modeBranchPicker && m.branchCreating {
+		return lipgloss.JoinVertical(lipgloss.Left, header, main, statusBar, m.renderBranchCreateBar())
 	}
 	helpBar := m.renderHelpBar()
 	return lipgloss.JoinVertical(lipgloss.Left, header, main, statusBar, helpBar)
@@ -1096,6 +1188,7 @@ func (m Model) renderHelpBar() string {
 			{"type", "filter"},
 			{"↑/↓/^j/^k", "navigate"},
 			{"enter", "switch"},
+			{"^n", "new"},
 			{"esc", "clear/close"},
 		}
 	default:
@@ -1131,5 +1224,12 @@ func (m Model) renderCommitBar() string {
 	}
 	input := m.commitInput.View()
 	esc := "  " + m.styles.HelpDesc.Render("esc cancel · enter commit")
+	return lipgloss.NewStyle().Width(m.width).Render(prompt + input + esc)
+}
+
+func (m Model) renderBranchCreateBar() string {
+	prompt := m.styles.HelpKey.Render(" new branch: ")
+	input := m.branchInput.View()
+	esc := "  " + m.styles.HelpDesc.Render("esc cancel · enter create")
 	return lipgloss.NewStyle().Width(m.width).Render(prompt + input + esc)
 }
