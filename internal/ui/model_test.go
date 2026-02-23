@@ -317,6 +317,49 @@ func TestHandleBranchesLoaded_Error(t *testing.T) {
 	}
 }
 
+func TestHandleResize_ClearsDiffCache(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t, []fileItem{
+		{change: git.FileChange{Path: "a.go", Status: git.StatusModified}},
+	})
+	m.cursor = 0
+
+	// Simulate having cached diff content
+	m.lastDiffContent = "old diff"
+	m.viewport.SetContent("old diff")
+
+	// Resize creates new viewport — cache must be cleared
+	result, _ := m.handleResize(tea.WindowSizeMsg{Width: 100, Height: 40})
+	rm := result.(Model)
+
+	if rm.lastDiffContent != "" {
+		t.Error("handleResize should clear lastDiffContent to force re-apply")
+	}
+
+	// Now handleDiffLoaded with same content should apply (not skip)
+	result2, _ := rm.handleDiffLoaded(diffLoadedMsg{content: "old diff", index: 0})
+	rm2 := result2.(Model)
+	if rm2.lastDiffContent != "old diff" {
+		t.Error("handleDiffLoaded should apply content after resize cleared cache")
+	}
+}
+
+func TestHandleDiffLoaded_SkipsDuplicate(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t, []fileItem{
+		{change: git.FileChange{Path: "a.go", Status: git.StatusModified}},
+	})
+	m.cursor = 0
+	m.lastDiffContent = "same diff"
+
+	// Same content as cache — should be a no-op
+	result, _ := m.handleDiffLoaded(diffLoadedMsg{content: "same diff", index: 0})
+	rm := result.(Model)
+	if rm.lastDiffContent != "same diff" {
+		t.Error("cache should remain unchanged on duplicate")
+	}
+}
+
 func TestBranchListScroll(t *testing.T) {
 	t.Parallel()
 	m := newTestModel(t, nil)
