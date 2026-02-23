@@ -43,7 +43,11 @@ differ commit     # review staged + commit
 | `tab`         | stage/unstage file                         |
 | `a`           | stage all                                  |
 | `c`           | commit (AI-generated message via `claude`) |
+| `b`           | open branch picker                         |
+| `v`           | toggle split (side-by-side) diff           |
 | `e`           | open in editor (`$EDITOR`, configurable)   |
+| `P`           | push (press twice to confirm)              |
+| `F`           | pull (fast-forward only)                   |
 | `g/G`         | first/last file                            |
 | `q`           | quit                                       |
 
@@ -56,6 +60,8 @@ differ commit     # review staged + commit
 | `g/G`       | top/bottom        |
 | `n/p`       | next/prev file    |
 | `tab`       | stage/unstage     |
+| `b`         | open branch picker|
+| `v`         | toggle split diff |
 | `e`         | open in editor    |
 | `esc` / `h` | back to file list |
 
@@ -65,6 +71,14 @@ differ commit     # review staged + commit
 | ------- | -------------- |
 | `enter` | confirm commit |
 | `esc`   | cancel         |
+
+### Branch Picker
+
+| Key     | Action        |
+| ------- | ------------- |
+| `j/k`   | navigate      |
+| `enter` | switch branch |
+| `esc/b` | cancel        |
 
 ## AI Commit Messages
 
@@ -86,7 +100,8 @@ Config file: `~/.config/differ/config.json`
   "theme": "dark",
   "commit_msg_cmd": "claude -p",
   "commit_msg_prompt": "Write a concise git commit message for this diff:",
-  "editor_cmd": "tmux new-window -c {repo} nvim {file}"
+  "editor_cmd": "tmux new-window -c {repo} nvim {file}",
+  "split_diff": false
 }
 ```
 
@@ -109,7 +124,13 @@ Press `prefix + g` to open differ in a floating window over your current session
 - Syntax highlighting via Chroma (Go, JS/TS, Python, Rust, CSS, HTML, JSON, YAML, Markdown, ...)
 - Staged/unstaged/untracked file indicators
 - Stage/unstage individual files or all at once
+- Split (side-by-side) diff view
+- Branch picker with keyboard navigation
+- Push/pull with upstream ahead/behind tracking
+- Per-file added/deleted line counts in file list
+- Configurable editor command (`editor_cmd`)
 - Commit flow with AI-generated messages
 - Commit log browser with diff preview
 - Compare against any branch/tag/commit ref
+- Auto-refresh (2s polling)
 - Single binary, no runtime dependencies

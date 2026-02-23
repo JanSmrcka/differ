@@ -26,7 +26,7 @@ make test              # go test ./...
 golangci-lint run      # CI uses v2.10.1, no custom config
 ```
 
-No unit tests exist yet. Test manually in a real git repo with staged, unstaged, and untracked files.
+Unit tests exist across all packages. Test manually in a real git repo with staged, unstaged, and untracked files.
 
 ## Architecture
 
@@ -36,14 +36,14 @@ main.go → cmd/root.go (cobra commands)
              ├── internal/git      — Repo struct, all git ops via os/exec
              ├── internal/theme    — color hex values only (no lipgloss)
              └── internal/ui
-                   ├── model.go    — Model (diff viewer, 3 modes: file list / diff / commit)
+                   ├── model.go    — Model (diff viewer, 4 modes: file list / diff / commit / branch picker)
                    ├── log.go      — LogModel (commit log browser)
                    ├── diff.go     — diff parser + renderer
                    ├── highlight.go — Chroma syntax highlighting
                    └── styles.go   — all lipgloss styles, bridges theme → lipgloss
 ```
 
-Two Bubble Tea models: `Model` (main diff viewer with file list/diff/commit modes) and `LogModel` (log browser). Both follow `Init()/Update()/View()`. All async work (git calls, AI commit messages) returned as `tea.Cmd` — never block in `Update`.
+Two Bubble Tea models: `Model` (main diff viewer with file list/diff/commit/branch-picker modes) and `LogModel` (log browser). Both follow `Init()/Update()/View()`. All async work (git calls, AI commit messages) returned as `tea.Cmd` — never block in `Update`.
 
 Version injected via ldflags at build (`-X .../cmd.version`), falls back to `debug.ReadBuildInfo()` for `go install`.
 
