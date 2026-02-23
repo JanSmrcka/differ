@@ -32,8 +32,9 @@ type tickMsg time.Time
 
 // Messages
 type diffLoadedMsg struct {
-	content string
-	index   int
+	content     string
+	index       int
+	resetScroll bool
 }
 
 type filesRefreshedMsg struct {
@@ -93,6 +94,8 @@ type Model struct {
 	height        int
 	ready         bool
 	SelectedFile  string // set on "open in editor" action, read after Run()
+
+	lastDiffContent string
 
 	// Branch picker state
 	branches      []string
@@ -192,7 +195,7 @@ func (m *Model) StartInCommitMode() {
 }
 
 func (m Model) Init() tea.Cmd {
-	cmds := []tea.Cmd{m.loadDiffCmd(), m.fetchUpstreamStatusCmd(), tickCmd()}
+	cmds := []tea.Cmd{m.loadDiffCmd(true), m.fetchUpstreamStatusCmd(), tickCmd()}
 	if m.mode == modeCommit {
 		cmds = append(cmds, textinput.Blink)
 	}
@@ -249,13 +252,21 @@ func (m Model) handleResize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 	m.width = msg.Width
 	m.height = msg.Height
 	m.viewport = viewport.New(m.diffWidth(), m.contentHeight())
+	m.lastDiffContent = "" // force re-apply after viewport recreation
 	m.ready = true
-	return m, m.loadDiffCmd()
+	return m, m.loadDiffCmd(true)
 }
 
 func (m Model) handleDiffLoaded(msg diffLoadedMsg) (tea.Model, tea.Cmd) {
-	if msg.index == m.cursor {
-		m.viewport.SetContent(msg.content)
+	if msg.index != m.cursor {
+		return m, nil
+	}
+	if msg.content == m.lastDiffContent {
+		return m, nil
+	}
+	m.lastDiffContent = msg.content
+	m.viewport.SetContent(msg.content)
+	if msg.resetScroll {
 		m.viewport.GotoTop()
 	}
 	return m, nil
@@ -263,18 +274,19 @@ func (m Model) handleDiffLoaded(msg diffLoadedMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) handleFilesRefreshed(msg filesRefreshedMsg) (tea.Model, tea.Cmd) {
 	if filesEqual(m.files, msg.files) {
-		return m, m.loadDiffCmd()
+		return m, m.loadDiffCmd(false)
 	}
 	m.files = msg.files
 	if m.cursor >= len(m.files) {
 		m.cursor = max(0, len(m.files)-1)
 	}
 	m.prevCurs = -1
+	m.lastDiffContent = ""
 	if len(m.files) == 0 {
 		m.viewport.SetContent("")
 		return m, nil
 	}
-	return m, m.loadDiffCmd()
+	return m, m.loadDiffCmd(true)
 }
 
 func (m Model) handleCommitDone(msg commitDoneMsg) (tea.Model, tea.Cmd) {
@@ -453,7 +465,8 @@ func (m Model) updateFileListMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "v":
 		m.splitDiff = !m.splitDiff
 		m.prevCurs = -1
-		return m, tea.Batch(m.loadDiffCmd(), m.saveSplitPrefCmd())
+		m.lastDiffContent = ""
+		return m, tea.Batch(m.loadDiffCmd(true), m.saveSplitPrefCmd())
 	case "F":
 		if m.upstream.Upstream == "" {
 			m.statusMsg = "no upstream configured"
@@ -464,7 +477,7 @@ func (m Model) updateFileListMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.cursor != m.prevCurs {
 		m.prevCurs = m.cursor
-		return m, m.loadDiffCmd()
+		return m, m.loadDiffCmd(true)
 	}
 	return m, nil
 }
@@ -493,7 +506,8 @@ func (m Model) updateDiffMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "v":
 		m.splitDiff = !m.splitDiff
 		m.prevCurs = -1
-		return m, tea.Batch(m.loadDiffCmd(), m.saveSplitPrefCmd())
+		m.lastDiffContent = ""
+		return m, tea.Batch(m.loadDiffCmd(true), m.saveSplitPrefCmd())
 	}
 	var cmd tea.Cmd
 	m.viewport, cmd = m.viewport.Update(msg)
@@ -623,7 +637,7 @@ func (m Model) nextFile() (tea.Model, tea.Cmd) {
 	if m.cursor < len(m.files)-1 {
 		m.cursor++
 		m.prevCurs = m.cursor
-		return m, m.loadDiffCmd()
+		return m, m.loadDiffCmd(true)
 	}
 	return m, nil
 }
@@ -632,13 +646,13 @@ func (m Model) prevFile() (tea.Model, tea.Cmd) {
 	if m.cursor > 0 {
 		m.cursor--
 		m.prevCurs = m.cursor
-		return m, m.loadDiffCmd()
+		return m, m.loadDiffCmd(true)
 	}
 	return m, nil
 }
 
 // Commands
-func (m Model) loadDiffCmd() tea.Cmd {
+func (m Model) loadDiffCmd(resetScroll bool) tea.Cmd {
 	if len(m.files) == 0 {
 		return nil
 	}
@@ -677,7 +691,7 @@ func (m Model) loadDiffCmd() tea.Cmd {
 				}
 			}
 		}
-		return diffLoadedMsg{content: content, index: idx}
+		return diffLoadedMsg{content: content, index: idx, resetScroll: resetScroll}
 	}
 }
 
