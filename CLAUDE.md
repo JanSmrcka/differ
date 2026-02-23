@@ -53,6 +53,13 @@ Version injected via ldflags at build (`-X .../cmd.version`), falls back to `deb
 - **Styles in one place**: all lipgloss styles in `styles.go`, derived from `theme.Theme`. No inline styles.
 - **Theme decoupled**: `internal/theme/` defines color values only. `styles.go` bridges to lipgloss.
 
+## Development Process
+
+- **New features and bug fixes**: always use TDD (red-green-refactor). Use `/tdd` skill.
+  1. Write failing test first
+  2. Implement minimal code to pass
+  3. Refactor while keeping tests green
+
 ## Code Style
 
 - No global mutable state. Pass config/theme through structs.
