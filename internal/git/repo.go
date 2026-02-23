@@ -24,10 +24,12 @@ const (
 
 // FileChange represents a changed file in the working tree or index.
 type FileChange struct {
-	Path    string
-	OldPath string // non-empty for renames
-	Status  FileStatus
-	Staged  bool
+	Path         string
+	OldPath      string // non-empty for renames
+	Status       FileStatus
+	Staged       bool
+	AddedLines   int
+	DeletedLines int
 }
 
 // UpstreamInfo holds ahead/behind counts relative to the upstream branch.
@@ -168,6 +170,11 @@ func (r *Repo) ChangedFiles(staged bool, ref string) ([]FileChange, error) {
 	if err != nil {
 		return nil, err
 	}
+	stagedStats, err := r.diffNumStat("--cached")
+	if err != nil {
+		return nil, err
+	}
+	applyStats(stagedFiles, stagedStats)
 	for i := range stagedFiles {
 		stagedFiles[i].Staged = true
 	}
@@ -182,6 +189,11 @@ func (r *Repo) ChangedFiles(staged bool, ref string) ([]FileChange, error) {
 	if err != nil {
 		return nil, err
 	}
+	unstagedStats, err := r.diffNumStat()
+	if err != nil {
+		return nil, err
+	}
+	applyStats(unstagedFiles, unstagedStats)
 	files = append(files, unstagedFiles...)
 
 	return files, nil
@@ -327,7 +339,7 @@ func (r *Repo) diffNameStatusEmptyTree() ([]FileChange, error) {
 
 // diffNameStatus runs git diff --name-status with optional extra args.
 func (r *Repo) diffNameStatus(extraArgs ...string) ([]FileChange, error) {
-	args := append([]string{"diff", "--name-status"}, extraArgs...)
+	args := append([]string{"diff", "--name-status", "--no-ext-diff", "--color=never"}, extraArgs...)
 	out, err := r.run(args...)
 	if err != nil {
 		return nil, err
@@ -335,13 +347,95 @@ func (r *Repo) diffNameStatus(extraArgs ...string) ([]FileChange, error) {
 	return parseNameStatus(out), nil
 }
 
-// changedFilesRef returns files changed compared to a ref.
-func (r *Repo) changedFilesRef(ref string) ([]FileChange, error) {
-	out, err := r.run("diff", "--name-status", ref)
+func (r *Repo) diffNumStat(extraArgs ...string) (map[string]lineStats, error) {
+	args := append([]string{"diff", "--numstat", "--no-ext-diff", "--color=never"}, extraArgs...)
+	out, err := r.run(args...)
 	if err != nil {
 		return nil, err
 	}
-	return parseNameStatus(out), nil
+	return parseNumStat(out), nil
+}
+
+// changedFilesRef returns files changed compared to a ref.
+func (r *Repo) changedFilesRef(ref string) ([]FileChange, error) {
+	out, err := r.run("diff", "--name-status", "--no-ext-diff", "--color=never", ref)
+	if err != nil {
+		return nil, err
+	}
+	files := parseNameStatus(out)
+	stats, err := r.diffNumStat(ref)
+	if err != nil {
+		return nil, err
+	}
+	applyStats(files, stats)
+	return files, nil
+}
+
+type lineStats struct {
+	added   int
+	deleted int
+}
+
+func parseNumStat(out string) map[string]lineStats {
+	stats := make(map[string]lineStats)
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		if line == "" {
+			continue
+		}
+		parts := strings.Split(line, "\t")
+		if len(parts) < 3 {
+			continue
+		}
+		path := parseNumStatPath(parts[len(parts)-1])
+		added := parseNumStatInt(parts[0])
+		deleted := parseNumStatInt(parts[1])
+		stats[path] = lineStats{added: added, deleted: deleted}
+	}
+	return stats
+}
+
+func parseNumStatPath(path string) string {
+	if !strings.Contains(path, " => ") {
+		return path
+	}
+	if strings.Contains(path, "{") && strings.Contains(path, "}") {
+		open := strings.Index(path, "{")
+		close := strings.LastIndex(path, "}")
+		if open >= 0 && close > open {
+			inside := path[open+1 : close]
+			parts := strings.SplitN(inside, " => ", 2)
+			if len(parts) == 2 {
+				return path[:open] + parts[1] + path[close+1:]
+			}
+		}
+	}
+	parts := strings.SplitN(path, " => ", 2)
+	if len(parts) == 2 {
+		return parts[1]
+	}
+	return path
+}
+
+func parseNumStatInt(s string) int {
+	if s == "-" {
+		return 0
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return 0
+	}
+	return n
+}
+
+func applyStats(files []FileChange, stats map[string]lineStats) {
+	for i := range files {
+		st, ok := stats[files[i].Path]
+		if !ok {
+			continue
+		}
+		files[i].AddedLines = st.added
+		files[i].DeletedLines = st.deleted
+	}
 }
 
 // parseNameStatus parses git diff --name-status output.

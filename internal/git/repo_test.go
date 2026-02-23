@@ -150,6 +150,23 @@ func TestParseLog(t *testing.T) {
 	}
 }
 
+func TestParseNumStat(t *testing.T) {
+	t.Parallel()
+	got := parseNumStat("12\t3\tfile.go\n-\t-\tbinary.dat\n5\t2\told/name.go => new/name.go\n7\t1\tsrc/{old => new}/name.go")
+	if got["file.go"].added != 12 || got["file.go"].deleted != 3 {
+		t.Fatalf("file.go stats mismatch: %+v", got["file.go"])
+	}
+	if got["binary.dat"].added != 0 || got["binary.dat"].deleted != 0 {
+		t.Fatalf("binary stats mismatch: %+v", got["binary.dat"])
+	}
+	if got["new/name.go"].added != 5 || got["new/name.go"].deleted != 2 {
+		t.Fatalf("rename stats mismatch: %+v", got["new/name.go"])
+	}
+	if got["src/new/name.go"].added != 7 || got["src/new/name.go"].deleted != 1 {
+		t.Fatalf("brace rename stats mismatch: %+v", got["src/new/name.go"])
+	}
+}
+
 // --- Integration tests ---
 
 func TestNewRepo_Valid(t *testing.T) {
@@ -213,6 +230,9 @@ func TestChangedFiles_Unstaged(t *testing.T) {
 	if files[0].Staged {
 		t.Error("file should not be staged")
 	}
+	if files[0].AddedLines == 0 {
+		t.Error("expected unstaged added lines > 0")
+	}
 }
 
 func TestChangedFiles_Staged(t *testing.T) {
@@ -230,6 +250,9 @@ func TestChangedFiles_Staged(t *testing.T) {
 	for _, f := range files {
 		if f.Staged && f.Path == "f.txt" {
 			found = true
+			if f.AddedLines == 0 {
+				t.Error("expected staged added lines > 0")
+			}
 		}
 	}
 	if !found {
@@ -269,6 +292,35 @@ func TestChangedFiles_Ref(t *testing.T) {
 	}
 	if len(files) != 1 {
 		t.Fatalf("expected 1 file, got %d", len(files))
+	}
+	if files[0].AddedLines == 0 {
+		t.Error("expected ref diff added lines > 0")
+	}
+}
+
+func TestChangedFiles_StagedRenameWithEdits_HasStats(t *testing.T) {
+	t.Parallel()
+	repo := setupTestRepo(t)
+	addCommit(t, repo, "old.txt", "one\n", "init")
+	gitRun(t, repo.Dir(), "mv", "old.txt", "new.txt")
+	writeFile(t, repo, "new.txt", "one\ntwo\n")
+	gitRun(t, repo.Dir(), "add", "-A")
+
+	files, err := repo.ChangedFiles(true, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 {
+		t.Fatalf("expected 1 staged file, got %d", len(files))
+	}
+	if files[0].Status != StatusRenamed {
+		t.Fatalf("expected renamed status, got %c", files[0].Status)
+	}
+	if files[0].Path != "new.txt" {
+		t.Fatalf("expected new path, got %q", files[0].Path)
+	}
+	if files[0].AddedLines == 0 {
+		t.Fatal("expected non-zero added lines for staged rename with edits")
 	}
 }
 
