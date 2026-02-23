@@ -150,6 +150,17 @@ func TestParseLog(t *testing.T) {
 	}
 }
 
+func TestParseNumStat(t *testing.T) {
+	t.Parallel()
+	got := parseNumStat("12\t3\tfile.go\n-\t-\tbinary.dat")
+	if got["file.go"].added != 12 || got["file.go"].deleted != 3 {
+		t.Fatalf("file.go stats mismatch: %+v", got["file.go"])
+	}
+	if got["binary.dat"].added != 0 || got["binary.dat"].deleted != 0 {
+		t.Fatalf("binary stats mismatch: %+v", got["binary.dat"])
+	}
+}
+
 // --- Integration tests ---
 
 func TestNewRepo_Valid(t *testing.T) {
@@ -213,6 +224,9 @@ func TestChangedFiles_Unstaged(t *testing.T) {
 	if files[0].Staged {
 		t.Error("file should not be staged")
 	}
+	if files[0].AddedLines == 0 {
+		t.Error("expected unstaged added lines > 0")
+	}
 }
 
 func TestChangedFiles_Staged(t *testing.T) {
@@ -230,6 +244,9 @@ func TestChangedFiles_Staged(t *testing.T) {
 	for _, f := range files {
 		if f.Staged && f.Path == "f.txt" {
 			found = true
+			if f.AddedLines == 0 {
+				t.Error("expected staged added lines > 0")
+			}
 		}
 	}
 	if !found {
@@ -269,6 +286,9 @@ func TestChangedFiles_Ref(t *testing.T) {
 	}
 	if len(files) != 1 {
 		t.Fatalf("expected 1 file, got %d", len(files))
+	}
+	if files[0].AddedLines == 0 {
+		t.Error("expected ref diff added lines > 0")
 	}
 }
 

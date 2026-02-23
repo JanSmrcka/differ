@@ -27,7 +27,7 @@ func TestBuildFileItems(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got := buildFileItems(tt.changes, tt.untracked)
+			got := buildFileItems(nil, tt.changes, tt.untracked)
 			if len(got) != tt.wantLen {
 				t.Errorf("len=%d, want %d", len(got), tt.wantLen)
 			}
@@ -256,6 +256,16 @@ func TestRenderBranchItem_Current(t *testing.T) {
 	item := m.renderBranchItem("main", false, true)
 	if !strings.Contains(item, "*") {
 		t.Error("current branch should have * prefix")
+	}
+}
+
+func TestRenderFileItem_ShowsStats(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t, nil)
+	item := fileItem{change: git.FileChange{Path: "main.go", Status: git.StatusModified, AddedLines: 12, DeletedLines: 3}}
+	out := m.renderFileItem(item, false)
+	if !strings.Contains(out, "+12 -3") {
+		t.Errorf("expected stats in file item, got %q", out)
 	}
 }
 

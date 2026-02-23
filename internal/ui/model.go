@@ -81,18 +81,18 @@ type Model struct {
 	stagedOnly bool
 	ref        string
 
-	mode        viewMode
-	cursor      int
-	prevCurs    int
-	viewport    viewport.Model
-	commitInput textinput.Model
-	statusMsg    string
+	mode          viewMode
+	cursor        int
+	prevCurs      int
+	viewport      viewport.Model
+	commitInput   textinput.Model
+	statusMsg     string
 	generatingMsg bool
-	splitDiff    bool
-	width        int
-	height       int
-	ready        bool
-	SelectedFile string // set on "open in editor" action, read after Run()
+	splitDiff     bool
+	width         int
+	height        int
+	ready         bool
+	SelectedFile  string // set on "open in editor" action, read after Run()
 
 	// Branch picker state
 	branches      []string
@@ -121,7 +121,7 @@ func NewModel(
 	stagedOnly bool,
 	ref string,
 ) Model {
-	files := buildFileItems(changes, untracked)
+	files := buildFileItems(repo, changes, untracked)
 
 	ti := textinput.New()
 	ti.Placeholder = "commit message..."
@@ -141,18 +141,36 @@ func NewModel(
 	}
 }
 
-func buildFileItems(changes []git.FileChange, untracked []string) []fileItem {
+func buildFileItems(repo *git.Repo, changes []git.FileChange, untracked []string) []fileItem {
 	var files []fileItem
 	for _, c := range changes {
 		files = append(files, fileItem{change: c})
 	}
 	for _, path := range untracked {
+		added := 0
+		if repo != nil {
+			raw, err := repo.ReadFileContent(path)
+			if err == nil {
+				added = countLines(raw)
+			}
+		}
 		files = append(files, fileItem{
-			change:    git.FileChange{Path: path, Status: git.StatusUntracked},
+			change:    git.FileChange{Path: path, Status: git.StatusUntracked, AddedLines: added, DeletedLines: 0},
 			untracked: true,
 		})
 	}
 	return files
+}
+
+func countLines(s string) int {
+	if s == "" {
+		return 0
+	}
+	count := strings.Count(s, "\n")
+	if !strings.HasSuffix(s, "\n") {
+		count++
+	}
+	return count
 }
 
 func filesEqual(a, b []fileItem) bool {
@@ -674,7 +692,7 @@ func (m Model) refreshFilesCmd() tea.Cmd {
 		if !stagedOnly && ref == "" {
 			untracked, _ = repo.UntrackedFiles()
 		}
-		return filesRefreshedMsg{files: buildFileItems(files, untracked)}
+		return filesRefreshedMsg{files: buildFileItems(repo, files, untracked)}
 	}
 }
 
@@ -684,7 +702,7 @@ func (m Model) buildRefreshedFiles() filesRefreshedMsg {
 	if !m.stagedOnly && m.ref == "" {
 		untracked, _ = m.repo.UntrackedFiles()
 	}
-	return filesRefreshedMsg{files: buildFileItems(files, untracked)}
+	return filesRefreshedMsg{files: buildFileItems(m.repo, files, untracked)}
 }
 
 type savePrefDoneMsg struct{ err error }
@@ -858,13 +876,18 @@ func (m Model) renderFileItem(f fileItem, selected bool) string {
 	}
 
 	statusStyled := m.styleStatus(status, f.change.Status)
+	stats := fmt.Sprintf("+%d -%d", f.change.AddedLines, f.change.DeletedLines)
 	name := filepath.Base(f.change.Path)
 	if f.change.OldPath != "" {
 		name = filepath.Base(f.change.OldPath) + " → " + filepath.Base(f.change.Path)
 	}
-	name = truncatePath(name, fileListWidth-10)
+	nameMaxW := fileListWidth - lipgloss.Width(staged) - lipgloss.Width(status) - 1 - lipgloss.Width(stats) - 1
+	if nameMaxW < 1 {
+		nameMaxW = 1
+	}
+	name = truncatePath(name, nameMaxW)
 
-	line := fmt.Sprintf("%s%s %s", staged, statusStyled, name)
+	line := fmt.Sprintf("%s%s %s %s", staged, statusStyled, name, stats)
 	if selected {
 		return m.styles.FileSelected.Width(fileListWidth).Render(line)
 	}
