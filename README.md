@@ -2,6 +2,10 @@
 
 Terminal UI git diff viewer built with Go and Bubble Tea. Two-panel layout: file list + syntax-highlighted diff preview.
 
+<p align="center">
+  <img src="./assets/preview.png" alt="differ preview" width="800" />
+</p>
+
 ## Install
 
 ```bash
@@ -53,17 +57,17 @@ differ commit     # review staged + commit
 
 ### Diff View
 
-| Key         | Action            |
-| ----------- | ----------------- |
-| `j/k`       | scroll            |
-| `d/u`       | half page down/up |
-| `g/G`       | top/bottom        |
-| `n/p`       | next/prev file    |
-| `tab`       | stage/unstage     |
-| `b`         | open branch picker|
-| `v`         | toggle split diff |
-| `e`         | open in editor    |
-| `esc` / `h` | back to file list |
+| Key         | Action             |
+| ----------- | ------------------ |
+| `j/k`       | scroll             |
+| `d/u`       | half page down/up  |
+| `g/G`       | top/bottom         |
+| `n/p`       | next/prev file     |
+| `tab`       | stage/unstage      |
+| `b`         | open branch picker |
+| `v`         | toggle split diff  |
+| `e`         | open in editor     |
+| `esc` / `h` | back to file list  |
 
 ### Commit Mode
 
@@ -74,13 +78,13 @@ differ commit     # review staged + commit
 
 ### Branch Picker
 
-| Key            | Action                    |
-| -------------- | ------------------------- |
-| type           | filter branches           |
-| `↑/↓` / `^j/^k` | navigate                |
-| `enter`        | switch branch             |
-| `ctrl+n`       | create new branch         |
-| `esc`          | clear filter / close      |
+| Key             | Action               |
+| --------------- | -------------------- |
+| type            | filter branches      |
+| `↑/↓` / `^j/^k` | navigate             |
+| `enter`         | switch branch        |
+| `ctrl+n`        | create new branch    |
+| `esc`           | clear filter / close |
 
 ## AI Commit Messages
 
