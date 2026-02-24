@@ -118,17 +118,75 @@ func TestFilesEqual_OneEmpty(t *testing.T) {
 func TestContentHeight(t *testing.T) {
 	t.Parallel()
 	m := Model{height: 30}
-	if got := m.contentHeight(); got != 27 {
-		t.Errorf("contentHeight()=%d, want 27", got)
+	// height - 4: cards add top+bottom border (+2), header removed (-1), net +1
+	if got := m.contentHeight(); got != 26 {
+		t.Errorf("contentHeight()=%d, want 26", got)
 	}
 }
 
 func TestDiffWidth(t *testing.T) {
 	t.Parallel()
 	m := Model{width: 120}
-	want := 120 - fileListWidth - 1
+	// width - fileListWidth(35) - 2(file card borders) - 1(gap) - 2(diff card borders)
+	want := 120 - 40
 	if got := m.diffWidth(); got != want {
 		t.Errorf("diffWidth()=%d, want %d", got, want)
+	}
+}
+
+func TestRenderCard_Dimensions(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t, nil)
+	content := "line1\nline2\nline3"
+	card := m.renderCard("Title", content, true, 20, 5)
+	lines := strings.Split(card, "\n")
+	// h=5 content lines + 2 border lines (top + bottom) = 7
+	if len(lines) != 7 {
+		t.Errorf("card line count=%d, want 7", len(lines))
+	}
+}
+
+func TestRenderCard_Title(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t, nil)
+	card := m.renderCard("MyTitle", "content", false, 20, 3)
+	firstLine := strings.Split(card, "\n")[0]
+	if !strings.Contains(firstLine, "MyTitle") {
+		t.Errorf("first line should contain title, got %q", firstLine)
+	}
+}
+
+func TestRenderCard_BorderChars(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t, nil)
+	card := m.renderCard("T", "x", false, 10, 2)
+	for _, ch := range []string{"╭", "╮", "╰", "╯", "│"} {
+		if !strings.Contains(card, ch) {
+			t.Errorf("card missing border char %q", ch)
+		}
+	}
+}
+
+func TestRenderCard_FocusedVsUnfocused(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t, nil)
+	// Both should render without panic and contain border chars
+	focused := m.renderCard("T", "x", true, 10, 2)
+	unfocused := m.renderCard("T", "x", false, 10, 2)
+	for _, card := range []string{focused, unfocused} {
+		if !strings.Contains(card, "╭") {
+			t.Error("card should contain border chars")
+		}
+	}
+}
+
+func TestRenderCard_EmptyTitle(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t, nil)
+	card := m.renderCard("", "content", false, 15, 2)
+	firstLine := strings.Split(card, "\n")[0]
+	if !strings.Contains(firstLine, "╭") || !strings.Contains(firstLine, "╮") {
+		t.Error("card with empty title should still have border corners")
 	}
 }
 
@@ -378,14 +436,14 @@ func TestBranchListScroll(t *testing.T) {
 	t.Parallel()
 	m := newTestModel(t, nil)
 	m.mode = modeBranchPicker
-	// height=30, contentHeight=27, itemH=26 (minus filter bar).
+	// height=30, contentHeight=26, itemH=25 (minus filter bar).
 	branches := make([]string, 40)
 	for i := range branches {
 		branches[i] = fmt.Sprintf("branch-%02d", i)
 	}
 	m.branches = branches
 	m.branchCursor = 35
-	m.branchOffset = 35 - 26 + 1 // 10
+	m.branchOffset = 35 - 25 + 1 // 11
 
 	out := m.renderBranchList(m.contentHeight())
 	if !strings.Contains(out, "branch-35") {
@@ -739,7 +797,7 @@ func TestRenderBranchCreateBar(t *testing.T) {
 
 func TestView_BranchCreating_ShowsCreateBar(t *testing.T) {
 	t.Parallel()
-	// View() calls renderHeader() which needs a real repo for BranchName()
+	// View() calls fileCardTitle() which needs a real repo for BranchName()
 	// Use renderBranchCreateBar() directly to test view integration
 	m := newTestModel(t, nil)
 	m.mode = modeBranchPicker
