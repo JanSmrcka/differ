@@ -59,7 +59,7 @@ func (m LogModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.viewport = viewport.New(m.width, m.height-2)
+		m.viewport = viewport.New(m.width-2, m.height-4)
 		m.ready = true
 	case logLoadedMsg:
 		m.commits = msg.commits
@@ -189,10 +189,12 @@ func (m LogModel) View() string {
 }
 
 func (m LogModel) viewList() string {
-	mainH := m.height - 2
+	contentH := m.height - 4 // card borders + status + help
+	cardW := m.width - 2     // inner width (card adds 2 for borders)
+
 	var b strings.Builder
 	for i, c := range m.commits {
-		if i >= mainH {
+		if i >= contentH {
 			break
 		}
 		line := m.renderCommitLine(c, i == m.cursor)
@@ -202,11 +204,11 @@ func (m LogModel) viewList() string {
 		}
 	}
 
-	main := lipgloss.NewStyle().Width(m.width).Height(mainH).Render(b.String())
+	card := renderCard(m.theme, "Commits", b.String(), true, cardW, contentH)
 	status := m.styles.StatusBar.Width(m.width).Render(
 		fmt.Sprintf(" %d commits", len(m.commits)))
 	help := m.renderLogHelp(false)
-	return lipgloss.JoinVertical(lipgloss.Left, main, status, help)
+	return lipgloss.JoinVertical(lipgloss.Left, card, status, help)
 }
 
 func (m LogModel) renderCommitLine(c git.Commit, selected bool) string {
@@ -220,14 +222,16 @@ func (m LogModel) renderCommitLine(c git.Commit, selected bool) string {
 }
 
 func (m LogModel) viewDiff() string {
-	mainH := m.height - 2
-	diff := lipgloss.NewStyle().Width(m.width).Height(mainH).Render(m.viewport.View())
+	contentH := m.height - 4
+	cardW := m.width - 2
 
 	c := m.commits[m.cursor]
+	title := c.Short + " " + c.Subject
+	card := renderCard(m.theme, title, m.viewport.View(), true, cardW, contentH)
 	status := m.styles.StatusBar.Width(m.width).Render(
 		fmt.Sprintf(" %s  %s — %s", c.Short, c.Subject, c.Author))
 	help := m.renderLogHelp(true)
-	return lipgloss.JoinVertical(lipgloss.Left, diff, status, help)
+	return lipgloss.JoinVertical(lipgloss.Left, card, status, help)
 }
 
 func (m LogModel) renderLogHelp(inDiff bool) string {

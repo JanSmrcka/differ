@@ -927,9 +927,9 @@ func (m Model) generateCommitMsgCmd() tea.Cmd {
 	}
 }
 
-// Layout: header(1) + content + status(1) + help(1) = height
-func (m Model) contentHeight() int { return m.height - 3 }
-func (m Model) diffWidth() int     { return m.width - fileListWidth - 1 }
+// Layout: cards(content+2 border) + status(1) + help(1) = height
+func (m Model) contentHeight() int { return m.height - 4 }
+func (m Model) diffWidth() int     { return m.width - fileListWidth - 2 - 1 - 2 }
 
 const (
 	minWidth  = 60
@@ -946,77 +946,108 @@ func (m Model) View() string {
 			m.width, m.height, minWidth, minHeight)
 	}
 
-	header := m.renderHeader()
 	contentH := m.contentHeight()
 
-	var fileList string
+	var fileContent string
 	if m.mode == modeBranchPicker {
-		fileList = m.renderBranchList(contentH)
+		fileContent = m.renderBranchList(contentH)
 	} else {
-		fileList = m.renderFileList(contentH)
+		fileContent = m.renderFileList(contentH)
 	}
-	filePanel := lipgloss.NewStyle().
-		Width(fileListWidth).Height(contentH).
-		Render(fileList)
+	fileCard := m.renderCard(
+		m.fileCardTitle(), fileContent,
+		m.mode == modeFileList || m.mode == modeBranchPicker,
+		fileListWidth, contentH,
+	)
 
-	border := m.renderBorder(contentH)
-	diffPanel := lipgloss.NewStyle().
-		Width(m.diffWidth()).Height(contentH).
-		Render(m.viewport.View())
+	diffCard := m.renderCard(
+		m.diffCardTitle(), m.viewport.View(),
+		m.mode == modeDiff,
+		m.diffWidth(), contentH,
+	)
 
-	main := lipgloss.JoinHorizontal(lipgloss.Top, filePanel, border, diffPanel)
+	main := lipgloss.JoinHorizontal(lipgloss.Top, fileCard, " ", diffCard)
 	statusBar := m.renderStatusBar()
 
 	if m.mode == modeCommit {
-		return lipgloss.JoinVertical(lipgloss.Left, header, main, statusBar, m.renderCommitBar())
+		return lipgloss.JoinVertical(lipgloss.Left, main, statusBar, m.renderCommitBar())
 	}
 	if m.mode == modeBranchPicker && m.branchCreating {
-		return lipgloss.JoinVertical(lipgloss.Left, header, main, statusBar, m.renderBranchCreateBar())
+		return lipgloss.JoinVertical(lipgloss.Left, main, statusBar, m.renderBranchCreateBar())
 	}
 	helpBar := m.renderHelpBar()
-	return lipgloss.JoinVertical(lipgloss.Left, header, main, statusBar, helpBar)
+	return lipgloss.JoinVertical(lipgloss.Left, main, statusBar, helpBar)
 }
 
-func (m Model) renderHeader() string {
-	branch := m.repo.BranchName()
-	left := m.styles.HeaderBar.Render(" " + branch)
+func (m Model) renderCard(title, content string, focused bool, w, h int) string {
+	return renderCard(m.theme, title, content, focused, w, h)
+}
 
-	mode := ""
-	if m.ref != "" {
-		mode = m.styles.Accent.Render("  ref:" + m.ref)
-	} else if m.stagedOnly {
-		mode = m.styles.Accent.Render("  staged only")
+// renderCard builds a bordered card with Unicode box chars.
+// Focused cards use AccentFg, unfocused use BorderFg.
+func renderCard(t theme.Theme, title, content string, focused bool, w, h int) string {
+	borderColor := lipgloss.Color(t.BorderFg)
+	if focused {
+		borderColor = lipgloss.Color(t.AccentFg)
 	}
+	bs := lipgloss.NewStyle().Foreground(borderColor)
 
-	right := ""
-	if len(m.files) > 0 && m.cursor < len(m.files) {
-		f := m.files[m.cursor]
-		name := f.change.Path
-		if f.change.Staged {
-			name += " [staged]"
+	// Top border: ╭─ Title ───────╮
+	titleStr := ""
+	if title != "" {
+		titleStr = " " + title + " "
+	}
+	topFill := w - lipgloss.Width(titleStr) - 1 // -1: ╭─(2) + title + fill + ╮(1) = w+2
+	if topFill < 0 {
+		topFill = 0
+	}
+	top := bs.Render("╭─" + titleStr + strings.Repeat("─", topFill) + "╮")
+
+	// Content lines: │line│ (pad/truncate to w)
+	lines := strings.Split(content, "\n")
+	for len(lines) < h {
+		lines = append(lines, "")
+	}
+	cardBg := lipgloss.Color(t.CardBg)
+	var rows []string
+	for i := 0; i < h; i++ {
+		line := lines[i]
+		pad := w - lipgloss.Width(line)
+		if pad > 0 {
+			line += lipgloss.NewStyle().Background(cardBg).Render(strings.Repeat(" ", pad))
 		}
-		right = name
+		rows = append(rows, bs.Render("│")+line+bs.Render("│"))
 	}
 
-	gap := m.width - lipgloss.Width(left) - lipgloss.Width(mode) - lipgloss.Width(right) - 1
-	if gap < 0 {
-		gap = 0
-	}
+	// Bottom border: ╰───────────╯
+	bottom := bs.Render("╰" + strings.Repeat("─", w) + "╯")
 
-	bar := left + mode + strings.Repeat(" ", gap) + right + " "
-	return m.styles.StatusBar.Width(m.width).Render(bar)
+	return lipgloss.JoinVertical(lipgloss.Left, top, strings.Join(rows, "\n"), bottom)
 }
 
-func (m Model) renderBorder(height int) string {
-	border := strings.Repeat("│\n", height)
-	if len(border) > 0 {
-		border = border[:len(border)-1]
+func (m Model) fileCardTitle() string {
+	if m.mode == modeBranchPicker {
+		return "Branches"
 	}
-	style := m.styles.Border
-	if m.mode == modeDiff {
-		style = m.styles.BorderFocus
+	title := m.repo.BranchName()
+	if m.ref != "" {
+		title += " ref:" + m.ref
+	} else if m.stagedOnly {
+		title += " staged"
 	}
-	return style.Render(border)
+	return title
+}
+
+func (m Model) diffCardTitle() string {
+	if len(m.files) == 0 || m.cursor >= len(m.files) {
+		return ""
+	}
+	f := m.files[m.cursor]
+	name := f.change.Path
+	if f.change.Staged {
+		name += " [staged]"
+	}
+	return name
 }
 
 func (m Model) renderFileList(height int) string {
@@ -1035,27 +1066,33 @@ func (m Model) renderFileList(height int) string {
 
 func (m Model) renderFileItem(f fileItem, selected bool) string {
 	status := string(f.change.Status)
-	staged := "  "
+	stagedRaw := "  "
 	if f.change.Staged {
-		staged = m.styles.StagedIcon.Render("● ")
+		stagedRaw = "● "
 	}
 
-	statusStyled := m.styleStatus(status, f.change.Status)
 	stats := fmt.Sprintf("+%d -%d", f.change.AddedLines, f.change.DeletedLines)
 	name := filepath.Base(f.change.Path)
 	if f.change.OldPath != "" {
 		name = filepath.Base(f.change.OldPath) + " → " + filepath.Base(f.change.Path)
 	}
-	nameMaxW := fileListWidth - lipgloss.Width(staged) - lipgloss.Width(status) - 1 - lipgloss.Width(stats) - 1
+	nameMaxW := fileListWidth - lipgloss.Width(stagedRaw) - lipgloss.Width(status) - 1 - lipgloss.Width(stats) - 1
 	if nameMaxW < 1 {
 		nameMaxW = 1
 	}
 	name = truncatePath(name, nameMaxW)
 
-	line := fmt.Sprintf("%s%s %s %s", staged, statusStyled, name, stats)
 	if selected {
+		// Plain text only — no inner ANSI, so FileSelected color applies uniformly
+		line := fmt.Sprintf("%s%s %s %s", stagedRaw, status, name, stats)
 		return m.styles.FileSelected.Width(fileListWidth).Render(line)
 	}
+	staged := stagedRaw
+	if f.change.Staged {
+		staged = m.styles.StagedIcon.Render("● ")
+	}
+	statusStyled := m.styleStatus(status, f.change.Status)
+	line := fmt.Sprintf("%s%s %s %s", staged, statusStyled, name, stats)
 	return m.styles.FileItem.Width(fileListWidth).Render(line)
 }
 

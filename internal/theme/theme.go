@@ -35,6 +35,9 @@ type Theme struct {
 	RenamedFg  string
 	UntrackedFg string
 
+	// Card
+	CardBg string
+
 	// Chrome
 	BorderFg    string
 	StatusBarBg string
@@ -55,86 +58,90 @@ var Themes = map[string]Theme{
 	"light": LightTheme(),
 }
 
-// DarkTheme returns a GitHub Dark-inspired theme.
+// DarkTheme returns a Catppuccin Mocha-inspired pastel dark theme.
 func DarkTheme() Theme {
 	return Theme{
-		Bg: "#0d1117",
-		Fg: "#c9d1d9",
+		Bg: "#1e1e2e",
+		Fg: "#e0e0f0",
 
-		AddedFg:   "#3fb950",
-		AddedBg:   "#12261e",
-		RemovedFg: "#f85149",
-		RemovedBg: "#2d1214",
-		HunkFg:    "#58a6ff",
+		AddedFg:   "#a6e3a1",
+		AddedBg:   "#1e3a2c",
+		RemovedFg: "#f38ba8",
+		RemovedBg: "#3b1d2e",
+		HunkFg:    "#6c5ce7",
 
-		LineNumFg:        "#484f58",
-		LineNumAddedFg:   "#2ea043",
-		LineNumRemovedFg: "#da3633",
+		LineNumFg:        "#585b70",
+		LineNumAddedFg:   "#a6e3a1",
+		LineNumRemovedFg: "#f38ba8",
 
-		HeaderBg: "#161b22",
-		HeaderFg: "#58a6ff",
+		HeaderBg: "#282a3a",
+		HeaderFg: "#c678dd",
 
-		HunkBg: "#161b22",
+		HunkBg: "#252636",
 
-		SelectedBg: "#161b22",
-		SelectedFg: "#f0f6fc",
-		StagedFg:   "#3fb950",
-		ModifiedFg: "#d29922",
-		AddedFileFg:  "#3fb950",
-		DeletedFg:  "#f85149",
-		RenamedFg:  "#d2a8ff",
-		UntrackedFg: "#8b949e",
+		CardBg: "#232336",
 
-		BorderFg:    "#30363d",
-		StatusBarBg: "#161b22",
-		StatusBarFg: "#8b949e",
-		HelpKeyFg:   "#58a6ff",
-		HelpDescFg:  "#8b949e",
+		SelectedBg:  "#3d2b5a",
+		SelectedFg:  "#c678dd",
+		StagedFg:    "#50fa7b",
+		ModifiedFg:  "#fab387",
+		AddedFileFg: "#a6e3a1",
+		DeletedFg:   "#f38ba8",
+		RenamedFg:   "#cba6f7",
+		UntrackedFg: "#7f849c",
 
-		AccentFg: "#58a6ff",
+		BorderFg:    "#6c5ce7",
+		StatusBarBg: "#1a1a2e",
+		StatusBarFg: "#b4befe",
+		HelpKeyFg:   "#c678dd",
+		HelpDescFg:  "#9399b2",
 
-		ChromaStyle: "github-dark",
+		AccentFg: "#c678dd",
+
+		ChromaStyle: "catppuccin-mocha",
 	}
 }
 
-// LightTheme returns a GitHub Light-inspired theme.
+// LightTheme returns a Catppuccin Latte-inspired pastel light theme.
 func LightTheme() Theme {
 	return Theme{
-		Bg: "#ffffff",
-		Fg: "#1f2328",
+		Bg: "#eff1f5",
+		Fg: "#4c4f69",
 
-		AddedFg:   "#1a7f37",
-		AddedBg:   "#dafbe1",
-		RemovedFg: "#cf222e",
-		RemovedBg: "#ffebe9",
-		HunkFg:    "#0969da",
+		AddedFg:   "#1a7f2a",
+		AddedBg:   "#e6f5e4",
+		RemovedFg: "#d20f39",
+		RemovedBg: "#fde4e8",
+		HunkFg:    "#1e66f5",
 
-		LineNumFg:        "#8c959f",
-		LineNumAddedFg:   "#1a7f37",
-		LineNumRemovedFg: "#cf222e",
+		LineNumFg:        "#9ca0b0",
+		LineNumAddedFg:   "#1a7f2a",
+		LineNumRemovedFg: "#d20f39",
 
-		HeaderBg: "#f6f8fa",
-		HeaderFg: "#0969da",
+		HeaderBg: "#e6e9ef",
+		HeaderFg: "#8839ef",
 
-		HunkBg: "#f6f8fa",
+		HunkBg: "#e6e9ef",
 
-		SelectedBg: "#f6f8fa",
-		SelectedFg: "#1f2328",
-		StagedFg:   "#1a7f37",
-		ModifiedFg: "#9a6700",
-		AddedFileFg:  "#1a7f37",
-		DeletedFg:  "#cf222e",
-		RenamedFg:  "#8250df",
-		UntrackedFg: "#656d76",
+		CardBg: "#e6e9ef",
 
-		BorderFg:    "#d0d7de",
-		StatusBarBg: "#f6f8fa",
-		StatusBarFg: "#656d76",
-		HelpKeyFg:   "#0969da",
-		HelpDescFg:  "#656d76",
+		SelectedBg:  "#d4c4f0",
+		SelectedFg:  "#4c4f69",
+		StagedFg:    "#087f23",
+		ModifiedFg:  "#fe640b",
+		AddedFileFg: "#1a7f2a",
+		DeletedFg:   "#d20f39",
+		RenamedFg:   "#8839ef",
+		UntrackedFg: "#8c8fa1",
 
-		AccentFg: "#0969da",
+		BorderFg:    "#8839ef",
+		StatusBarBg: "#e6e9ef",
+		StatusBarFg: "#6c6f85",
+		HelpKeyFg:   "#8839ef",
+		HelpDescFg:  "#8c8fa1",
 
-		ChromaStyle: "github",
+		AccentFg: "#8839ef",
+
+		ChromaStyle: "catppuccin-latte",
 	}
 }

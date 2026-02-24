@@ -33,10 +33,9 @@ type Styles struct {
 	// Chrome
 	HeaderBar   lipgloss.Style
 	StatusBar   lipgloss.Style
-	HelpKey     lipgloss.Style
-	HelpDesc    lipgloss.Style
-	Border      lipgloss.Style
-	BorderFocus lipgloss.Style
+	HelpKey  lipgloss.Style
+	HelpDesc lipgloss.Style
+	CardBg   lipgloss.Style
 
 	// Commit input
 	CommitInput lipgloss.Style
@@ -53,7 +52,6 @@ func NewStyles(t theme.Theme) Styles {
 			PaddingLeft(1),
 		FileSelected: lipgloss.NewStyle().
 			Foreground(lipgloss.Color(t.SelectedFg)).
-			Background(lipgloss.Color(t.SelectedBg)).
 			Bold(true).
 			PaddingLeft(1),
 		StagedIcon: lipgloss.NewStyle().
@@ -84,8 +82,7 @@ func NewStyles(t theme.Theme) Styles {
 		DiffContext: lipgloss.NewStyle().
 			Foreground(lipgloss.Color(t.Fg)),
 		DiffHunkHeader: lipgloss.NewStyle().
-			Foreground(lipgloss.Color(t.HunkFg)).
-			Faint(true),
+			Foreground(lipgloss.Color(t.HunkFg)),
 		DiffLineNum: lipgloss.NewStyle().
 			Foreground(lipgloss.Color(t.LineNumFg)),
 		DiffLineNumAdded: lipgloss.NewStyle().
@@ -106,13 +103,12 @@ func NewStyles(t theme.Theme) Styles {
 			Foreground(lipgloss.Color(t.StatusBarFg)),
 		HelpKey: lipgloss.NewStyle().
 			Foreground(lipgloss.Color(t.HelpKeyFg)).
-			Bold(true),
+			Bold(true).
+			Underline(true),
 		HelpDesc: lipgloss.NewStyle().
 			Foreground(lipgloss.Color(t.HelpDescFg)),
-		Border: lipgloss.NewStyle().
-			Foreground(lipgloss.Color(t.BorderFg)),
-		BorderFocus: lipgloss.NewStyle().
-			Foreground(lipgloss.Color(t.AccentFg)),
+		CardBg: lipgloss.NewStyle().
+			Background(lipgloss.Color(t.CardBg)),
 
 		CommitInput: lipgloss.NewStyle().
 			Foreground(lipgloss.Color(t.Fg)),

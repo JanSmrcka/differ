@@ -338,7 +338,7 @@ func RenderSplitDiff(parsed ParsedDiff, filename string, styles Styles, t theme.
 		left := renderSplitSide(sl.Left, filename, styles, t, panelW, true)
 		right := renderSplitSide(sl.Right, filename, styles, t, panelW, false)
 		b.WriteString(left)
-		b.WriteString(styles.Border.Render("│"))
+		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(t.BorderFg)).Render("│"))
 		b.WriteString(right)
 		b.WriteByte('\n')
 	}
@@ -356,7 +356,7 @@ func RenderNewFileSplit(content, filename string, styles Styles, t theme.Theme, 
 		left := renderSplitSide(nil, filename, styles, t, panelW, true)
 		right := renderSplitSide(&dl, filename, styles, t, panelW, false)
 		b.WriteString(left)
-		b.WriteString(styles.Border.Render("│"))
+		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(t.BorderFg)).Render("│"))
 		b.WriteString(right)
 		b.WriteByte('\n')
 	}
