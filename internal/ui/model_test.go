@@ -855,3 +855,132 @@ func TestPush_NoUpstream_ConfirmPushes(t *testing.T) {
 		t.Error("expected push cmd")
 	}
 }
+
+func TestEnterCommitMode_NoStaged_SetsStatus(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t, []fileItem{{change: git.FileChange{Path: "a.go", Staged: false}}})
+
+	result, cmd := m.enterCommitMode()
+	rm := result.(Model)
+
+	if cmd != nil {
+		t.Error("expected no cmd")
+	}
+	if rm.mode != modeFileList {
+		t.Errorf("mode=%v, want file list", rm.mode)
+	}
+	if !strings.Contains(rm.statusMsg, "no staged files") {
+		t.Errorf("statusMsg=%q", rm.statusMsg)
+	}
+}
+
+func TestEnterCommitMode_WithStaged_EntersCommitMode(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t, []fileItem{{change: git.FileChange{Path: "a.go", Staged: true}}})
+
+	result, cmd := m.enterCommitMode()
+	rm := result.(Model)
+
+	if rm.mode != modeCommit {
+		t.Errorf("mode=%v, want commit", rm.mode)
+	}
+	if !rm.generatingMsg {
+		t.Error("generatingMsg should be true")
+	}
+	if cmd == nil {
+		t.Error("expected batch cmd")
+	}
+}
+
+func TestUpdateCommitMode_EnterEmpty_ShowsError(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t, nil)
+	m.mode = modeCommit
+
+	result, cmd := m.updateCommitMode(tea.KeyMsg{Type: tea.KeyEnter})
+	rm := result.(Model)
+
+	if cmd != nil {
+		t.Error("expected no cmd")
+	}
+	if !strings.Contains(rm.statusMsg, "empty commit message") {
+		t.Errorf("statusMsg=%q", rm.statusMsg)
+	}
+}
+
+func TestToggleStage_DisabledInStagedOnlyOrRef(t *testing.T) {
+	t.Parallel()
+	files := []fileItem{{change: git.FileChange{Path: "a.go", Staged: false}}}
+
+	m1 := newTestModel(t, files)
+	m1.stagedOnly = true
+	_, cmd1 := m1.toggleStage()
+	if cmd1 != nil {
+		t.Error("toggleStage should be disabled for stagedOnly")
+	}
+
+	m2 := newTestModel(t, files)
+	m2.ref = "main"
+	_, cmd2 := m2.toggleStage()
+	if cmd2 != nil {
+		t.Error("toggleStage should be disabled for ref mode")
+	}
+}
+
+func TestStageAll_DisabledInRefMode(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t, nil)
+	m.ref = "main"
+
+	_, cmd := m.stageAll()
+	if cmd != nil {
+		t.Error("stageAll should be disabled in ref mode")
+	}
+}
+
+func TestHandleFilesRefreshed_EmptyClearsViewport(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t, []fileItem{{change: git.FileChange{Path: "a.go"}}})
+	m.viewport.SetContent("old")
+
+	result, cmd := m.handleFilesRefreshed(filesRefreshedMsg{files: nil})
+	rm := result.(Model)
+
+	if cmd != nil {
+		t.Error("expected no cmd")
+	}
+	if rm.cursor != 0 {
+		t.Errorf("cursor=%d, want 0", rm.cursor)
+	}
+	if rm.viewport.View() != "" {
+		t.Errorf("viewport=%q, want empty", rm.viewport.View())
+	}
+}
+
+func TestHandleTick_SkipsPollingDuringCommit(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t, nil)
+	m.mode = modeCommit
+
+	_, cmd := m.handleTick()
+	if cmd == nil {
+		t.Fatal("expected tick cmd")
+	}
+	msg := cmd()
+	if _, ok := msg.(tickMsg); !ok {
+		t.Errorf("msg type=%T, want tickMsg", msg)
+	}
+}
+
+func TestPushConfirm_ResetOnNonPKey(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t, nil)
+	m.mode = modeFileList
+	m.pushConfirm = true
+
+	result, _ := m.updateFileListMode(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	rm := result.(Model)
+	if rm.pushConfirm {
+		t.Error("pushConfirm should reset on non-P key")
+	}
+}
