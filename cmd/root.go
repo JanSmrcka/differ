@@ -95,7 +95,10 @@ func runDiff(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	cfg := config.Load()
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
 	t := resolveTheme(cfg)
 	styles := ui.NewStyles(t)
 
@@ -149,7 +152,10 @@ func runCommit(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	cfg := config.Load()
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
 	t := resolveTheme(cfg)
 	styles := ui.NewStyles(t)
 
@@ -170,7 +176,10 @@ func runLog(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	cfg := config.Load()
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
 	t := resolveTheme(cfg)
 	styles := ui.NewStyles(t)
 

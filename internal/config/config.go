@@ -2,6 +2,8 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 )
@@ -26,23 +28,29 @@ func Default() Config {
 
 // Load reads config from ~/.config/differ/config.json.
 // Returns defaults if file doesn't exist.
-func Load() Config {
+func Load() (Config, error) {
 	path, err := configPath()
 	if err != nil {
-		return Default()
+		return Default(), fmt.Errorf("could not resolve config path: %w", err)
 	}
 	return LoadFrom(path)
 }
 
-// LoadFrom reads config from the given path. Returns defaults on error.
-func LoadFrom(path string) Config {
+// LoadFrom reads config from the given path.
+// Returns defaults without error if file doesn't exist.
+func LoadFrom(path string) (Config, error) {
 	cfg := Default()
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return cfg
+		if errors.Is(err, os.ErrNotExist) {
+			return cfg, nil
+		}
+		return cfg, fmt.Errorf("could not read config file %q: %w", path, err)
 	}
-	_ = json.Unmarshal(data, &cfg)
-	return cfg
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return cfg, fmt.Errorf("invalid config file %q: %w; fix the JSON or remove the file to use defaults", path, err)
+	}
+	return cfg, nil
 }
 
 // Save writes config to ~/.config/differ/config.json.
