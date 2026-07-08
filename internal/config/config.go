@@ -27,7 +27,7 @@ func Default() Config {
 }
 
 // Load reads config from ~/.config/differ/config.json.
-// Returns defaults if file doesn't exist.
+// Returns defaults and a nil error if the file doesn't exist; otherwise returns defaults plus an error on failures.
 func Load() (Config, error) {
 	path, err := configPath()
 	if err != nil {
