@@ -37,7 +37,7 @@ func Load() (Config, error) {
 }
 
 // LoadFrom reads config from the given path.
-// Returns defaults without error if file doesn't exist.
+// Returns defaults and a nil error if the file doesn't exist; otherwise returns defaults plus an error on failures (e.g., read/parse errors).
 func LoadFrom(path string) (Config, error) {
 	cfg := Default()
 	data, err := os.ReadFile(path)
