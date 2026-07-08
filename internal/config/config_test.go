@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -38,7 +39,10 @@ func TestSaveAndLoad(t *testing.T) {
 		t.Fatalf("SaveTo: %v", err)
 	}
 
-	got := LoadFrom(path)
+	got, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("LoadFrom: %v", err)
+	}
 	if got.Theme != "light" {
 		t.Errorf("Theme=%q, want light", got.Theme)
 	}
@@ -56,7 +60,10 @@ func TestSaveAndLoad(t *testing.T) {
 func TestLoad_NoFile(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "nonexistent.json")
-	cfg := LoadFrom(path)
+	cfg, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("LoadFrom missing file: %v", err)
+	}
 	if cfg.Theme != "dark" || cfg.TabWidth != 4 {
 		t.Error("missing file should return defaults")
 	}
@@ -69,7 +76,13 @@ func TestLoad_InvalidJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfg := LoadFrom(path)
+	cfg, err := LoadFrom(path)
+	if err == nil {
+		t.Fatal("LoadFrom should return an error for invalid JSON")
+	}
+	if !strings.HasPrefix(err.Error(), "invalid config file") {
+		t.Fatalf("LoadFrom error = %q, want invalid config prefix", err.Error())
+	}
 	if cfg.Theme != "dark" || cfg.TabWidth != 4 {
 		t.Error("invalid JSON should return defaults")
 	}
