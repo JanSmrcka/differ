@@ -95,10 +95,10 @@ func runDiff(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	cfg, err := config.Load()
-	if err != nil {
-		return err
-	}
+cfg, err := config.Load()
+if err != nil {
+	return fmt.Errorf("config: %w", err)
+}
 	t := resolveTheme(cfg)
 	styles := ui.NewStyles(t)
 
