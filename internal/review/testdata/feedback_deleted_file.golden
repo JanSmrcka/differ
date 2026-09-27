@@ -1,0 +1,10 @@
+Review feedback: 1 comment
+
+File: src/legacy/old.ts
+Line: 1 (old)
+
+Changed code:
+-export const deprecated = true
+
+Comment:
+Why was this removed?
