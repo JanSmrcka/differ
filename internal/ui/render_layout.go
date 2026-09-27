@@ -52,9 +52,15 @@ func renderCard(t theme.Theme, title, content string, focused bool, w, h int) st
 		borderColor = lipgloss.Color(t.AccentFg)
 	}
 	bs := lipgloss.NewStyle().Foreground(borderColor)
+	// The top border is "╭─" + title + fill + "╮", so the title has w-3 columns
+	// to live in. A longer one must be truncated: clamping the fill instead
+	// makes the border wider than the card, which ragged the whole layout.
 	titleStr := ""
 	if title != "" {
-		titleStr = " " + title + " "
+		titleStr = " " + truncateEnd(title, max(w-3, 0)) + " "
+		if lipgloss.Width(titleStr) > w-1 {
+			titleStr = ""
+		}
 	}
 	topFill := w - lipgloss.Width(titleStr) - 1
 	if topFill < 0 {
@@ -203,6 +209,26 @@ func (m Model) renderBranchItem(name string, selected, current bool) string {
 		return m.styles.FileSelected.Width(fileListWidth).Render(line)
 	}
 	return m.styles.FileItem.Width(fileListWidth).Render(line)
+}
+
+// truncateEnd shortens text to maxW columns, marking the cut with an ellipsis.
+// Unlike truncatePath it keeps the start, which is what identifies a branch or
+// a card.
+func truncateEnd(s string, maxW int) string {
+	if maxW <= 0 {
+		return ""
+	}
+	if lipgloss.Width(s) <= maxW {
+		return s
+	}
+	if maxW == 1 {
+		return "…"
+	}
+	runes := []rune(s)
+	for len(runes) > 0 && lipgloss.Width(string(runes))+1 > maxW {
+		runes = runes[:len(runes)-1]
+	}
+	return string(runes) + "…"
 }
 
 func truncatePath(path string, maxW int) string {

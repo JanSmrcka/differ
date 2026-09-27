@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/jansmrcka/differ/internal/config"
 	"github.com/jansmrcka/differ/internal/git"
 	"github.com/jansmrcka/differ/internal/testutil"
@@ -217,6 +218,22 @@ func TestIntegration_CommentEditorBarRenders(t *testing.T) {
 	view := m.View()
 	if !strings.Contains(view, "needs await") {
 		t.Errorf("editor content missing:\n%s", view)
+	}
+	t.Logf("\n%s", view)
+}
+
+func TestIntegration_GoFileWithTabsRendersInsideThePanel(t *testing.T) {
+	tr := testutil.NewRepo(t)
+	tr.ApplyFixture(testutil.Fixture(t, "tabs_indent"))
+
+	m := liveModel(t, tr)
+	m.mode = modeDiff
+
+	view := m.View()
+	for i, line := range strings.Split(view, "\n") {
+		if w := lipgloss.Width(line); w > m.width {
+			t.Errorf("line %d is %d columns, terminal is %d", i, w, m.width)
+		}
 	}
 	t.Logf("\n%s", view)
 }

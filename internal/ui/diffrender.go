@@ -30,7 +30,12 @@ type DiffRenderer struct {
 	width    int
 
 	split    bool
+	tabWidth int
 	comments []review.Comment
+
+	// dirty defers re-rendering until the content is actually asked for, so
+	// several setters cost one render.
+	dirty bool
 
 	pairs []splitRow
 	rows  []displayRow
@@ -50,9 +55,41 @@ type displayRow struct {
 
 // NewDiffRenderer renders every line up front.
 func NewDiffRenderer(parsed ParsedDiff, filename string, styles Styles, t theme.Theme, width int) *DiffRenderer {
-	r := &DiffRenderer{parsed: parsed, filename: filename, styles: styles, theme: t, width: width}
+	// Without this the Chroma style stays nil and every line renders
+	// unhighlighted.
+	initChromaStyle(t.ChromaStyle)
+
+	r := &DiffRenderer{
+		parsed: parsed, filename: filename, styles: styles,
+		theme: t, width: width, tabWidth: defaultTabWidth,
+	}
 	r.render()
 	return r
+}
+
+// SetTabWidth sets how wide a tab renders. Zero or less keeps the default.
+func (r *DiffRenderer) SetTabWidth(n int) {
+	if n <= 0 || n == r.tabWidth {
+		return
+	}
+	r.tabWidth = n
+	r.dirty = true
+}
+
+// ensure re-renders if a setter changed something since the last render.
+func (r *DiffRenderer) ensure() {
+	if r.dirty {
+		r.render()
+		r.dirty = false
+	}
+}
+
+// displayLine returns a copy of a source line with tabs expanded for display.
+// The original keeps its tabs so comment anchors and excerpts show the file as
+// it really is.
+func (r *DiffRenderer) displayLine(dl DiffLine) DiffLine {
+	dl.Content = expandTabs(dl.Content, r.tabWidth)
+	return dl
 }
 
 // SetSplit switches between unified and side-by-side rendering.
@@ -61,14 +98,14 @@ func (r *DiffRenderer) SetSplit(split bool) {
 		return
 	}
 	r.split = split
-	r.render()
+	r.dirty = true
 }
 
 // SetComments attaches review comments for inline display. The caller passes
 // only the comments belonging to this file.
 func (r *DiffRenderer) SetComments(cs []review.Comment) {
 	r.comments = cs
-	r.render()
+	r.dirty = true
 }
 
 func (r *DiffRenderer) render() {
@@ -89,7 +126,7 @@ func (r *DiffRenderer) render() {
 		for i, dl := range r.parsed.Lines {
 			r.rowOf[i] = len(r.rows)
 			r.rows = append(r.rows, displayRow{
-				text: renderDiffLineGutter(dl, r.filename, r.styles, r.theme, r.width, r.gutterFor(byLine, i)),
+				text: renderDiffLineGutter(r.displayLine(dl), r.filename, r.styles, r.theme, r.width, r.gutterFor(byLine, i)),
 				line: i, pair: -1,
 			})
 			r.appendCommentRows(byLine[i])
@@ -187,18 +224,28 @@ func (r *DiffRenderer) gutterFor(byLine map[int][]review.Comment, idx int) strin
 
 func (r *DiffRenderer) renderRow(row splitRow, gutter string) string {
 	if row.left != nil && row.left.Type == LineHunkHeader {
-		return renderHunkLine(*row.left, r.styles, r.width, gutter)
+		return renderHunkLine(r.displayLine(*row.left), r.styles, r.width, gutter)
 	}
 	panelW := (r.width - gutterWidth - 1) / 2
-	left := renderSplitSide(row.left, r.filename, r.styles, r.theme, panelW, true)
-	right := renderSplitSide(row.right, r.filename, r.styles, r.theme, panelW, false)
+	left := renderSplitSide(r.displaySide(row.left), r.filename, r.styles, r.theme, panelW, true)
+	right := renderSplitSide(r.displaySide(row.right), r.filename, r.styles, r.theme, panelW, false)
 	sep := lipgloss.NewStyle().Foreground(lipgloss.Color(r.theme.BorderFg)).Render("│")
 	return gutter + left + sep + right
+}
+
+// displaySide expands tabs on one side of a split row, preserving nil.
+func (r *DiffRenderer) displaySide(dl *DiffLine) *DiffLine {
+	if dl == nil {
+		return nil
+	}
+	out := r.displayLine(*dl)
+	return &out
 }
 
 // Content returns the diff with the given line marked as current. A cursor
 // outside the diff marks nothing.
 func (r *DiffRenderer) Content(cursor int) string {
+	r.ensure()
 	if r.parsed.Binary {
 		return RenderBinaryFile(r.styles, r.width)
 	}
@@ -219,13 +266,14 @@ func (r *DiffRenderer) renderCursorRow(row displayRow) string {
 	case row.pair >= 0:
 		return r.renderRow(r.pairs[row.pair], gutter)
 	case row.line >= 0:
-		return renderDiffLineGutter(r.parsed.Lines[row.line], r.filename, r.styles, r.theme, r.width, gutter)
+		return renderDiffLineGutter(r.displayLine(r.parsed.Lines[row.line]), r.filename, r.styles, r.theme, r.width, gutter)
 	default:
 		return row.text
 	}
 }
 
 func (r *DiffRenderer) rowFor(cursor int) (int, bool) {
+	r.ensure()
 	if cursor < 0 || cursor >= len(r.rowOf) || r.rowOf[cursor] < 0 {
 		return 0, false
 	}
@@ -237,7 +285,7 @@ func (r *DiffRenderer) rowFor(cursor int) (int, bool) {
 func (r *DiffRenderer) LineCount() int { return len(r.parsed.Lines) }
 
 // DisplayRows is how many rows Content produces.
-func (r *DiffRenderer) DisplayRows() int { return len(r.rows) }
+func (r *DiffRenderer) DisplayRows() int { r.ensure(); return len(r.rows) }
 
 // RowFor maps a line index to the display row showing it.
 func (r *DiffRenderer) RowFor(cursor int) (int, bool) { return r.rowFor(cursor) }

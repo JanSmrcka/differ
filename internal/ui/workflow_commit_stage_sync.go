@@ -149,6 +149,7 @@ func (m Model) loadDiffCmd(resetScroll bool) tea.Cmd {
 	diffW := m.diffWidth()
 	filename := f.change.Path
 	splitMode := m.splitDiff && diffW >= minSplitWidth
+	tabWidth := m.cfg.TabWidth
 	return func() tea.Msg {
 		fail := func(err error) tea.Msg {
 			return diffLoadedMsg{
@@ -174,6 +175,7 @@ func (m Model) loadDiffCmd(resetScroll bool) tea.Cmd {
 		}
 
 		r := NewDiffRenderer(parsed, filename, styles, t, diffW)
+		r.SetTabWidth(tabWidth)
 		r.SetSplit(splitMode)
 		return diffLoadedMsg{renderer: r, index: idx, resetScroll: resetScroll}
 	}

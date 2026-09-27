@@ -221,6 +221,35 @@ const cursorMarker = "▌"
 
 const gutterWidth = 2
 
+// defaultTabWidth is used where no configured width is available (the log
+// browser), matching config.Default().
+const defaultTabWidth = 4
+
+// expandTabs replaces tabs with spaces to the next tab stop. A tab measures as
+// one column but the terminal draws it as several, so leaving them in makes
+// every width calculation wrong and the line overflows its panel.
+func expandTabs(s string, tabWidth int) string {
+	if !strings.Contains(s, "\t") {
+		return s
+	}
+	if tabWidth <= 0 {
+		tabWidth = defaultTabWidth
+	}
+	var b strings.Builder
+	col := 0
+	for _, r := range s {
+		if r == '\t' {
+			n := tabWidth - col%tabWidth
+			b.WriteString(strings.Repeat(" ", n))
+			col += n
+			continue
+		}
+		b.WriteRune(r)
+		col++
+	}
+	return b.String()
+}
+
 // commentMarker flags a line carrying review comments; commentBar prefixes the
 // comment body rows beneath it.
 const commentMarker = "●"
