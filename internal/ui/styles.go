@@ -20,22 +20,22 @@ type Styles struct {
 	StatusUntracked lipgloss.Style
 
 	// Diff
-	DiffAdded           lipgloss.Style
-	DiffRemoved         lipgloss.Style
-	DiffAddedBg         lipgloss.Style // bg-only, for padding highlighted lines
-	DiffRemovedBg       lipgloss.Style // bg-only, for padding highlighted lines
-	DiffContext         lipgloss.Style
-	DiffHunkHeader      lipgloss.Style
-	DiffLineNum         lipgloss.Style
-	DiffLineNumAdded    lipgloss.Style
-	DiffLineNumRemoved  lipgloss.Style
+	DiffAdded          lipgloss.Style
+	DiffRemoved        lipgloss.Style
+	DiffAddedBg        lipgloss.Style // bg-only, for padding highlighted lines
+	DiffRemovedBg      lipgloss.Style // bg-only, for padding highlighted lines
+	DiffContext        lipgloss.Style
+	DiffHunkHeader     lipgloss.Style
+	DiffLineNum        lipgloss.Style
+	DiffLineNumAdded   lipgloss.Style
+	DiffLineNumRemoved lipgloss.Style
 
 	// Chrome
-	HeaderBar   lipgloss.Style
-	StatusBar   lipgloss.Style
-	HelpKey  lipgloss.Style
-	HelpDesc lipgloss.Style
-	CardBg   lipgloss.Style
+	HeaderBar lipgloss.Style
+	StatusBar lipgloss.Style
+	HelpKey   lipgloss.Style
+	HelpDesc  lipgloss.Style
+	CardBg    lipgloss.Style
 
 	// Commit input
 	CommitInput lipgloss.Style

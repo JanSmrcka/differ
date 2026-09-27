@@ -57,17 +57,22 @@ differ commit     # review staged + commit
 
 ### Diff View
 
-| Key         | Action             |
-| ----------- | ------------------ |
-| `j/k`       | scroll             |
-| `d/u`       | half page down/up  |
-| `g/G`       | top/bottom         |
-| `n/p`       | next/prev file     |
-| `tab`       | stage/unstage      |
-| `b`         | open branch picker |
-| `v`         | toggle split diff  |
-| `e`         | open in editor     |
-| `esc` / `h` | back to file list  |
+| Key         | Action                    |
+| ----------- | ------------------------- |
+| `j/k`       | move line cursor          |
+| `}` / `{`   | next/prev hunk            |
+| `d/u`       | half page down/up         |
+| `g/G`       | first/last line           |
+| `n/p`       | next/prev file            |
+| `tab`       | stage/unstage             |
+| `b`         | open branch picker        |
+| `v`         | toggle split diff         |
+| `e`         | open in editor            |
+| `esc` / `h` | back to file list         |
+
+The diff view has a line cursor (`▌`) marking the current line. It is the
+anchor review comments attach to, and it keeps the same position when you
+toggle between unified and split view.
 
 ### Commit Mode
 

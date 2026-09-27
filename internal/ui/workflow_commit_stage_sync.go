@@ -150,30 +150,32 @@ func (m Model) loadDiffCmd(resetScroll bool) tea.Cmd {
 	filename := f.change.Path
 	splitMode := m.splitDiff && diffW >= minSplitWidth
 	return func() tea.Msg {
-		var content string
+		fail := func(err error) tea.Msg {
+			return diffLoadedMsg{
+				errContent:  styles.DiffHunkHeader.Render("Error: " + err.Error()),
+				index:       idx,
+				resetScroll: resetScroll,
+			}
+		}
+
+		var parsed ParsedDiff
 		if f.untracked {
 			raw, err := repo.ReadFileContent(filename)
 			if err != nil {
-				content = styles.DiffHunkHeader.Render("Error: " + err.Error())
-			} else if splitMode {
-				content = RenderNewFileSplit(raw, filename, styles, t, diffW)
-			} else {
-				content = RenderNewFile(raw, filename, styles, t, diffW)
+				return fail(err)
 			}
+			parsed = ParseNewFile(raw)
 		} else {
 			raw, err := repo.DiffFile(filename, staged, ref)
 			if err != nil {
-				content = styles.DiffHunkHeader.Render("Error: " + err.Error())
-			} else {
-				parsed := ParseDiff(raw)
-				if splitMode {
-					content = RenderSplitDiff(parsed, filename, styles, t, diffW)
-				} else {
-					content = RenderDiff(parsed, filename, styles, t, diffW)
-				}
+				return fail(err)
 			}
+			parsed = ParseDiff(raw)
 		}
-		return diffLoadedMsg{content: content, index: idx, resetScroll: resetScroll}
+
+		r := NewDiffRenderer(parsed, filename, styles, t, diffW)
+		r.SetSplit(splitMode)
+		return diffLoadedMsg{renderer: r, index: idx, resetScroll: resetScroll}
 	}
 }
 

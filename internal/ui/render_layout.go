@@ -239,7 +239,7 @@ func (m Model) renderHelpBar() string {
 	var pairs []struct{ key, desc string }
 	switch m.mode {
 	case modeDiff:
-		pairs = []struct{ key, desc string }{{"j/k", "scroll"}, {"d/u", "½ page"}, {"n/p", "next/prev"}, {"v", "split"}, {"tab", "stage"}, {"e", "edit"}, {"b", "branches"}, {"esc", "back"}, {"q", "quit"}}
+		pairs = []struct{ key, desc string }{{"j/k", "line"}, {"}/{", "hunk"}, {"d/u", "½ page"}, {"n/p", "file"}, {"v", "split"}, {"tab", "stage"}, {"e", "edit"}, {"esc", "back"}, {"q", "quit"}}
 	case modeBranchPicker:
 		pairs = []struct{ key, desc string }{{"type", "filter"}, {"↑/↓/^j/^k", "navigate"}, {"enter", "switch"}, {"^n", "new"}, {"esc", "clear/close"}}
 	default:

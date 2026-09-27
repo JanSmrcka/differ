@@ -64,15 +64,36 @@ func (m Model) handleResize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleDiffLoaded(msg diffLoadedMsg) (tea.Model, tea.Cmd) {
-	if msg.index != m.cursor || msg.content == m.lastDiffContent {
+	if msg.index != m.cursor {
 		return m, nil
 	}
-	m.lastDiffContent = msg.content
-	m.viewport.SetContent(msg.content)
-	if msg.resetScroll {
-		m.viewport.GotoTop()
+	if msg.renderer == nil {
+		if msg.errContent == m.lastDiffContent {
+			return m, nil
+		}
+		m.renderer = nil
+		m.lastDiffContent = msg.errContent
+		m.viewport.SetContent(msg.errContent)
+		if msg.resetScroll {
+			m.viewport.GotoTop()
+		}
+		return m, nil
 	}
-	return m, nil
+
+	m.renderer = msg.renderer
+	if msg.resetScroll {
+		// New file (or a resize): start at the first line worth reviewing.
+		m.viewport.GotoTop()
+		return m.setCursor(msg.renderer.Parsed().FirstCommentableLine()), nil
+	}
+	// A background refresh: keep the cursor where the user left it, clamped in
+	// case the diff shrank underneath.
+	before := m.lastDiffContent
+	updated := m.setCursor(m.diffCursor)
+	if updated.lastDiffContent == before {
+		return updated, nil
+	}
+	return updated, nil
 }
 
 func (m Model) handleFilesRefreshed(msg filesRefreshedMsg) (tea.Model, tea.Cmd) {

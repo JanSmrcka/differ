@@ -218,31 +218,27 @@ func TestExtractHunkContext(t *testing.T) {
 	}
 }
 
-// --- parseHunkHeader ---
+// --- parseHunkRanges ---
 
-func TestParseHunkHeader(t *testing.T) {
+func TestParseHunkRanges(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name    string
-		input   string
-		wantOld int
-		wantNew int
+		name  string
+		input string
+		want  hunkRanges
 	}{
-		{"basic", "@@ -10,5 +20,8 @@", 10, 20},
-		{"no_count", "@@ -1 +1 @@", 1, 1},
-		{"large", "@@ -100,50 +200,60 @@ func foo()", 100, 200},
-		{"missing", "no hunk", 0, 0},
+		{"basic", "@@ -10,5 +20,8 @@", hunkRanges{10, 5, 20, 8}},
+		{"omitted counts mean one", "@@ -1 +1 @@", hunkRanges{1, 1, 1, 1}},
+		{"with context", "@@ -100,50 +200,60 @@ func foo()", hunkRanges{100, 50, 200, 60}},
+		{"new file", "@@ -0,0 +1,3 @@", hunkRanges{0, 0, 1, 3}},
+		{"deleted file", "@@ -1,13 +0,0 @@", hunkRanges{1, 13, 0, 0}},
+		{"not a hunk header", "no hunk", hunkRanges{0, 1, 0, 1}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			old, new := 0, 0
-			parseHunkHeader(tt.input, &old, &new)
-			if old != tt.wantOld {
-				t.Errorf("oldNum=%d, want %d", old, tt.wantOld)
-			}
-			if new != tt.wantNew {
-				t.Errorf("newNum=%d, want %d", new, tt.wantNew)
+			if got := parseHunkRanges(tt.input); got != tt.want {
+				t.Errorf("parseHunkRanges(%q) = %+v, want %+v", tt.input, got, tt.want)
 			}
 		})
 	}

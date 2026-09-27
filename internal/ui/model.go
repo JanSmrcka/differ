@@ -32,7 +32,10 @@ const (
 type tickMsg time.Time
 
 type diffLoadedMsg struct {
-	content     string
+	// renderer is nil when the diff could not be loaded; errContent then holds
+	// the message to show instead.
+	renderer    *DiffRenderer
+	errContent  string
 	index       int
 	resetScroll bool
 }
@@ -87,6 +90,11 @@ type Model struct {
 	SelectedFile  string
 
 	lastDiffContent string
+
+	// renderer holds the diff currently on screen; diffCursor indexes into its
+	// lines and is the anchor review comments will attach to.
+	renderer   *DiffRenderer
+	diffCursor int
 
 	branches         []string
 	filteredBranches []string
