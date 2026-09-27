@@ -47,7 +47,7 @@ func TestSend_OneCommentUnderTheCursor(t *testing.T) {
 	m = cursorOn(t, m, LineAdded, "  const user = await getUser(id)")
 
 	updated, cmd := m.updateReviewMode(key("s"))
-	m = runCmd(t, updated.(Model), cmd)
+	runCmd(t, updated.(Model), cmd)
 
 	sent := fake.Sent()
 	if len(sent) != 1 {
@@ -149,7 +149,7 @@ func TestSend_SentCommentsAreNotResent(t *testing.T) {
 	updated, cmd := m.updateReviewMode(key("S"))
 	m = runCmd(t, updated.(Model), cmd)
 	updated, cmd = m.updateReviewMode(key("S"))
-	m = runCmd(t, updated.(Model), cmd)
+	runCmd(t, updated.(Model), cmd)
 
 	if n := len(fake.Sent()); n != 1 {
 		t.Errorf("already-sent comments were sent again (%d payloads)", n)

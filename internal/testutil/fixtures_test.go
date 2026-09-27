@@ -24,8 +24,8 @@ func TestFixtures_ApplyCleanly(t *testing.T) {
 			r.Write("fixture.patch", f.Diff)
 			r.Git("apply", "--whitespace=nowarn", "fixture.patch")
 
-			switch {
-			case f.After == "":
+			switch f.After {
+			case "":
 				if r.Exists(f.Path) {
 					t.Errorf("%s should have been deleted", f.Path)
 				}

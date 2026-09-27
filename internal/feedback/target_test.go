@@ -7,25 +7,61 @@ import (
 	"testing"
 )
 
-func TestResolve_KnownTargets(t *testing.T) {
-	for _, name := range []string{"clipboard", "stdout"} {
-		tr, err := Resolve(Config{Target: name})
-		if err != nil {
-			t.Fatalf("Resolve(%q) failed: %v", name, err)
-		}
-		if tr.Name() != name {
-			t.Errorf("Name() = %q, want %q", tr.Name(), name)
-		}
+// skipWithoutClipboard skips when the machine has no clipboard command, which
+// is the normal state of a headless CI runner.
+func skipWithoutClipboard(t *testing.T) {
+	t.Helper()
+	if _, err := clipboardTarget(); err != nil {
+		t.Skipf("no clipboard command available: %v", err)
+	}
+}
+
+func TestResolve_Stdout(t *testing.T) {
+	tr, err := Resolve(Config{Target: "stdout"})
+	if err != nil {
+		t.Fatalf("Resolve(stdout) failed: %v", err)
+	}
+	if tr.Name() != "stdout" {
+		t.Errorf("Name() = %q, want stdout", tr.Name())
+	}
+}
+
+func TestResolve_Clipboard(t *testing.T) {
+	skipWithoutClipboard(t)
+	tr, err := Resolve(Config{Target: "clipboard"})
+	if err != nil {
+		t.Fatalf("Resolve(clipboard) failed: %v", err)
+	}
+	if tr.Name() != "clipboard" {
+		t.Errorf("Name() = %q, want clipboard", tr.Name())
 	}
 }
 
 func TestResolve_EmptyTargetDefaultsToClipboard(t *testing.T) {
+	skipWithoutClipboard(t)
 	tr, err := Resolve(Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if tr.Name() != "clipboard" {
 		t.Errorf("default target = %q, want clipboard", tr.Name())
+	}
+}
+
+// On a machine with no clipboard command, resolving must fail with advice
+// rather than returning a target that would silently do nothing.
+func TestResolve_WithoutAClipboardExplainsTheAlternatives(t *testing.T) {
+	if _, err := clipboardTarget(); err == nil {
+		t.Skip("this machine has a clipboard command")
+	}
+	_, err := Resolve(Config{Target: "clipboard"})
+	if err == nil {
+		t.Fatal("expected an error when no clipboard command exists")
+	}
+	for _, want := range []string{"stdout", "tmux"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error should suggest %q: %v", want, err)
+		}
 	}
 }
 

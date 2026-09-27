@@ -26,6 +26,14 @@ make test              # go test ./...
 golangci-lint run      # CI uses v2.10.1, no custom config
 ```
 
+If the local Go toolchain is newer than go.mod's, golangci-lint fails with
+"export data version ... is greater than maximum supported version". Pin the
+toolchain to match CI:
+
+```bash
+GOTOOLCHAIN=go1.25.5 go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.10.1 run ./...
+```
+
 Unit tests exist across all packages. Test manually in a real git repo with staged, unstaged, and untracked files.
 
 ## Architecture
@@ -35,13 +43,33 @@ main.go → cmd/root.go (cobra commands)
              ├── internal/config   — Config struct, load/save ~/.config/differ/config.json
              ├── internal/git      — Repo struct, all git ops via os/exec
              ├── internal/theme    — color hex values only (no lipgloss)
+             ├── internal/review   — review session: comments, per-file state, feedback text
+             ├── internal/feedback — Target interface + clipboard/stdout/tmux delivery
+             ├── internal/testutil — temp git repos, diff fixtures, golden files (tests only)
              └── internal/ui
-                   ├── model.go    — Model (diff viewer, 4 modes: file list / diff / commit / branch picker)
+                   ├── model.go    — Model state (5 modes: file list / diff / commit / branch / review)
+                   ├── update_dispatch.go — Update dispatcher only
+                   ├── mode_*.go   — per-mode key handling
                    ├── log.go      — LogModel (commit log browser)
-                   ├── diff.go     — diff parser + renderer
+                   ├── diff.go     — diff parser + line rendering
+                   ├── hunk.go     — hunk model, line addressing, navigation
+                   ├── diffrender.go — DiffRenderer: cached rendering, cursor, inline comments
+                   ├── comment*.go — building, editing and rendering review comments
                    ├── highlight.go — Chroma syntax highlighting
                    └── styles.go   — all lipgloss styles, bridges theme → lipgloss
 ```
+
+### Review architecture
+
+`internal/review` and `internal/feedback` must not import `internal/ui`: the UI
+owns the diff parser, and a cycle would follow. A `review.Comment` therefore
+carries its own anchor text and a plain-text excerpt, which keeps feedback
+generation a pure string transformation.
+
+`DiffRenderer` distinguishes **line indexes** (address `ParsedDiff.Lines`; what
+the cursor and comments refer to) from **display rows** (what is printed).
+Split view pairs two lines onto one row and inline comments insert rows, so the
+two diverge — use `RowFor` to map between them, never assume they are equal.
 
 Two Bubble Tea models: `Model` (main diff viewer with file list/diff/commit/branch-picker modes) and `LogModel` (log browser). Both follow `Init()/Update()/View()`. All async work (git calls, AI commit messages) returned as `tea.Cmd` — never block in `Update`.
 

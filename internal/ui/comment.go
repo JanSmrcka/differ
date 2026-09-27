@@ -110,7 +110,7 @@ func excerptFor(parsed ParsedDiff, h Hunk) string {
 		}
 		line := excerptMarker(dl.Type) + dl.Content
 		if total+len(line)+1 > maxExcerptChars {
-			b.WriteString(fmt.Sprintf("… truncated (%d more lines)\n", h.LastLine-i+1))
+			fmt.Fprintf(&b, "… truncated (%d more lines)\n", h.LastLine-i+1)
 			break
 		}
 		b.WriteString(line)
