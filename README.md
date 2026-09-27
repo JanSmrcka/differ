@@ -81,14 +81,21 @@ Review mode is the diff view with review state on top: it tracks which files
 you have looked at and (from the next release) holds your review comments.
 It never changes git state — staging and committing stay explicit actions.
 
-| Key       | Action              |
-| --------- | ------------------- |
-| `r`       | toggle review mode  |
-| `j/k`     | move line cursor    |
-| `}` / `{` | next/prev hunk      |
-| `n/p`     | next/prev file      |
-| `v`       | toggle split diff   |
-| `esc`     | back to file list   |
+| Key       | Action                          |
+| --------- | ------------------------------- |
+| `r`       | toggle review mode              |
+| `j/k`     | move line cursor                |
+| `}` / `{` | next/prev hunk                  |
+| `c`       | comment on line (edit existing) |
+| `C`       | comment on whole hunk           |
+| `x`       | delete comment under cursor     |
+| `n/p`     | next/prev file                  |
+| `v`       | toggle split diff               |
+| `esc`     | back to file list               |
+
+In the comment editor: `ctrl+s` saves, `esc` cancels. Comments are multiline,
+shown inline under the line they refer to, and marked `pending` until sent.
+They live for the session only — nothing is written to disk or to git.
 
 ### Commit Mode
 

@@ -31,7 +31,16 @@ func (m Model) enterReviewMode() (tea.Model, tea.Cmd) {
 }
 
 func (m Model) updateReviewMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.commenting {
+		return m.updateCommentEditor(msg)
+	}
 	switch msg.String() {
+	case "c":
+		return m.startComment()
+	case "C":
+		return m.startHunkComment()
+	case "x":
+		return m.deleteCommentAtCursor()
 	case "ctrl+c":
 		return m, tea.Quit
 	case "esc":

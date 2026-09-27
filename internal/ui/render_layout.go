@@ -36,6 +36,9 @@ func (m Model) View() string {
 	if m.mode == modeBranchPicker && m.branchCreating {
 		return lipgloss.JoinVertical(lipgloss.Left, main, statusBar, m.renderBranchCreateBar())
 	}
+	if m.commenting {
+		return lipgloss.JoinVertical(lipgloss.Left, main, statusBar, m.renderCommentEditor())
+	}
 	return lipgloss.JoinVertical(lipgloss.Left, main, statusBar, m.renderHelpBar())
 }
 
@@ -80,13 +83,21 @@ func (m Model) fileCardTitle() string {
 	if m.mode == modeBranchPicker {
 		return "Branches"
 	}
-	title := m.repo.BranchName()
+	title := m.branchName()
 	if m.ref != "" {
 		title += " ref:" + m.ref
 	} else if m.stagedOnly {
 		title += " staged"
 	}
 	return title
+}
+
+// branchName is nil-safe so the view can render before a repo is attached.
+func (m Model) branchName() string {
+	if m.repo == nil {
+		return ""
+	}
+	return m.repo.BranchName()
 }
 
 func (m Model) diffCardTitle() string {
@@ -257,7 +268,7 @@ func (m Model) renderHelpBar() string {
 	case modeDiff:
 		pairs = []struct{ key, desc string }{{"j/k", "line"}, {"}/{", "hunk"}, {"d/u", "½ page"}, {"n/p", "file"}, {"v", "split"}, {"tab", "stage"}, {"e", "edit"}, {"esc", "back"}, {"q", "quit"}}
 	case modeReview:
-		pairs = []struct{ key, desc string }{{"j/k", "line"}, {"}/{", "hunk"}, {"n/p", "file"}, {"v", "split"}, {"r", "exit review"}, {"esc", "files"}, {"q", "quit"}}
+		pairs = []struct{ key, desc string }{{"j/k", "line"}, {"}/{", "hunk"}, {"c", "comment"}, {"C", "hunk comment"}, {"x", "delete"}, {"n/p", "file"}, {"r", "exit review"}, {"q", "quit"}}
 	case modeBranchPicker:
 		pairs = []struct{ key, desc string }{{"type", "filter"}, {"↑/↓/^j/^k", "navigate"}, {"enter", "switch"}, {"^n", "new"}, {"esc", "clear/close"}}
 	default:
@@ -276,6 +287,19 @@ func (m Model) renderCommitBar() string {
 		return lipgloss.NewStyle().Width(m.width).Render(prompt + m.styles.HelpDesc.Render("generating...  esc cancel"))
 	}
 	return lipgloss.NewStyle().Width(m.width).Render(prompt + m.commitInput.View() + "  " + m.styles.HelpDesc.Render("esc cancel · enter commit"))
+}
+
+// renderCommentEditor shows the textarea plus what the two closing keys do.
+func (m Model) renderCommentEditor() string {
+	label := fmt.Sprintf(" comment · line %d ", m.draft.StartLine)
+	if m.draft.EndLine > m.draft.StartLine {
+		label = fmt.Sprintf(" comment · lines %d-%d ", m.draft.StartLine, m.draft.EndLine)
+	}
+	if m.editingID != "" {
+		label = " edit" + label
+	}
+	head := m.styles.HelpKey.Render(label) + m.styles.HelpDesc.Render("· ctrl+s save · esc cancel")
+	return lipgloss.NewStyle().Width(m.width).Render(head + "\n" + m.commentInput.View())
 }
 
 func (m Model) renderBranchCreateBar() string {

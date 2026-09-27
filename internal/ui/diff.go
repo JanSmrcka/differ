@@ -221,6 +221,12 @@ const cursorMarker = "▌"
 
 const gutterWidth = 2
 
+// commentMarker flags a line carrying review comments; commentBar prefixes the
+// comment body rows beneath it.
+const commentMarker = "●"
+
+const commentBar = "▏"
+
 // RenderDiff renders parsed diff lines into a styled string.
 func RenderDiff(parsed ParsedDiff, filename string, styles Styles, t theme.Theme, width int) string {
 	if parsed.Binary {
@@ -253,6 +259,10 @@ func blankGutter() string { return strings.Repeat(" ", gutterWidth) }
 
 func cursorGutter(styles Styles) string {
 	return styles.Accent.Render(cursorMarker) + " "
+}
+
+func commentGutter(styles Styles) string {
+	return styles.CommentBar.Render(commentMarker) + " "
 }
 
 func renderHunkLine(dl DiffLine, styles Styles, width int, gutter string) string {

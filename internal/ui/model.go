@@ -4,6 +4,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -110,6 +111,14 @@ type Model struct {
 	upstream    git.UpstreamInfo
 	pushConfirm bool
 
+	// commenting is true while the comment editor is open; draft is the
+	// comment being written, and editingID is set when editing an existing
+	// one rather than creating a new comment.
+	commenting   bool
+	draft        review.Comment
+	editingID    string
+	commentInput textarea.Model
+
 	// session holds review state — comments and per-file progress. It is
 	// created on first entering review mode and lives until the process ends;
 	// it is never written to disk and never mirrored into the git index.
@@ -137,6 +146,11 @@ func NewModel(repo *git.Repo, cfg config.Config, changes []git.FileChange, untra
 	bi.Placeholder = "branch name..."
 	bi.CharLimit = 100
 
+	ca := textarea.New()
+	ca.Placeholder = "review comment..."
+	ca.ShowLineNumbers = false
+	ca.SetHeight(commentEditorHeight)
+
 	return Model{
 		repo:         repo,
 		cfg:          cfg,
@@ -150,6 +164,7 @@ func NewModel(repo *git.Repo, cfg config.Config, changes []git.FileChange, untra
 		commitInput:  ti,
 		branchFilter: bf,
 		branchInput:  bi,
+		commentInput: ca,
 	}
 }
 

@@ -165,3 +165,58 @@ func TestIntegration_ReviewModeRendersOnRealRepo(t *testing.T) {
 	}
 	t.Logf("\n%s", view)
 }
+
+func TestIntegration_WriteACommentAndSeeItInTheDiff(t *testing.T) {
+	tr := testutil.NewRepo(t)
+	tr.ApplyFixture(testutil.Fixture(t, "multi_hunk"))
+
+	m := liveModel(t, tr)
+	updated, _ := m.updateFileListMode(key("r"))
+	m = updated.(Model)
+
+	// Put the cursor on the changed line and write a comment.
+	m = m.setCursor(lineIndexOf(t, m.renderer.Parsed(), LineAdded, "  const user = await getUser(id)"))
+	updated, _ = m.updateReviewMode(key("c"))
+	m = updated.(Model)
+	m = typeText(t, m, "keep this awaited")
+	updated, _ = m.updateReviewMode(tea.KeyMsg{Type: tea.KeyCtrlS})
+	m = updated.(Model)
+
+	view := m.View()
+	if !strings.Contains(view, "keep this awaited") {
+		t.Errorf("comment body is not on screen:\n%s", view)
+	}
+	// With the cursor still on the commented line the cursor marker wins, so
+	// move away to see the comment's own gutter marker.
+	moved := m.moveCursor(2)
+	if !strings.Contains(moved.View(), commentMarker) {
+		t.Errorf("no comment gutter marker on screen:\n%s", moved.View())
+	}
+	if !strings.Contains(view, "1 comments") {
+		t.Errorf("status bar does not report the comment:\n%s", view)
+	}
+
+	// The working tree must be untouched by all of that.
+	if got := strings.Join(tr.Status(), "\n"); !strings.Contains(got, "src.ts") || len(tr.Status()) != 1 {
+		t.Errorf("git state changed: %v", tr.Status())
+	}
+	t.Logf("\n%s", view)
+}
+
+func TestIntegration_CommentEditorBarRenders(t *testing.T) {
+	tr := testutil.NewRepo(t)
+	tr.ApplyFixture(testutil.Fixture(t, "multi_hunk"))
+	m := liveModel(t, tr)
+	updated, _ := m.updateFileListMode(key("r"))
+	m = updated.(Model)
+	m = m.setCursor(lineIndexOf(t, m.renderer.Parsed(), LineAdded, "  const user = await getUser(id)"))
+	updated, _ = m.updateReviewMode(key("c"))
+	m = updated.(Model)
+	m = typeText(t, m, "needs await\nsecond line")
+
+	view := m.View()
+	if !strings.Contains(view, "needs await") {
+		t.Errorf("editor content missing:\n%s", view)
+	}
+	t.Logf("\n%s", view)
+}

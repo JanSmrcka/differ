@@ -15,6 +15,7 @@ func diffModel(t *testing.T, fixture string, height int) Model {
 	t.Helper()
 	m := newTestModel(t, []fileItem{{change: git.FileChange{Path: "src.ts", Status: git.StatusModified}}})
 	m.mode = modeDiff
+	m.ready = true
 	m.viewport = viewport.New(80, height)
 	parsed := ParseDiff(testutil.Fixture(t, fixture).Diff)
 	r := NewDiffRenderer(parsed, "src.ts", m.styles, m.theme, 80)

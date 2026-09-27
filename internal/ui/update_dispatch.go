@@ -83,6 +83,9 @@ func (m Model) handleDiffLoaded(msg diffLoadedMsg) (tea.Model, tea.Cmd) {
 	}
 
 	m.renderer = msg.renderer
+	if m.session != nil {
+		m.renderer.SetComments(m.session.CommentsFor(m.currentFilePath()))
+	}
 	if msg.resetScroll {
 		// New file (or a resize): start at the first line worth reviewing.
 		m.viewport.GotoTop()
