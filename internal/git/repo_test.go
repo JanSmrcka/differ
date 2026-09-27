@@ -2,52 +2,20 @@ package git
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"github.com/jansmrcka/differ/internal/testutil"
 )
 
-// gitEnv returns env vars that fully isolate git from host config.
-// HOME is set to fakeHome so ~/.gitconfig is never read.
-func gitEnv(fakeHome string) []string {
-	return []string{
-		"HOME=" + fakeHome,
-		"GIT_CONFIG_NOSYSTEM=1",
-		"GIT_CONFIG_GLOBAL=/dev/null",
-		"GIT_AUTHOR_NAME=test",
-		"GIT_AUTHOR_EMAIL=test@test.com",
-		"GIT_COMMITTER_NAME=test",
-		"GIT_COMMITTER_EMAIL=test@test.com",
-		"PATH=" + os.Getenv("PATH"),
-	}
-}
+// Repo construction and git isolation live in internal/testutil so every
+// package shares one definition of "a repo in a known state".
 
-// setupTestRepo creates a temp dir with git init + repo-local config,
-// fully isolated from host git configuration.
+// setupTestRepo creates an isolated temp repo and wraps it in a git.Repo.
 func setupTestRepo(t *testing.T) *Repo {
 	t.Helper()
-	dir := t.TempDir()
-	fakeHome := t.TempDir()
-	env := gitEnv(fakeHome)
-
-	run := func(args ...string) {
-		t.Helper()
-		cmd := exec.Command("git", args...)
-		cmd.Dir = dir
-		cmd.Env = env
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
-	}
-	run("init")
-	// Repo-local config overrides host settings for Repo.run() calls
-	run("config", "user.name", "test")
-	run("config", "user.email", "test@test.com")
-	run("config", "commit.gpgsign", "false")
-	run("config", "core.hooksPath", filepath.Join(fakeHome, "no-hooks"))
-
-	repo, err := NewRepo(dir)
+	tr := testutil.NewRepo(t)
+	repo, err := NewRepo(tr.Dir)
 	if err != nil {
 		t.Fatalf("NewRepo: %v", err)
 	}
@@ -56,19 +24,18 @@ func setupTestRepo(t *testing.T) *Repo {
 
 func writeFile(t *testing.T, repo *Repo, name, content string) {
 	t.Helper()
-	if err := os.WriteFile(filepath.Join(repo.Dir(), name), []byte(content), 0o644); err != nil {
+	full := filepath.Join(repo.Dir(), name)
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func gitRun(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	cmd.Env = gitEnv(os.Getenv("HOME"))
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git %v: %v\n%s", args, err, out)
-	}
+	testutil.GitIn(t, dir, args...)
 }
 
 func addCommit(t *testing.T, repo *Repo, filename, content, msg string) {
@@ -634,13 +601,7 @@ func TestCreateBranch_NoCommits(t *testing.T) {
 
 func TestPushSetUpstream(t *testing.T) {
 	t.Parallel()
-	// Create a bare "remote" repo
-	bare := t.TempDir()
-	cmd := exec.Command("git", "init", "--bare", bare)
-	cmd.Env = gitEnv(t.TempDir())
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("bare init: %v\n%s", err, out)
-	}
+	bare := testutil.NewBareRepo(t)
 
 	repo := setupTestRepo(t)
 	addCommit(t, repo, "f.txt", "v1", "init")

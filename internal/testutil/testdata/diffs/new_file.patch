@@ -1,0 +1,7 @@
+diff --git a/fresh.ts b/fresh.ts
+new file mode 100644
+index 0000000..d45aa49
+--- /dev/null
++++ b/fresh.ts
+@@ -0,0 +1 @@
++export const ok = true

@@ -1,0 +1,19 @@
+diff --git a/src.ts b/src.ts
+deleted file mode 100644
+index d84f8f0..0000000
+--- a/src.ts
++++ /dev/null
+@@ -1,13 +0,0 @@
+-export function load(id: string) {
+-  const user = getUser(id)
+-  return user
+-}
+-
+-function helper(a: number) {
+-  return a + 1
+-}
+-
+-export function save(data: Data) {
+-  await persist(data)
+-  return true
+-}
