@@ -46,6 +46,7 @@ differ commit     # review staged + commit
 | `enter` / `l` | view diff                                  |
 | `tab`         | stage/unstage file                         |
 | `a`           | stage all                                  |
+| `r`           | enter review mode                          |
 | `c`           | commit (AI-generated message via `claude`) |
 | `b`           | open branch picker                         |
 | `v`           | toggle split (side-by-side) diff           |
@@ -73,6 +74,21 @@ differ commit     # review staged + commit
 The diff view has a line cursor (`▌`) marking the current line. It is the
 anchor review comments attach to, and it keeps the same position when you
 toggle between unified and split view.
+
+### Review Mode
+
+Review mode is the diff view with review state on top: it tracks which files
+you have looked at and (from the next release) holds your review comments.
+It never changes git state — staging and committing stay explicit actions.
+
+| Key       | Action              |
+| --------- | ------------------- |
+| `r`       | toggle review mode  |
+| `j/k`     | move line cursor    |
+| `}` / `{` | next/prev hunk      |
+| `n/p`     | next/prev file      |
+| `v`       | toggle split diff   |
+| `esc`     | back to file list   |
 
 ### Commit Mode
 

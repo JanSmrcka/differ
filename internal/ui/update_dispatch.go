@@ -49,6 +49,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateCommitMode(msg)
 		case modeBranchPicker:
 			return m.updateBranchMode(msg)
+		case modeReview:
+			return m.updateReviewMode(msg)
 		}
 	}
 	return m, nil

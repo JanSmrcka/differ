@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/jansmrcka/differ/internal/config"
 	"github.com/jansmrcka/differ/internal/git"
+	"github.com/jansmrcka/differ/internal/review"
 	"github.com/jansmrcka/differ/internal/theme"
 )
 
@@ -19,6 +20,7 @@ const (
 	modeDiff
 	modeCommit
 	modeBranchPicker
+	modeReview
 )
 
 const fileListWidth = 35
@@ -107,6 +109,11 @@ type Model struct {
 
 	upstream    git.UpstreamInfo
 	pushConfirm bool
+
+	// session holds review state — comments and per-file progress. It is
+	// created on first entering review mode and lives until the process ends;
+	// it is never written to disk and never mirrored into the git index.
+	session *review.Session
 }
 
 type fileItem struct {

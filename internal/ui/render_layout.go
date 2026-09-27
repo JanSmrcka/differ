@@ -27,7 +27,7 @@ func (m Model) View() string {
 		fileContent = m.renderFileList(contentH)
 	}
 	fileCard := m.renderCard(m.fileCardTitle(), fileContent, m.mode == modeFileList || m.mode == modeBranchPicker, fileListWidth, contentH)
-	diffCard := m.renderCard(m.diffCardTitle(), m.viewport.View(), m.mode == modeDiff, m.diffWidth(), contentH)
+	diffCard := m.renderCard(m.diffCardTitle(), m.viewport.View(), m.mode == modeDiff || m.mode == modeReview, m.diffWidth(), contentH)
 	main := lipgloss.JoinHorizontal(lipgloss.Top, fileCard, " ", diffCard)
 	statusBar := m.renderStatusBar()
 	if m.mode == modeCommit {
@@ -97,6 +97,12 @@ func (m Model) diffCardTitle() string {
 	name := f.change.Path
 	if f.change.Staged {
 		name += " [staged]"
+	}
+	if m.mode == modeReview {
+		name = "review · " + name
+		if n := m.session.CountFor(f.change.Path); n > 0 {
+			name += fmt.Sprintf(" · %d comments", n)
+		}
 	}
 	return name
 }
@@ -223,6 +229,16 @@ func (m Model) renderStatusBar() string {
 		}
 	}
 	left := fmt.Sprintf(" %d staged  %d files", stagedCount, len(m.files))
+	if m.mode == modeReview {
+		p := m.reviewProgress()
+		left = fmt.Sprintf(" review %d/%d files", p.Reviewed, p.Total)
+		if p.Comments > 0 {
+			left += fmt.Sprintf("  %d comments", p.Comments)
+		}
+		if p.Pending > 0 {
+			left += fmt.Sprintf("  %d pending", p.Pending)
+		}
+	}
 	if m.upstream.Upstream != "" && (m.upstream.Ahead > 0 || m.upstream.Behind > 0) {
 		left += fmt.Sprintf("  ↑%d ↓%d", m.upstream.Ahead, m.upstream.Behind)
 	}
@@ -240,6 +256,8 @@ func (m Model) renderHelpBar() string {
 	switch m.mode {
 	case modeDiff:
 		pairs = []struct{ key, desc string }{{"j/k", "line"}, {"}/{", "hunk"}, {"d/u", "½ page"}, {"n/p", "file"}, {"v", "split"}, {"tab", "stage"}, {"e", "edit"}, {"esc", "back"}, {"q", "quit"}}
+	case modeReview:
+		pairs = []struct{ key, desc string }{{"j/k", "line"}, {"}/{", "hunk"}, {"n/p", "file"}, {"v", "split"}, {"r", "exit review"}, {"esc", "files"}, {"q", "quit"}}
 	case modeBranchPicker:
 		pairs = []struct{ key, desc string }{{"type", "filter"}, {"↑/↓/^j/^k", "navigate"}, {"enter", "switch"}, {"^n", "new"}, {"esc", "clear/close"}}
 	default:

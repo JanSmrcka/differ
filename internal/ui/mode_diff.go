@@ -13,6 +13,16 @@ func (m Model) updateDiffMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "esc", "h", "left":
 		m.mode = modeFileList
 		return m, nil
+	case "r":
+		return m.enterReviewMode()
+	}
+	return m.diffNavigation(msg)
+}
+
+// diffNavigation handles movement and the actions shared by diff and review
+// mode, so the two never drift apart.
+func (m Model) diffNavigation(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
 	case "j", "down":
 		return m.moveCursor(1), nil
 	case "k", "up":

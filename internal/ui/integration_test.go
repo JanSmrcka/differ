@@ -143,3 +143,25 @@ func TestIntegration_SplitViewKeepsCursorAddress(t *testing.T) {
 		t.Errorf("split view changed the cursor address:\n before %+v\n after  %+v", before, after)
 	}
 }
+
+func TestIntegration_ReviewModeRendersOnRealRepo(t *testing.T) {
+	tr := testutil.NewRepo(t)
+	tr.AgentChangeset()
+
+	m := liveModel(t, tr)
+	updated, cmd := m.updateFileListMode(key("r"))
+	m = updated.(Model)
+	if cmd != nil {
+		updated, _ = m.Update(cmd())
+		m = updated.(Model)
+	}
+
+	if m.mode != modeReview {
+		t.Fatalf("mode = %v, want modeReview", m.mode)
+	}
+	view := m.View()
+	if !strings.Contains(view, "review") {
+		t.Errorf("view does not indicate review mode:\n%s", view)
+	}
+	t.Logf("\n%s", view)
+}
