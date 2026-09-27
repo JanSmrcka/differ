@@ -89,6 +89,8 @@ It never changes git state — staging and committing stay explicit actions.
 | `c`       | comment on line (edit existing) |
 | `C`       | comment on whole hunk           |
 | `x`       | delete comment under cursor     |
+| `s`       | send comment under cursor       |
+| `S`       | send all pending comments       |
 | `n/p`     | next/prev file                  |
 | `v`       | toggle split diff               |
 | `esc`     | back to file list               |
@@ -135,9 +137,18 @@ Config file: `~/.config/differ/config.json`
   "commit_msg_cmd": "claude -p",
   "commit_msg_prompt": "Write a concise git commit message for this diff:",
   "editor_cmd": "tmux new-window -c {repo} nvim {file}",
-  "split_diff": false
+  "split_diff": false,
+  "feedback_target": "clipboard",
+  "tmux_target": ""
 }
 ```
+
+`feedback_target` decides where review feedback goes: `clipboard` (default),
+`stdout`, or `tmux`. The clipboard target shells out to `pbcopy` on macOS and
+`wl-copy`/`xclip`/`xsel` on Linux, so it does the right thing over SSH.
+
+A failed send never discards comments — they stay pending and the error is
+shown, so you can fix the target and send again.
 
 `editor_cmd` supports `{file}` (absolute path) and `{repo}` (repo root) placeholders. Defaults to `$EDITOR {file}` (falls back to `vi`).
 

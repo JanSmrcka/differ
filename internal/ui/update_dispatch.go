@@ -17,6 +17,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleDiffLoaded(msg)
 	case filesRefreshedMsg:
 		return m.handleFilesRefreshed(msg)
+	case feedbackSentMsg:
+		return m.handleFeedbackSent(msg)
 	case commitDoneMsg:
 		return m.handleCommitDone(msg)
 	case commitMsgGeneratedMsg:

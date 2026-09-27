@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/jansmrcka/differ/internal/config"
+	"github.com/jansmrcka/differ/internal/feedback"
 	"github.com/jansmrcka/differ/internal/git"
 	"github.com/jansmrcka/differ/internal/review"
 	"github.com/jansmrcka/differ/internal/theme"
@@ -45,6 +46,14 @@ type diffLoadedMsg struct {
 
 type filesRefreshedMsg struct{ files []fileItem }
 type commitDoneMsg struct{ err error }
+
+// feedbackSentMsg reports the outcome of a delivery attempt. ids names the
+// comments that were in the payload, so they are marked sent only on success.
+type feedbackSentMsg struct {
+	ids    []string
+	target string
+	err    error
+}
 
 type commitMsgGeneratedMsg struct {
 	message string
@@ -119,6 +128,12 @@ type Model struct {
 	editingID    string
 	commentInput textarea.Model
 
+	// target delivers review feedback; targetErr records why it could not be
+	// built, so the problem is reported when the user tries to send rather
+	// than at startup.
+	target    feedback.Target
+	targetErr error
+
 	// session holds review state — comments and per-file progress. It is
 	// created on first entering review mode and lives until the process ends;
 	// it is never written to disk and never mirrored into the git index.
@@ -146,6 +161,14 @@ func NewModel(repo *git.Repo, cfg config.Config, changes []git.FileChange, untra
 	bi.Placeholder = "branch name..."
 	bi.CharLimit = 100
 
+	// Resolving the target up front keeps the failure (missing clipboard
+	// command, not inside tmux) attached to the send action rather than
+	// blocking startup.
+	target, targetErr := feedback.Resolve(feedback.Config{
+		Target:     cfg.FeedbackTarget,
+		TmuxTarget: cfg.TmuxTarget,
+	})
+
 	ca := textarea.New()
 	ca.Placeholder = "review comment..."
 	ca.ShowLineNumbers = false
@@ -165,6 +188,8 @@ func NewModel(repo *git.Repo, cfg config.Config, changes []git.FileChange, untra
 		branchFilter: bf,
 		branchInput:  bi,
 		commentInput: ca,
+		target:       target,
+		targetErr:    targetErr,
 	}
 }
 

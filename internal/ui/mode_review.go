@@ -41,6 +41,10 @@ func (m Model) updateReviewMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.startHunkComment()
 	case "x":
 		return m.deleteCommentAtCursor()
+	case "s":
+		return m.sendCommentAtCursor()
+	case "S":
+		return m.sendAllPending()
 	case "ctrl+c":
 		return m, tea.Quit
 	case "esc":

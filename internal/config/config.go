@@ -14,6 +14,13 @@ type Config struct {
 	CommitMsgPrompt string `json:"commit_msg_prompt"`
 	SplitDiff       bool   `json:"split_diff"`
 	EditorCmd       string `json:"editor_cmd"`
+
+	// FeedbackTarget selects where review feedback is delivered:
+	// "clipboard" (default), "stdout" or "tmux".
+	FeedbackTarget string `json:"feedback_target"`
+	// TmuxTarget is the tmux pane feedback is sent to when FeedbackTarget is
+	// "tmux". Empty means the last active pane in the current window.
+	TmuxTarget string `json:"tmux_target"`
 }
 
 // Default returns the default configuration.

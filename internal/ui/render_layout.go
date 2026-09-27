@@ -249,6 +249,9 @@ func (m Model) renderStatusBar() string {
 		if p.Pending > 0 {
 			left += fmt.Sprintf("  %d pending", p.Pending)
 		}
+		if p.Sent > 0 {
+			left += fmt.Sprintf("  %d sent", p.Sent)
+		}
 	}
 	if m.upstream.Upstream != "" && (m.upstream.Ahead > 0 || m.upstream.Behind > 0) {
 		left += fmt.Sprintf("  ↑%d ↓%d", m.upstream.Ahead, m.upstream.Behind)
@@ -268,7 +271,7 @@ func (m Model) renderHelpBar() string {
 	case modeDiff:
 		pairs = []struct{ key, desc string }{{"j/k", "line"}, {"}/{", "hunk"}, {"d/u", "½ page"}, {"n/p", "file"}, {"v", "split"}, {"tab", "stage"}, {"e", "edit"}, {"esc", "back"}, {"q", "quit"}}
 	case modeReview:
-		pairs = []struct{ key, desc string }{{"j/k", "line"}, {"}/{", "hunk"}, {"c", "comment"}, {"C", "hunk comment"}, {"x", "delete"}, {"n/p", "file"}, {"r", "exit review"}, {"q", "quit"}}
+		pairs = []struct{ key, desc string }{{"j/k", "line"}, {"}/{", "hunk"}, {"c", "comment"}, {"C", "hunk comment"}, {"x", "delete"}, {"s/S", "send one/all"}, {"n/p", "file"}, {"r", "exit review"}, {"q", "quit"}}
 	case modeBranchPicker:
 		pairs = []struct{ key, desc string }{{"type", "filter"}, {"↑/↓/^j/^k", "navigate"}, {"enter", "switch"}, {"^n", "new"}, {"esc", "clear/close"}}
 	default:
