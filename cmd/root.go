@@ -108,8 +108,14 @@ func runDiff(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if m, ok := finalModel.(ui.Model); ok && m.SelectedFile != "" {
-		return openInEditor(cfg.EditorCmd, m.SelectedFile, repo.Dir())
+	if m, ok := finalModel.(ui.Model); ok {
+		// The alt screen is gone now, so buffered feedback can be printed.
+		if err := m.FlushFeedback(os.Stdout); err != nil {
+			return err
+		}
+		if m.SelectedFile != "" {
+			return openInEditor(cfg.EditorCmd, m.SelectedFile, repo.Dir())
+		}
 	}
 	return nil
 }
@@ -156,8 +162,14 @@ func runCommit(cmd *cobra.Command, args []string) error {
 	model := ui.NewModel(repo, cfg, files, nil, styles, t, true, "")
 	model.StartInCommitMode()
 	p := tea.NewProgram(model, tea.WithAltScreen())
-	_, err = p.Run()
-	return err
+	finalModel, err := p.Run()
+	if err != nil {
+		return err
+	}
+	if m, ok := finalModel.(ui.Model); ok {
+		return m.FlushFeedback(os.Stdout)
+	}
+	return nil
 }
 
 func runLog(cmd *cobra.Command, args []string) error {

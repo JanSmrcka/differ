@@ -1,6 +1,7 @@
 package review
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -131,5 +132,34 @@ func TestFormatFeedback_ScalesToManyComments(t *testing.T) {
 	out := FormatFeedback(cs)
 	if n := strings.Count(out, "Comment:"); n != 50 {
 		t.Errorf("got %d comment sections, want 50", n)
+	}
+}
+
+// #8: IDs are "c1".."c10", so a lexicographic tiebreak puts c10 before c9.
+// Comments on the same file and line must come out in the order written.
+func TestFormatFeedback_TiebreakUsesCreationOrderNotStringOrder(t *testing.T) {
+	s := NewSession()
+	var want []string
+	for i := 1; i <= 12; i++ {
+		body := fmt.Sprintf("note %d", i)
+		// Every comment sits on the same file and line, so only the tiebreak
+		// decides the order.
+		s.Add(Comment{File: "a.ts", Side: SideNew, StartLine: 1, EndLine: 1, Body: body})
+		want = append(want, body)
+	}
+
+	out := FormatFeedback(s.Comments())
+	var positions []int
+	for _, body := range want {
+		idx := strings.Index(out, body)
+		if idx < 0 {
+			t.Fatalf("comment %q missing from output", body)
+		}
+		positions = append(positions, idx)
+	}
+	for i := 1; i < len(positions); i++ {
+		if positions[i] < positions[i-1] {
+			t.Errorf("comment %q appears before %q — tiebreak is not creation order", want[i], want[i-1])
+		}
 	}
 }

@@ -3,8 +3,10 @@ package ui
 import (
 	"context"
 	"fmt"
+	"io"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/jansmrcka/differ/internal/feedback"
 	"github.com/jansmrcka/differ/internal/review"
 )
 
@@ -13,6 +15,16 @@ import (
 // Delivery is asynchronous and comments are only marked sent once the target
 // confirms. A failure leaves everything pending so nothing the user wrote is
 // lost to a missing clipboard helper or a closed tmux pane.
+
+// FlushFeedback writes out any feedback the target buffered during the
+// session. The stdout target cannot print while the TUI owns the alternate
+// screen, so the caller flushes once the program has exited.
+func (m Model) FlushFeedback(w io.Writer) error {
+	if f, ok := m.target.(feedback.Flusher); ok {
+		return f.Flush(w)
+	}
+	return nil
+}
 
 // sendCommentAtCursor delivers just the comment under the cursor.
 func (m Model) sendCommentAtCursor() (tea.Model, tea.Cmd) {

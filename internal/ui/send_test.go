@@ -276,3 +276,31 @@ func TestSend_EndToEndIntoATmuxPane(t *testing.T) {
 	}
 	t.Logf("payload delivered to pane %s:\n%s", pane, got)
 }
+
+// #4 end to end: with the stdout target the payload must survive the TUI and
+// reach the terminal after it exits, not be painted onto the alt screen.
+func TestSend_StdoutTargetSurvivesTheTUI(t *testing.T) {
+	m, _ := sendModel(t)
+	target, err := feedback.Resolve(feedback.Config{Target: "stdout"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.target = target
+
+	updated, cmd := m.updateReviewMode(key("S"))
+	m = runCmd(t, updated.(Model), cmd)
+
+	if m.session.PendingCount() != 0 {
+		t.Fatalf("comments still pending: %q", m.statusMsg)
+	}
+
+	var out strings.Builder
+	if err := m.FlushFeedback(&out); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Review feedback", "first note", "second note"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("flushed output missing %q:\n%s", want, out.String())
+		}
+	}
+}

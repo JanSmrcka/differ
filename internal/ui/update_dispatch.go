@@ -64,7 +64,9 @@ func (m Model) handleResize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 	m.viewport = viewport.New(m.diffWidth(), m.contentHeight())
 	m.lastDiffContent = ""
 	m.ready = true
-	return m, m.loadDiffCmd(true)
+	// Re-render at the new size without resetting: a resize (or a tmux pane
+	// split) must not send the reviewer back to the top of the diff.
+	return m, m.loadDiffCmd(false)
 }
 
 func (m Model) handleDiffLoaded(msg diffLoadedMsg) (tea.Model, tea.Cmd) {
@@ -88,19 +90,17 @@ func (m Model) handleDiffLoaded(msg diffLoadedMsg) (tea.Model, tea.Cmd) {
 	if m.session != nil {
 		m.renderer.SetComments(m.session.CommentsFor(m.currentFilePath()))
 	}
-	if msg.resetScroll {
-		// New file (or a resize): start at the first line worth reviewing.
+	// A new file, or the very first diff of the session, starts at the first
+	// line worth reviewing. Everything else keeps the reviewer's position.
+	if msg.resetScroll || !m.cursorPlaced {
 		m.viewport.GotoTop()
 		return m.setCursor(msg.renderer.Parsed().FirstCommentableLine()), nil
 	}
 	// A background refresh: keep the cursor where the user left it, clamped in
-	// case the diff shrank underneath.
-	before := m.lastDiffContent
-	updated := m.setCursor(m.diffCursor)
-	if updated.lastDiffContent == before {
-		return updated, nil
-	}
-	return updated, nil
+	// case the diff shrank underneath. applyContent leaves the viewport alone
+	// when nothing changed, so polling cannot undo the user's own scrolling.
+	m.diffCursor = clampCursor(m.diffCursor, m.renderer.LineCount())
+	return m.applyContent(false), nil
 }
 
 func (m Model) handleFilesRefreshed(msg filesRefreshedMsg) (tea.Model, tea.Cmd) {

@@ -59,6 +59,11 @@ type Comment struct {
 	Excerpt string
 	Body    string
 	State   State
+
+	// seq is the creation order, used to break ties between comments on the
+	// same line. IDs are strings ("c9", "c10"), so comparing them would order
+	// the tenth comment before the ninth.
+	seq int
 }
 
 // FileState is how far the user has got with one file.
@@ -95,6 +100,7 @@ func NewSession() *Session {
 func (s *Session) Add(c Comment) Comment {
 	s.nextID++
 	c.ID = fmt.Sprintf("c%d", s.nextID)
+	c.seq = s.nextID
 	c.State = StatePending
 	if c.EndLine < c.StartLine {
 		c.EndLine = c.StartLine
@@ -111,7 +117,10 @@ func (s *Session) Comments() []Comment {
 		if out[i].File != out[j].File {
 			return out[i].File < out[j].File
 		}
-		return out[i].StartLine < out[j].StartLine
+		if out[i].StartLine != out[j].StartLine {
+			return out[i].StartLine < out[j].StartLine
+		}
+		return out[i].seq < out[j].seq
 	})
 	return out
 }

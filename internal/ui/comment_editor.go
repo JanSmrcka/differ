@@ -18,7 +18,7 @@ const commentEditorHeight = 4
 // startComment opens the editor for a new line comment, or reopens the
 // comment already attached to this line.
 func (m Model) startComment() (tea.Model, tea.Cmd) {
-	if existing, ok := m.commentAtCursor(); ok {
+	if existing, ok := m.lineCommentAtCursor(); ok {
 		return m.openEditor(existing, existing.ID, existing.Body)
 	}
 	draft, ok := m.buildLineComment()
@@ -123,22 +123,54 @@ func (m Model) deleteCommentAtCursor() (tea.Model, tea.Cmd) {
 	return m.refreshCommentMarks(), nil
 }
 
-// commentAtCursor finds the comment anchored to the line under the cursor.
+// commentAtCursor finds the comment the cursor points at, preferring one on
+// exactly this line over one that merely spans it. Used where a hunk comment
+// is still a sensible target — deleting and sending.
 func (m Model) commentAtCursor() (review.Comment, bool) {
+	exact, spanning, exactOK, spanningOK := m.commentsAtCursor()
+	if exactOK {
+		return exact, true
+	}
+	return spanning, spanningOK
+}
+
+// lineCommentAtCursor finds only a comment anchored to exactly this line.
+//
+// Opening the editor uses this so a hunk comment does not swallow the lines
+// inside it: with only a hunk comment present, `c` on a line in that hunk
+// starts a new line comment rather than reopening the hunk's.
+func (m Model) lineCommentAtCursor() (review.Comment, bool) {
+	exact, _, exactOK, _ := m.commentsAtCursor()
+	return exact, exactOK
+}
+
+// commentsAtCursor splits the comments covering the cursor into the one
+// anchored exactly here and the first that merely spans this line.
+func (m Model) commentsAtCursor() (exact, spanning review.Comment, exactOK, spanningOK bool) {
 	if m.session == nil || m.renderer == nil {
-		return review.Comment{}, false
+		return
 	}
 	addr, ok := m.renderer.Parsed().AddressOf(m.diffCursor)
 	if !ok {
-		return review.Comment{}, false
+		return
 	}
 	side, line := sideAndLine(addr)
+
 	for _, c := range m.session.CommentsFor(m.currentFilePath()) {
-		if c.Side == side && line >= c.StartLine && line <= c.EndLine {
-			return c, true
+		if c.Side != side || line < c.StartLine || line > c.EndLine {
+			continue
+		}
+		if c.StartLine == line && c.EndLine == line {
+			if !exactOK {
+				exact, exactOK = c, true
+			}
+			continue
+		}
+		if !spanningOK {
+			spanning, spanningOK = c, true
 		}
 	}
-	return review.Comment{}, false
+	return
 }
 
 // refreshCommentMarks re-renders the diff so comment markers and bodies match

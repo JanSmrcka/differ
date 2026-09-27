@@ -30,6 +30,10 @@ func FormatFeedback(cs []Comment) string {
 		if ordered[i].StartLine != ordered[j].StartLine {
 			return ordered[i].StartLine < ordered[j].StartLine
 		}
+		// seq is creation order; IDs are strings, where "c10" < "c9".
+		if ordered[i].seq != ordered[j].seq {
+			return ordered[i].seq < ordered[j].seq
+		}
 		return ordered[i].ID < ordered[j].ID
 	})
 

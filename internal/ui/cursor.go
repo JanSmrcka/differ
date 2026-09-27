@@ -13,37 +13,67 @@ func (m Model) setCursor(idx int) Model {
 	if m.renderer == nil {
 		return m
 	}
-	last := m.renderer.LineCount() - 1
-	if last < 0 {
-		m.diffCursor = 0
-		return m
-	}
-	m.diffCursor = min(max(idx, 0), last)
-	return m.syncCursorViewport()
+	m.diffCursor = clampCursor(idx, m.renderer.LineCount())
+	m.cursorPlaced = true
+	return m.applyContent(true)
 }
 
-// syncCursorViewport scrolls the viewport just enough to keep the cursor
-// visible, and refreshes the rendered content so the marker follows.
-func (m Model) syncCursorViewport() Model {
+// clampCursor keeps an index inside a diff of count lines. An empty diff — a
+// binary file, or a new file with no content — addresses line 0.
+func clampCursor(idx, count int) int {
+	if count <= 0 {
+		return 0
+	}
+	return min(max(idx, 0), count-1)
+}
+
+// applyContent re-renders the diff into the viewport.
+//
+// The viewport is only touched when the rendered content actually changed, so
+// the two-second poll cannot undo scrolling the user did themselves with
+// pgup/pgdn or the mouse wheel. It scrolls to the cursor when the user moved
+// it, or when the content changed underneath and the cursor would otherwise be
+// off screen.
+func (m Model) applyContent(follow bool) Model {
 	if m.renderer == nil {
 		return m
 	}
-	// Scroll in display rows: in split view several source lines share a row.
-	row, ok := m.renderer.RowFor(m.diffCursor)
-	h := m.viewport.Height
-	if ok && h > 0 {
-		switch {
-		case row < m.viewport.YOffset:
-			m.viewport.SetYOffset(row)
-		case row >= m.viewport.YOffset+h:
-			m.viewport.SetYOffset(row - h + 1)
-		}
-	}
 	content := m.renderer.Content(m.diffCursor)
-	m.lastDiffContent = content
-	m.viewport.SetContent(content)
+	changed := content != m.lastDiffContent
+	if changed {
+		m.lastDiffContent = content
+		m.viewport.SetContent(content)
+	}
+	if follow || changed {
+		m = m.scrollToCursor()
+	}
 	return m
 }
+
+// scrollToCursor scrolls just enough to bring the cursor's row into view.
+func (m Model) scrollToCursor() Model {
+	if m.renderer == nil {
+		return m
+	}
+	// Scroll in display rows: in split view several source lines share a row,
+	// and inline comments add rows of their own.
+	row, ok := m.renderer.RowFor(m.diffCursor)
+	h := m.viewport.Height
+	if !ok || h <= 0 {
+		return m
+	}
+	switch {
+	case row < m.viewport.YOffset:
+		m.viewport.SetYOffset(row)
+	case row >= m.viewport.YOffset+h:
+		m.viewport.SetYOffset(row - h + 1)
+	}
+	return m
+}
+
+// syncCursorViewport re-renders and follows the cursor, for callers that just
+// changed what the diff should look like.
+func (m Model) syncCursorViewport() Model { return m.applyContent(true) }
 
 // nextHunk and prevHunk move the cursor between hunks, staying put when there
 // is no hunk in that direction.

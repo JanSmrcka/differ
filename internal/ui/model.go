@@ -107,6 +107,10 @@ type Model struct {
 	// lines and is the anchor review comments will attach to.
 	renderer   *DiffRenderer
 	diffCursor int
+	// cursorPlaced records that the cursor has been positioned for the
+	// current diff, so a resize preserves it but the first load still lands
+	// on the first reviewable line.
+	cursorPlaced bool
 
 	branches         []string
 	filteredBranches []string

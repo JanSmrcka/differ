@@ -82,21 +82,6 @@ func TestResolve_UnknownTargetIsAnActionableError(t *testing.T) {
 	}
 }
 
-func TestStdoutTarget_BuffersUntilFlushed(t *testing.T) {
-	var out strings.Builder
-	tr := &stdoutTarget{w: &out}
-
-	if err := tr.Send(context.Background(), "hello feedback"); err != nil {
-		t.Fatal(err)
-	}
-	if out.String() == "" {
-		t.Error("stdout target wrote nothing")
-	}
-	if !strings.Contains(out.String(), "hello feedback") {
-		t.Errorf("payload missing: %q", out.String())
-	}
-}
-
 // A target that fails must fail loudly — callers rely on the error to keep
 // comments pending.
 func TestCommandTarget_ReportsFailure(t *testing.T) {
@@ -145,5 +130,68 @@ func TestFake(t *testing.T) {
 	}
 	if len(f.Sent()) != 1 {
 		t.Error("a failed send must not be recorded as sent")
+	}
+}
+
+// #4: while the TUI owns the alt screen, printing to stdout paints over it and
+// is lost when the alt screen is torn down. The payload must be buffered and
+// flushed after the program exits.
+func TestStdoutTarget_BuffersUntilFlushed(t *testing.T) {
+	tr := newStdoutTarget()
+
+	if err := tr.Send(context.Background(), "first payload"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tr.Send(context.Background(), "second payload"); err != nil {
+		t.Fatal(err)
+	}
+
+	var out strings.Builder
+	if err := tr.Flush(&out); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	for _, want := range []string{"first payload", "second payload"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("flushed output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestStdoutTarget_FlushIsIdempotent(t *testing.T) {
+	tr := newStdoutTarget()
+	if err := tr.Send(context.Background(), "once"); err != nil {
+		t.Fatal(err)
+	}
+
+	var first, second strings.Builder
+	_ = tr.Flush(&first)
+	_ = tr.Flush(&second)
+
+	if !strings.Contains(first.String(), "once") {
+		t.Error("first flush lost the payload")
+	}
+	if strings.Contains(second.String(), "once") {
+		t.Error("second flush repeated an already-flushed payload")
+	}
+}
+
+func TestStdoutTarget_NothingToFlushWritesNothing(t *testing.T) {
+	var out strings.Builder
+	if err := newStdoutTarget().Flush(&out); err != nil {
+		t.Fatal(err)
+	}
+	if out.String() != "" {
+		t.Errorf("flush with no payloads wrote %q", out.String())
+	}
+}
+
+func TestResolve_StdoutIsBuffered(t *testing.T) {
+	tr, err := Resolve(Config{Target: "stdout"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := tr.(Flusher); !ok {
+		t.Errorf("stdout target %T must implement Flusher, or its payload is lost", tr)
 	}
 }

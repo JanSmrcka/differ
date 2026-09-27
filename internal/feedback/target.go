@@ -10,7 +10,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -48,7 +47,7 @@ func Resolve(cfg Config) (Target, error) {
 	case "", "clipboard":
 		return clipboardTarget()
 	case "stdout":
-		return &stdoutTarget{w: os.Stdout}, nil
+		return newStdoutTarget(), nil
 	case "tmux":
 		return newTmuxTarget(cfg.TmuxTarget)
 	default:
@@ -113,20 +112,46 @@ func (t *commandTarget) Send(ctx context.Context, payload string) error {
 	return nil
 }
 
-// stdoutTarget collects payloads and prints them. Useful for piping differ's
-// feedback into another tool.
-type stdoutTarget struct {
-	mu sync.Mutex
-	w  io.Writer
+// Flusher is a target that holds payloads until the terminal is free.
+type Flusher interface {
+	Flush(w io.Writer) error
 }
+
+// stdoutTarget buffers payloads rather than writing them immediately.
+//
+// differ runs in the alternate screen buffer, so printing during a session
+// paints over the TUI and is discarded when the alt screen is torn down — the
+// feedback would be reported as sent and then lost. The caller flushes after
+// the program exits.
+type stdoutTarget struct {
+	mu       sync.Mutex
+	payloads []string
+}
+
+func newStdoutTarget() *stdoutTarget { return &stdoutTarget{} }
 
 func (t *stdoutTarget) Name() string { return "stdout" }
 
 func (t *stdoutTarget) Send(_ context.Context, payload string) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	_, err := fmt.Fprintln(t.w, payload)
-	return err
+	t.payloads = append(t.payloads, payload)
+	return nil
+}
+
+// Flush writes and clears everything buffered so far.
+func (t *stdoutTarget) Flush(w io.Writer) error {
+	t.mu.Lock()
+	pending := t.payloads
+	t.payloads = nil
+	t.mu.Unlock()
+
+	for _, p := range pending {
+		if _, err := fmt.Fprintln(w, p); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Fake records payloads instead of delivering them, for tests.
