@@ -150,6 +150,38 @@ Config file: `~/.config/differ/config.json`
 A failed send never discards comments — they stay pending and the error is
 shown, so you can fix the target and send again.
 
+## Reviewing agent changes in tmux
+
+The workflow differ is built for: a coding agent in one pane, differ in another.
+
+```text
+tmux
+├── Claude Code
+└── differ
+```
+
+```json
+{
+  "feedback_target": "tmux",
+  "tmux_target": ""
+}
+```
+
+An empty `tmux_target` means the last active pane — in a two-pane layout, and
+from a `display-popup`, that is the pane you came from. Set it explicitly to
+any tmux pane target (`%12`, `session:window.pane`) to pin it.
+
+Press `r` to review, `c` to comment on a line, `S` to send everything pending.
+The payload is pasted into the target pane's prompt using a tmux paste buffer,
+so multiline feedback arrives intact.
+
+differ does **not** press Enter for you. The feedback lands in the agent's
+prompt and you send it — which means a misconfigured target can never execute
+anything. differ also refuses to paste into its own pane.
+
+If tmux is unavailable, the pane is gone, or the target resolves to differ
+itself, the send fails with a specific error and your comments stay pending.
+
 `editor_cmd` supports `{file}` (absolute path) and `{repo}` (repo root) placeholders. Defaults to `$EDITOR {file}` (falls back to `vi`).
 
 ## Tips

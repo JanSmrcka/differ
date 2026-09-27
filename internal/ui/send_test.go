@@ -2,8 +2,12 @@ package ui
 
 import (
 	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/jansmrcka/differ/internal/feedback"
@@ -216,4 +220,59 @@ func TestSend_RealClipboardTargetIsResolvedFromConfig(t *testing.T) {
 	if m.target.Name() != "clipboard" {
 		t.Errorf("default target = %q, want clipboard", m.target.Name())
 	}
+}
+
+// The complete loop: a comment written in review mode arrives in another tmux
+// pane as text a coding agent can act on.
+func TestSend_EndToEndIntoATmuxPane(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not installed")
+	}
+	dir := t.TempDir()
+	outfile := filepath.Join(dir, "agent-received.txt")
+	sess := "differ-e2e-test"
+	_ = exec.Command("tmux", "kill-session", "-t", sess).Run()
+	if out, err := exec.Command("tmux", "new-session", "-d", "-s", sess, "-n", "w", "cat > "+outfile).CombinedOutput(); err != nil {
+		t.Skipf("cannot start tmux session: %v\n%s", err, out)
+	}
+	t.Cleanup(func() { _ = exec.Command("tmux", "kill-session", "-t", sess).Run() })
+
+	paneOut, err := exec.Command("tmux", "list-panes", "-t", sess+":w", "-F", "#{pane_id}").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pane := strings.TrimSpace(string(paneOut))
+
+	m, _ := sendModel(t)
+	target, err := feedback.Resolve(feedback.Config{Target: "tmux", TmuxTarget: pane})
+	if err != nil {
+		t.Skipf("tmux target unavailable: %v", err)
+	}
+	m.target = target
+
+	updated, cmd := m.updateReviewMode(key("S"))
+	m = runCmd(t, updated.(Model), cmd)
+
+	if m.session.PendingCount() != 0 {
+		t.Errorf("comments still pending after a successful send: %q", m.statusMsg)
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	var got string
+	for time.Now().Before(deadline) {
+		if data, err := os.ReadFile(outfile); err == nil {
+			got = string(data)
+			if strings.Contains(got, "second note") {
+				break
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	for _, want := range []string{"Review feedback", "File: src.ts", "first note", "second note"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the agent pane never received %q; got:\n%s", want, got)
+		}
+	}
+	t.Logf("payload delivered to pane %s:\n%s", pane, got)
 }
