@@ -34,6 +34,16 @@ func (m Model) updateReviewMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.commenting {
 		return m.updateCommentEditor(msg)
 	}
+
+	// Both confirmations are per action, not per session: anything other than
+	// repeating the action disarms them.
+	if k := msg.String(); k != "q" {
+		m.quitConfirm = false
+	}
+	if k := msg.String(); k != "s" && k != "S" {
+		m.staleConfirm = false
+	}
+
 	switch msg.String() {
 	case "c":
 		return m.startComment()

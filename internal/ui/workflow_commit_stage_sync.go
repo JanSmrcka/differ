@@ -186,20 +186,32 @@ func (m Model) refreshFilesCmd() tea.Cmd {
 	stagedOnly := m.stagedOnly
 	ref := m.ref
 	return func() tea.Msg {
-		files, _ := repo.ChangedFiles(stagedOnly, ref)
+		files, err := repo.ChangedFiles(stagedOnly, ref)
+		if err != nil {
+			return filesRefreshedMsg{err: err}
+		}
 		var untracked []string
 		if !stagedOnly && ref == "" {
-			untracked, _ = repo.UntrackedFiles()
+			untracked, err = repo.UntrackedFiles()
+			if err != nil {
+				return filesRefreshedMsg{err: err}
+			}
 		}
 		return filesRefreshedMsg{files: buildFileItems(repo, files, untracked)}
 	}
 }
 
 func (m Model) buildRefreshedFiles() filesRefreshedMsg {
-	files, _ := m.repo.ChangedFiles(m.stagedOnly, m.ref)
+	files, err := m.repo.ChangedFiles(m.stagedOnly, m.ref)
+	if err != nil {
+		return filesRefreshedMsg{err: err}
+	}
 	var untracked []string
 	if !m.stagedOnly && m.ref == "" {
-		untracked, _ = m.repo.UntrackedFiles()
+		untracked, err = m.repo.UntrackedFiles()
+		if err != nil {
+			return filesRefreshedMsg{err: err}
+		}
 	}
 	return filesRefreshedMsg{files: buildFileItems(m.repo, files, untracked)}
 }

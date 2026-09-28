@@ -17,6 +17,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleDiffLoaded(msg)
 	case filesRefreshedMsg:
 		return m.handleFilesRefreshed(msg)
+	case reanchorMsg:
+		return m.handleReanchor(msg)
 	case feedbackSentMsg:
 		return m.handleFeedbackSent(msg)
 	case commitDoneMsg:
@@ -108,6 +110,14 @@ func (m Model) handleDiffLoaded(msg diffLoadedMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleFilesRefreshed(msg filesRefreshedMsg) (tea.Model, tea.Cmd) {
+	if msg.err != nil {
+		// git could not be read. An empty file list here means "unknown", not
+		// "everything was committed", so nothing may be staled off it — a held
+		// index.lock while the agent stages files would otherwise demote the
+		// whole review with no way back.
+		m.statusMsg = "refresh failed: " + msg.err.Error()
+		return m, nil
+	}
 	if filesEqual(m.files, msg.files) {
 		return m, m.loadDiffCmd(false)
 	}
@@ -128,7 +138,19 @@ func (m Model) handleFilesRefreshed(msg filesRefreshedMsg) (tea.Model, tea.Cmd) 
 		m.viewport.SetContent("")
 		return m, nil
 	}
-	return m, m.loadDiffCmd(true)
+	// The changeset moved, so comments on files that are not on screen need
+	// re-anchoring too, not just the one being viewed.
+	return m, tea.Batch(m.loadDiffCmd(true), m.reanchorAllCmd())
+}
+
+func (m Model) handleReanchor(msg reanchorMsg) (tea.Model, tea.Cmd) {
+	if m.session == nil {
+		return m, nil
+	}
+	for file, locations := range msg.locations {
+		m.session.Reanchor(file, locations)
+	}
+	return m.refreshCommentMarks(), nil
 }
 
 func (m Model) handleCommitDone(msg commitDoneMsg) (tea.Model, tea.Cmd) {

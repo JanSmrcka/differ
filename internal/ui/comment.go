@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/jansmrcka/differ/internal/git"
 	"github.com/jansmrcka/differ/internal/review"
 )
 
@@ -34,6 +36,68 @@ func diffLocations(p ParsedDiff) []review.Location {
 		out = append(out, review.Location{Side: side, Line: line, Content: p.Lines[i].Content})
 	}
 	return out
+}
+
+// reanchorAllCmd re-resolves every commented file against its current diff.
+//
+// Only the file on screen is re-anchored when its diff loads, so without this
+// a comment on any other file keeps line numbers that the agent has since
+// moved — and would be delivered quoting the wrong place.
+func (m Model) reanchorAllCmd() tea.Cmd {
+	if m.session == nil {
+		return nil
+	}
+	current := m.currentFilePath()
+	var targets []string
+	seen := map[string]bool{current: true}
+	for _, c := range m.session.Comments() {
+		if !seen[c.File] {
+			seen[c.File] = true
+			targets = append(targets, c.File)
+		}
+	}
+	if len(targets) == 0 {
+		return nil
+	}
+
+	repo := m.repo
+	staged := m.stagedOnly
+	ref := m.ref
+	untracked := map[string]bool{}
+	for _, f := range m.files {
+		if f.untracked {
+			untracked[f.change.Path] = true
+		}
+	}
+
+	return func() tea.Msg {
+		out := make(map[string][]review.Location, len(targets))
+		for _, path := range targets {
+			parsed, ok := parseFileDiff(repo, path, staged, ref, untracked[path])
+			if !ok {
+				continue
+			}
+			out[path] = diffLocations(parsed)
+		}
+		return reanchorMsg{locations: out}
+	}
+}
+
+// parseFileDiff reads one file's current diff, returning false when it can no
+// longer be read — a comment must not be staled on a transient failure.
+func parseFileDiff(repo *git.Repo, path string, staged bool, ref string, untracked bool) (ParsedDiff, bool) {
+	if untracked {
+		raw, err := repo.ReadFileContent(path)
+		if err != nil {
+			return ParsedDiff{}, false
+		}
+		return ParseNewFile(raw), true
+	}
+	raw, err := repo.DiffFile(path, staged, ref)
+	if err != nil {
+		return ParsedDiff{}, false
+	}
+	return ParseDiff(raw), true
 }
 
 // buildLineComment describes the line under the cursor.
@@ -90,7 +154,7 @@ func (m Model) buildHunkComment() (review.Comment, bool) {
 		StartLine: start,
 		EndLine:   start + max(count, 1) - 1,
 		HunkIndex: h.Index,
-		Anchor:    anchorForHunk(parsed, h),
+		Anchor:    anchorForHunk(parsed, h, side),
 		Excerpt:   excerptFor(parsed, h),
 	}, true
 }
@@ -104,15 +168,35 @@ func sideAndLine(addr LineAddress) (review.Side, int) {
 	return review.SideNew, addr.NewLine
 }
 
-// anchorForHunk is the hunk's first content line, used to re-locate the hunk
-// after the diff changes.
-func anchorForHunk(parsed ParsedDiff, h Hunk) string {
+// anchorForHunk is the hunk's first line that exists on the given side.
+//
+// The side matters: a hunk often starts with a removed line, which exists only
+// on the old side. Anchoring a new-side comment to it would make the anchor
+// unfindable and the comment stale against an unchanged diff.
+func anchorForHunk(parsed ParsedDiff, h Hunk, side review.Side) string {
 	for i := h.StartLine; i <= h.LastLine && i < len(parsed.Lines); i++ {
-		if parsed.Lines[i].Type != LineHunkHeader {
-			return parsed.Lines[i].Content
+		dl := parsed.Lines[i]
+		if dl.Type == LineHunkHeader {
+			continue
+		}
+		if lineExistsOn(dl.Type, side) {
+			return dl.Content
 		}
 	}
 	return h.Context
+}
+
+// lineExistsOn reports whether a diff line is present in the given version of
+// the file.
+func lineExistsOn(t DiffLineType, side review.Side) bool {
+	switch t {
+	case LineAdded:
+		return side == review.SideNew
+	case LineRemoved:
+		return side == review.SideOld
+	default:
+		return true // context lines exist on both sides
+	}
 }
 
 // excerptFor renders a hunk as plain unified-diff text: no styling, no line

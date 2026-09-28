@@ -72,6 +72,12 @@ type Comment struct {
 	stateBeforeStale State
 }
 
+// WasSent reports whether this comment has already been delivered, including
+// after it later went stale. Nothing that was sent may be sent again.
+func (c Comment) WasSent() bool {
+	return c.State == StateSent || (c.State == StateStale && c.stateBeforeStale == StateSent)
+}
+
 // FileState is how far the user has got with one file.
 type FileState int
 

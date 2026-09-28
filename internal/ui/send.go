@@ -48,7 +48,7 @@ func (m Model) sendCommentAtCursor() (tea.Model, tea.Cmd) {
 		m.statusMsg = "no comment here to send"
 		return m, nil
 	}
-	if c.State == review.StateSent {
+	if c.WasSent() {
 		m.statusMsg = "already sent"
 		return m, nil
 	}
@@ -73,6 +73,12 @@ func (m Model) sendAllPending() (tea.Model, tea.Cmd) {
 
 	var pending, stale []review.Comment
 	for _, c := range m.session.Comments() {
+		// Anything already delivered is history, even if it later went stale
+		// because its file left the diff. Re-sending would hand the agent the
+		// whole review a second time.
+		if c.WasSent() {
+			continue
+		}
 		switch c.State {
 		case review.StatePending:
 			pending = append(pending, c)
@@ -85,7 +91,10 @@ func (m Model) sendAllPending() (tea.Model, tea.Cmd) {
 	case len(pending) > 0:
 		updated, cmd := m.send(pending)
 		if len(stale) > 0 {
+			// Arm the guard now, so the promised "S again" actually sends them
+			// rather than only re-prompting.
 			mm := updated.(Model)
+			mm.staleConfirm = true
 			mm.statusMsg += fmt.Sprintf(" · %s stale, S again to send", plural(len(stale), "comment"))
 			return mm, cmd
 		}

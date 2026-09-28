@@ -78,7 +78,7 @@ toggle between unified and split view.
 ### Review Mode
 
 Review mode is the diff view with review state on top: it tracks which files
-you have looked at and (from the next release) holds your review comments.
+you have looked at and holds your review comments.
 It never changes git state — staging and committing stay explicit actions.
 
 | Key       | Action                          |
@@ -91,6 +91,13 @@ It never changes git state — staging and committing stay explicit actions.
 | `x`       | delete comment under cursor     |
 | `s`       | send comment under cursor       |
 | `S`       | send all pending comments       |
+| `n/p`     | next/prev file                  |
+| `v`       | toggle split diff               |
+| `esc`     | back to file list               |
+
+In the comment editor: `ctrl+s` saves, `esc` cancels. Comments are multiline,
+shown inline under the line they refer to, and marked `pending` until sent.
+They live for the session only — nothing is written to disk or to git.
 
 Quitting with unsent comments asks for confirmation — review state is
 session-only, so `q` really does discard them.
@@ -103,13 +110,9 @@ comment is marked `stale` (`!`), with the reason shown inline and the file
 flagged in the list. Sending stale comments takes a second, explicit press —
 feedback about code that no longer exists is never sent by accident. If the
 line comes back, so does the comment.
-| `n/p`     | next/prev file                  |
-| `v`       | toggle split diff               |
-| `esc`     | back to file list               |
 
-In the comment editor: `ctrl+s` saves, `esc` cancels. Comments are multiline,
-shown inline under the line they refer to, and marked `pending` until sent.
-They live for the session only — nothing is written to disk or to git.
+A comment that was already sent is never sent again, even if it later goes
+stale because its file left the diff.
 
 ### Commit Mode
 
