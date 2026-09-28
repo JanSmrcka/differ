@@ -50,7 +50,7 @@ differ commit     # review staged + commit
 | `c`           | commit (AI-generated message via `claude`) |
 | `b`           | open branch picker                         |
 | `v`           | toggle split (side-by-side) diff           |
-| `e`           | open in editor (`$EDITOR`, configurable)   |
+| `e`           | open in editor — differ keeps running      |
 | `P`           | push (auto `--set-upstream` if needed)     |
 | `F`           | pull (fast-forward only)                   |
 | `g/G`         | first/last file                            |
@@ -68,7 +68,7 @@ differ commit     # review staged + commit
 | `tab`       | stage/unstage             |
 | `b`         | open branch picker        |
 | `v`         | toggle split diff         |
-| `e`         | open in editor            |
+| `e`         | open in editor at the cursor's line |
 | `esc` / `h` | back to file list         |
 
 The diff view has a line cursor (`▌`) marking the current line. It is the
@@ -151,7 +151,7 @@ Config file: `~/.config/differ/config.json`
   "theme": "dark",
   "commit_msg_cmd": "claude -p",
   "commit_msg_prompt": "Write a concise git commit message for this diff:",
-  "editor_cmd": "tmux new-window -c {repo} nvim {file}",
+  "editor_cmd": "",
   "split_diff": false,
   "feedback_target": "clipboard",
   "tmux_target": ""
@@ -197,7 +197,25 @@ anything. differ also refuses to paste into its own pane.
 If tmux is unavailable, the pane is gone, or the target resolves to differ
 itself, the send fails with a specific error and your comments stay pending.
 
-`editor_cmd` supports `{file}` (absolute path) and `{repo}` (repo root) placeholders. Defaults to `$EDITOR {file}` (falls back to `vi`).
+### Editor
+
+`e` opens the file under the cursor in your editor and differ keeps running:
+it releases the terminal, and you are back on the same file and line when the
+editor exits. From the diff or a review, the editor opens at the line the
+cursor is on.
+
+The editor is `editor_cmd`, else `$EDITOR`, else `vi`. `$EDITOR` may carry
+arguments (`code --wait`). `editor_cmd` supports `{file}` (absolute path),
+`{repo}` (repo root) and `{line}` placeholders; each is substituted inside a
+single argument, so a path containing spaces needs no quoting.
+
+Without an explicit `{file}` in `editor_cmd`, differ adds the line itself for
+editors it knows: `+<line>` for `vi`/`vim`/`nvim`/`view`/`nano`, and
+`--goto <file>:<line>` for `code`. Any other editor gets the file alone — use
+`{line}` to place it yourself, as in `"editor_cmd": "subl {file}:{line}"`.
+
+An `editor_cmd` that starts with `tmux` runs exactly as written, so a recipe
+like `tmux new-window -c {repo} nvim {file}` still works.
 
 ## Tips
 
@@ -221,7 +239,7 @@ Press `prefix + g` to open differ in a floating window over your current session
 - Push with auto `--set-upstream` for new branches
 - Pull with upstream ahead/behind tracking
 - Per-file added/deleted line counts in file list
-- Configurable editor command (`editor_cmd`)
+- Open the file under the cursor in `$EDITOR` without leaving differ
 - Commit flow with AI-generated messages
 - Commit log browser with diff preview
 - Compare against any branch/tag/commit ref

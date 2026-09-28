@@ -49,10 +49,7 @@ func (m Model) diffNavigation(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "p":
 		return m.prevFile()
 	case "e":
-		if m.cursor < len(m.files) {
-			m.SelectedFile = m.files[m.cursor].change.Path
-		}
-		return m, tea.Quit
+		return m.openFileInEditor()
 	case "b":
 		return m.enterBranchMode()
 	case "tab":

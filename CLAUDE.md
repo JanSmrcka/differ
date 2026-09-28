@@ -45,6 +45,7 @@ main.go → cmd/root.go (cobra commands)
              ├── internal/theme    — color hex values only (no lipgloss)
              ├── internal/review   — review session: comments, per-file state, feedback text
              ├── internal/feedback — Target interface + clipboard/stdout/tmux delivery
+             ├── internal/editor   — decides and performs "open this file in an editor"
              ├── internal/testutil — temp git repos, diff fixtures, golden files (tests only)
              └── internal/ui
                    ├── model.go    — Model state (5 modes: file list / diff / commit / branch / review)
@@ -65,6 +66,14 @@ main.go → cmd/root.go (cobra commands)
 owns the diff parser, and a cycle would follow. A `review.Comment` therefore
 carries its own anchor text and a plain-text excerpt, which keeps feedback
 generation a pure string transformation.
+
+`internal/editor` must not import `internal/ui` either. It both decides how to
+open a file and does it — the one exception is handing the terminal to a child
+process, which only the bubbletea program can do, so such a plan comes back as
+an argv the UI runs through `tea.ExecProcess`. Its environment arrives as an
+injected `editor.Env` rather than being read inside, so the whole decision tree
+is a pure function of its inputs and its tests need no `t.Setenv` (which would
+bar `t.Parallel`).
 
 `DiffRenderer` is the only rendering path — the diff viewer, untracked files
 and the commit log browser all go through it, so tab expansion, syntax

@@ -54,10 +54,7 @@ func (m Model) updateFileListMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.mode = modeDiff
 		return m, nil
 	case "e":
-		if m.cursor < len(m.files) {
-			m.SelectedFile = m.files[m.cursor].change.Path
-		}
-		return m, tea.Quit
+		return m.openFileInEditor()
 	case "tab":
 		return m.toggleStage()
 	case "a":

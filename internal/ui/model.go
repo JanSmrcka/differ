@@ -113,7 +113,6 @@ type Model struct {
 	width         int
 	height        int
 	ready         bool
-	SelectedFile  string
 
 	lastDiffContent string
 
