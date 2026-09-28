@@ -127,10 +127,11 @@ func TestContentHeight(t *testing.T) {
 func TestDiffWidth(t *testing.T) {
 	t.Parallel()
 	m := Model{width: 120}
-	// width - fileListWidth(35) - 2(file card borders) - 1(gap) - 2(diff card borders)
-	want := 120 - 40
-	if got := m.diffWidth(); got != want {
-		t.Errorf("diffWidth()=%d, want %d", got, want)
+	// 120 less the file list (35), the divider (1) and the space either side
+	// of it (2). The old figure also budgeted for card borders that the frame
+	// no longer draws.
+	if got := m.diffWidth(); got != 82 {
+		t.Errorf("diffWidth()=%d, want 82", got)
 	}
 }
 

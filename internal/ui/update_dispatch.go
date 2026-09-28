@@ -7,7 +7,19 @@ import (
 )
 
 // Update stays dispatcher-only; behavior lives in focused modules.
+//
+// Every message goes through fitViewport afterwards, not just key presses:
+// an async result — a push finishing, feedback being sent, a commit landing —
+// can add a status row and change how much room the panels have.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	updated, cmd := m.dispatch(msg)
+	if mm, ok := updated.(Model); ok {
+		return mm.fitViewport(), cmd
+	}
+	return updated, cmd
+}
+
+func (m Model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		return m.handleResize(msg)
@@ -42,14 +54,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case tea.KeyMsg:
-		updated, cmd := m.routeKey(msg)
-		// Any mode change can change the footer's height — a status row
-		// appears, an input opens — so the panels must be re-measured in one
-		// place rather than at every transition.
-		if mm, ok := updated.(Model); ok {
-			return mm.fitViewport(), cmd
-		}
-		return updated, cmd
+		return m.routeKey(msg)
 	}
 	return m, nil
 }
@@ -73,7 +78,7 @@ func (m Model) routeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) handleResize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 	m.width = msg.Width
 	m.height = msg.Height
-	m.viewport = viewport.New(m.diffWidth(), m.contentHeight())
+	m.viewport = viewport.New(m.diffWidth(), m.listHeight())
 	m.lastDiffContent = ""
 	m.ready = true
 	// Re-render at the new size without resetting: a resize (or a tmux pane

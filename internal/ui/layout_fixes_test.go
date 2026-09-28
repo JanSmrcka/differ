@@ -78,9 +78,10 @@ func TestCommentEditor_ShrinksTheDiffViewport(t *testing.T) {
 	if m.viewport.Height != before {
 		t.Errorf("viewport height %d not restored after closing the editor (was %d)", m.viewport.Height, before)
 	}
-	// The viewport must always match the room the panels actually have.
-	if m.viewport.Height != m.contentHeight() {
-		t.Errorf("viewport height %d != contentHeight %d", m.viewport.Height, m.contentHeight())
+	// The viewport matches the panel's list rows, not the whole panel: two
+	// rows go to the label and the blank line under it.
+	if m.viewport.Height != m.listHeight() {
+		t.Errorf("viewport height %d != listHeight %d", m.viewport.Height, m.listHeight())
 	}
 }
 

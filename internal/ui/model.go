@@ -272,4 +272,10 @@ func (m Model) contentHeight() int { return m.height - chromeRows - m.footerHeig
 // label and the blank line under it. Scroll clamping and rendering must both
 // use this, or the cursor can sit outside the visible window.
 func (m Model) listHeight() int { return max(m.contentHeight()-2, 0) }
-func (m Model) diffWidth() int  { return m.width - fileListWidth - 2 - 1 - 2 }
+
+// diffWidth is what the right-hand panel gets: the terminal less the file
+// list, the divider and the space either side of it. The old figure still
+// budgeted for card borders that no longer exist.
+func (m Model) diffWidth() int {
+	return m.width - fileListWidth - verticalDividerWidth - 2*panelGap
+}

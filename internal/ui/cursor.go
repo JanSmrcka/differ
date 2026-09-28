@@ -74,7 +74,7 @@ func (m Model) scrollToCursor() Model {
 // fitViewport resizes the viewport when the space available to it has changed,
 // and does nothing otherwise so it is cheap to call after every key.
 func (m Model) fitViewport() Model {
-	if !m.ready || m.viewport.Height == m.contentHeight() {
+	if !m.ready || m.viewport.Height == m.listHeight() {
 		return m
 	}
 	return m.resizeViewport()
@@ -88,7 +88,10 @@ func (m Model) resizeViewport() Model {
 		return m
 	}
 	m.viewport.Width = m.diffWidth()
-	m.viewport.Height = m.contentHeight()
+	// listHeight, not contentHeight: the panel spends two rows on its label
+	// and the blank line under it. Using the larger figure clipped the bottom
+	// two diff rows while scrollToCursor still counted them as visible.
+	m.viewport.Height = m.listHeight()
 	return m.applyContent(true)
 }
 

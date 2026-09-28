@@ -18,6 +18,8 @@ const (
 	horizontalRule  = "─"
 	focusBar        = "▍"
 	panelGap        = 1 // one space either side of the divider
+
+	verticalDividerWidth = 1
 )
 
 // chromeRows is what the frame spends on structure: the header and the two
@@ -177,16 +179,28 @@ func (m Model) rule() string {
 // renderFooter is the bar below the content: hints, or an input when one is
 // open.
 func (m Model) renderFooter() string {
+	var input string
 	switch {
 	case m.commenting:
-		return m.renderCommentEditor()
+		input = m.renderCommentEditor()
 	case m.mode == modeCommit:
-		return m.renderCommitBar()
+		input = m.renderCommitBar()
 	case m.mode == modeBranchPicker && m.branchCreating:
-		return m.renderBranchCreateBar()
+		input = m.renderBranchCreateBar()
 	default:
-		return m.renderHintBar()
+		return m.renderHintBar() // already carries the status row
 	}
+
+	// An open input replaces the hints, but not the status: "comment is empty
+	// — esc to cancel" and "ai msg failed" are only reachable here, and the
+	// whole point of those messages is not to fail silently.
+	if segment := m.statusSegment(); segment != "" {
+		return lipgloss.JoinVertical(lipgloss.Left,
+			input,
+			m.renderBar(m.styles.StatusText, " "+segment),
+		)
+	}
+	return input
 }
 
 // renderHintBar is the key hints, with a status row beneath them when there is
