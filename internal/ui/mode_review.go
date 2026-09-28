@@ -55,7 +55,7 @@ func (m Model) updateReviewMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.mode = modeDiff
 		return m, nil
 	case "q":
-		return m, tea.Quit
+		return m.confirmQuit()
 	}
 	return m.diffNavigation(msg)
 }

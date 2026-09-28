@@ -71,6 +71,18 @@ func (m Model) scrollToCursor() Model {
 	return m
 }
 
+// resizeViewport matches the viewport to the space the cards currently have,
+// which changes when the footer grows or shrinks, then keeps the cursor in
+// view.
+func (m Model) resizeViewport() Model {
+	if !m.ready {
+		return m
+	}
+	m.viewport.Width = m.diffWidth()
+	m.viewport.Height = m.contentHeight()
+	return m.applyContent(true)
+}
+
 // syncCursorViewport re-renders and follows the cursor, for callers that just
 // changed what the diff should look like.
 func (m Model) syncCursorViewport() Model { return m.applyContent(true) }

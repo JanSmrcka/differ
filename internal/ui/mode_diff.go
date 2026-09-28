@@ -7,9 +7,14 @@ import tea "github.com/charmbracelet/bubbletea"
 // has to be the thing the user drives.
 
 func (m Model) updateDiffMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if msg.String() != "q" {
+		m.quitConfirm = false
+	}
 	switch msg.String() {
-	case "q", "ctrl+c":
+	case "ctrl+c":
 		return m, tea.Quit
+	case "q":
+		return m.confirmQuit()
 	case "esc", "h", "left":
 		m.mode = modeFileList
 		return m, nil

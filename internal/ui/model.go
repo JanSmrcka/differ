@@ -4,6 +4,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
+
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -123,6 +125,7 @@ type Model struct {
 
 	upstream    git.UpstreamInfo
 	pushConfirm bool
+	quitConfirm bool
 
 	// commenting is true while the comment editor is open; draft is the
 	// comment being written, and editingID is set when editing an existing
@@ -251,5 +254,34 @@ func (m Model) Init() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-func (m Model) contentHeight() int { return m.height - 4 }
+// footerHeight is how many rows the bar below the status line takes.
+//
+// It is measured, not assumed: the comment editor is a multiline textarea, and
+// the help hints wrap onto a second row on narrow terminals. Guessing one row
+// pushed the top of the layout off screen.
+func (m Model) footerHeight() int {
+	if m.commenting {
+		return 1 + commentEditorHeight // label + textarea
+	}
+	if m.width <= 0 {
+		return 1
+	}
+	return lipgloss.Height(lipgloss.NewStyle().Width(m.width).Render(m.footerContent()))
+}
+
+// footerContent is the text of the bar below the status line.
+func (m Model) footerContent() string {
+	switch {
+	case m.mode == modeCommit:
+		return m.commitBarContent()
+	case m.mode == modeBranchPicker && m.branchCreating:
+		return m.branchCreateContent()
+	default:
+		return m.helpContent(m.helpPairs())
+	}
+}
+
+// contentHeight is the room left for the cards: the terminal minus the card
+// borders, the status line and the footer.
+func (m Model) contentHeight() int { return m.height - 3 - m.footerHeight() }
 func (m Model) diffWidth() int     { return m.width - fileListWidth - 2 - 1 - 2 }

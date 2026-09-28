@@ -29,10 +29,15 @@ func (m Model) updateFileListMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.pushConfirm = false
+	if msg.String() != "q" {
+		m.quitConfirm = false
+	}
 
 	switch msg.String() {
-	case "q", "ctrl+c":
+	case "ctrl+c":
 		return m, tea.Quit
+	case "q":
+		return m.confirmQuit()
 	case "j", "down":
 		if m.cursor < len(m.files)-1 {
 			m.cursor++

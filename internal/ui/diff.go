@@ -256,25 +256,6 @@ const commentMarker = "●"
 
 const commentBar = "▏"
 
-// RenderDiff renders parsed diff lines into a styled string.
-func RenderDiff(parsed ParsedDiff, filename string, styles Styles, t theme.Theme, width int) string {
-	if parsed.Binary {
-		return RenderBinaryFile(styles, width)
-	}
-	initChromaStyle(t.ChromaStyle)
-
-	var b strings.Builder
-	for _, dl := range parsed.Lines {
-		b.WriteString(renderDiffLine(dl, filename, styles, t, width))
-		b.WriteByte('\n')
-	}
-	return b.String()
-}
-
-func renderDiffLine(dl DiffLine, filename string, styles Styles, t theme.Theme, width int) string {
-	return renderDiffLineGutter(dl, filename, styles, t, width, blankGutter())
-}
-
 func renderDiffLineGutter(dl DiffLine, filename string, styles Styles, t theme.Theme, width int, gutter string) string {
 	switch dl.Type {
 	case LineHunkHeader:
@@ -355,12 +336,6 @@ func fmtLineNum(n int) string {
 	return fmt.Sprintf("%4d", n)
 }
 
-// RenderNewFile renders file content as an all-added diff (for untracked
-// files), through the same renderer used for real diffs.
-func RenderNewFile(content, filename string, styles Styles, t theme.Theme, width int) string {
-	return NewDiffRenderer(ParseNewFile(content), filename, styles, t, width).Content(-1)
-}
-
 // RenderBinaryFile renders a placeholder for binary files.
 func RenderBinaryFile(styles Styles, width int) string {
 	return styles.DiffHunkHeader.Width(width).Render("  Binary file — cannot display diff")
@@ -369,12 +344,6 @@ func RenderBinaryFile(styles Styles, width int) string {
 // --- Split (side-by-side) diff ---
 
 const minSplitWidth = 60
-
-// SplitLine pairs left (old) and right (new) sides for side-by-side display.
-type SplitLine struct {
-	Left  *DiffLine // nil = blank padding
-	Right *DiffLine // nil = blank padding
-}
 
 // splitRow is a paired split line that remembers where each side came from in
 // ParsedDiff.Lines, so a cursor keeps the same address in both views.
@@ -429,28 +398,6 @@ func pairLinesIndexed(lines []DiffLine) []splitRow {
 		}
 	}
 	return rows
-}
-
-// PairLines converts unified diff lines into paired split lines.
-func PairLines(lines []DiffLine) []SplitLine {
-	rows := pairLinesIndexed(lines)
-	out := make([]SplitLine, 0, len(rows))
-	for _, r := range rows {
-		out = append(out, SplitLine{Left: r.left, Right: r.right})
-	}
-	return out
-}
-
-// RenderSplitDiff renders a parsed diff in side-by-side layout.
-func RenderSplitDiff(parsed ParsedDiff, filename string, styles Styles, t theme.Theme, width int) string {
-	r := NewDiffRenderer(parsed, filename, styles, t, width)
-	r.SetSplit(true)
-	return r.Content(-1)
-}
-
-// RenderNewFileSplit renders untracked file content in split layout.
-func RenderNewFileSplit(content, filename string, styles Styles, t theme.Theme, width int) string {
-	return RenderSplitDiff(ParseNewFile(content), filename, styles, t, width)
 }
 
 const splitLineNumWidth = 4

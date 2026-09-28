@@ -91,6 +91,9 @@ It never changes git state — staging and committing stay explicit actions.
 | `x`       | delete comment under cursor     |
 | `s`       | send comment under cursor       |
 | `S`       | send all pending comments       |
+
+Quitting with unsent comments asks for confirmation — review state is
+session-only, so `q` really does discard them.
 | `n/p`     | next/prev file                  |
 | `v`       | toggle split diff               |
 | `esc`     | back to file list               |

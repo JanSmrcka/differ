@@ -44,6 +44,8 @@ func (m Model) openEditor(draft review.Comment, editingID, body string) (tea.Mod
 	m.draft = draft
 	m.editingID = editingID
 	m.commentInput = newCommentArea(m.diffWidth(), body)
+	// The editor takes several rows from the cards, so the viewport shrinks.
+	m = m.resizeViewport()
 	return m, textarea.Blink
 }
 
@@ -85,7 +87,7 @@ func (m Model) closeEditor() Model {
 	m.draft = review.Comment{}
 	m.commentInput.Reset()
 	m.commentInput.Blur()
-	return m
+	return m.resizeViewport()
 }
 
 func (m Model) saveComment() (tea.Model, tea.Cmd) {

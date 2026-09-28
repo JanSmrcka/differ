@@ -12,16 +12,16 @@ func TestPairLines_ContextOnly(t *testing.T) {
 		{Type: LineContext, Content: "a", OldNum: 1, NewNum: 1},
 		{Type: LineContext, Content: "b", OldNum: 2, NewNum: 2},
 	}
-	pairs := PairLines(lines)
+	pairs := pairLinesIndexed(lines)
 	if len(pairs) != 2 {
 		t.Fatalf("expected 2 pairs, got %d", len(pairs))
 	}
 	for i, p := range pairs {
-		if p.Left == nil || p.Right == nil {
+		if p.left == nil || p.right == nil {
 			t.Fatalf("pair %d: expected both sides non-nil", i)
 		}
-		if p.Left.Content != p.Right.Content {
-			t.Errorf("pair %d: left %q != right %q", i, p.Left.Content, p.Right.Content)
+		if p.left.Content != p.right.Content {
+			t.Errorf("pair %d: left %q != right %q", i, p.left.Content, p.right.Content)
 		}
 	}
 }
@@ -32,17 +32,17 @@ func TestPairLines_RemovedThenAdded(t *testing.T) {
 		{Type: LineRemoved, Content: "old2", OldNum: 2, NewNum: -1},
 		{Type: LineAdded, Content: "new1", OldNum: -1, NewNum: 1},
 	}
-	pairs := PairLines(lines)
+	pairs := pairLinesIndexed(lines)
 	if len(pairs) != 2 {
 		t.Fatalf("expected 2 pairs, got %d", len(pairs))
 	}
 	// First pair: removed left, added right
-	if pairs[0].Left.Content != "old1" || pairs[0].Right.Content != "new1" {
-		t.Errorf("pair 0: got left=%q right=%q", pairs[0].Left.Content, pairs[0].Right.Content)
+	if pairs[0].left.Content != "old1" || pairs[0].right.Content != "new1" {
+		t.Errorf("pair 0: got left=%q right=%q", pairs[0].left.Content, pairs[0].right.Content)
 	}
 	// Second pair: removed left, nil right
-	if pairs[1].Left.Content != "old2" || pairs[1].Right != nil {
-		t.Errorf("pair 1: got left=%q right=%v", pairs[1].Left.Content, pairs[1].Right)
+	if pairs[1].left.Content != "old2" || pairs[1].right != nil {
+		t.Errorf("pair 1: got left=%q right=%v", pairs[1].left.Content, pairs[1].right)
 	}
 }
 
@@ -51,14 +51,14 @@ func TestPairLines_OrphanAdded(t *testing.T) {
 		{Type: LineContext, Content: "ctx", OldNum: 1, NewNum: 1},
 		{Type: LineAdded, Content: "new", OldNum: -1, NewNum: 2},
 	}
-	pairs := PairLines(lines)
+	pairs := pairLinesIndexed(lines)
 	if len(pairs) != 2 {
 		t.Fatalf("expected 2 pairs, got %d", len(pairs))
 	}
-	if pairs[1].Left != nil {
+	if pairs[1].left != nil {
 		t.Error("orphan added: expected nil left")
 	}
-	if pairs[1].Right == nil || pairs[1].Right.Content != "new" {
+	if pairs[1].right == nil || pairs[1].right.Content != "new" {
 		t.Error("orphan added: expected right with content 'new'")
 	}
 }
@@ -68,14 +68,14 @@ func TestPairLines_HunkHeader(t *testing.T) {
 		{Type: LineHunkHeader, Content: "func main()", OldNum: -1, NewNum: -1},
 		{Type: LineContext, Content: "a", OldNum: 10, NewNum: 10},
 	}
-	pairs := PairLines(lines)
+	pairs := pairLinesIndexed(lines)
 	if len(pairs) != 2 {
 		t.Fatalf("expected 2 pairs, got %d", len(pairs))
 	}
-	if pairs[0].Left == nil || pairs[0].Left.Type != LineHunkHeader {
+	if pairs[0].left == nil || pairs[0].left.Type != LineHunkHeader {
 		t.Error("expected hunk header on left")
 	}
-	if pairs[0].Right != nil {
+	if pairs[0].right != nil {
 		t.Error("expected nil right for hunk header")
 	}
 }
@@ -85,12 +85,12 @@ func TestPairLines_EqualRemovedAdded(t *testing.T) {
 		{Type: LineRemoved, Content: "old", OldNum: 1, NewNum: -1},
 		{Type: LineAdded, Content: "new", OldNum: -1, NewNum: 1},
 	}
-	pairs := PairLines(lines)
+	pairs := pairLinesIndexed(lines)
 	if len(pairs) != 1 {
 		t.Fatalf("expected 1 pair, got %d", len(pairs))
 	}
-	if pairs[0].Left.Content != "old" || pairs[0].Right.Content != "new" {
-		t.Errorf("got left=%q right=%q", pairs[0].Left.Content, pairs[0].Right.Content)
+	if pairs[0].left.Content != "old" || pairs[0].right.Content != "new" {
+		t.Errorf("got left=%q right=%q", pairs[0].left.Content, pairs[0].right.Content)
 	}
 }
 
@@ -100,20 +100,20 @@ func TestPairLines_MoreAddedThanRemoved(t *testing.T) {
 		{Type: LineAdded, Content: "new1", OldNum: -1, NewNum: 1},
 		{Type: LineAdded, Content: "new2", OldNum: -1, NewNum: 2},
 	}
-	pairs := PairLines(lines)
+	pairs := pairLinesIndexed(lines)
 	if len(pairs) != 2 {
 		t.Fatalf("expected 2 pairs, got %d", len(pairs))
 	}
-	if pairs[0].Left.Content != "old" || pairs[0].Right.Content != "new1" {
-		t.Errorf("pair 0: left=%q right=%q", pairs[0].Left.Content, pairs[0].Right.Content)
+	if pairs[0].left.Content != "old" || pairs[0].right.Content != "new1" {
+		t.Errorf("pair 0: left=%q right=%q", pairs[0].left.Content, pairs[0].right.Content)
 	}
-	if pairs[1].Left != nil || pairs[1].Right.Content != "new2" {
-		t.Errorf("pair 1: left=%v right=%q", pairs[1].Left, pairs[1].Right.Content)
+	if pairs[1].left != nil || pairs[1].right.Content != "new2" {
+		t.Errorf("pair 1: left=%v right=%q", pairs[1].left, pairs[1].right.Content)
 	}
 }
 
 func TestPairLines_Empty(t *testing.T) {
-	pairs := PairLines(nil)
+	pairs := pairLinesIndexed(nil)
 	if len(pairs) != 0 {
 		t.Fatalf("expected 0 pairs, got %d", len(pairs))
 	}
@@ -129,8 +129,9 @@ func TestRenderSplitDiff_ContainsSeparator(t *testing.T) {
 		{Type: LineContext, Content: "hello", OldNum: 1, NewNum: 1},
 	}}
 	styles, th := testStyles()
-	result := RenderSplitDiff(parsed, "test.go", styles, th, 100)
-	if !strings.Contains(result, "│") {
+	r := NewDiffRenderer(parsed, "test.go", styles, th, 100)
+	r.SetSplit(true)
+	if !strings.Contains(r.Content(-1), "│") {
 		t.Error("split diff should contain │ separator")
 	}
 }
@@ -138,16 +139,18 @@ func TestRenderSplitDiff_ContainsSeparator(t *testing.T) {
 func TestRenderSplitDiff_Binary(t *testing.T) {
 	parsed := ParsedDiff{Binary: true}
 	styles, th := testStyles()
-	result := RenderSplitDiff(parsed, "test.bin", styles, th, 100)
-	if !strings.Contains(result, "Binary") {
+	r := NewDiffRenderer(parsed, "test.bin", styles, th, 100)
+	r.SetSplit(true)
+	if !strings.Contains(r.Content(-1), "Binary") {
 		t.Error("binary file should show binary message")
 	}
 }
 
 func TestRenderNewFileSplit_ContainsSeparator(t *testing.T) {
 	styles, th := testStyles()
-	result := RenderNewFileSplit("line1\nline2", "test.go", styles, th, 100)
-	if !strings.Contains(result, "│") {
+	r := NewDiffRenderer(ParseNewFile("line1\nline2"), "test.go", styles, th, 100)
+	r.SetSplit(true)
+	if !strings.Contains(r.Content(-1), "│") {
 		t.Error("split new file should contain │ separator")
 	}
 }
@@ -404,7 +407,7 @@ func TestRenderDiff_Basic(t *testing.T) {
 		{Type: LineAdded, Content: "new", OldNum: -1, NewNum: 2},
 	}}
 	styles, th := testStyles()
-	result := RenderDiff(parsed, "test.go", styles, th, 100)
+	result := NewDiffRenderer(parsed, "test.go", styles, th, 100).Content(-1)
 	if result == "" {
 		t.Error("expected non-empty render")
 	}
@@ -414,7 +417,7 @@ func TestRenderDiff_Binary(t *testing.T) {
 	t.Parallel()
 	parsed := ParsedDiff{Binary: true}
 	styles, th := testStyles()
-	result := RenderDiff(parsed, "test.bin", styles, th, 100)
+	result := NewDiffRenderer(parsed, "test.bin", styles, th, 100).Content(-1)
 	if !strings.Contains(result, "Binary") {
 		t.Error("binary diff should show binary message")
 	}
@@ -423,7 +426,7 @@ func TestRenderDiff_Binary(t *testing.T) {
 func TestRenderNewFile_Basic(t *testing.T) {
 	t.Parallel()
 	styles, th := testStyles()
-	result := RenderNewFile("line1\nline2\nline3", "test.go", styles, th, 100)
+	result := NewDiffRenderer(ParseNewFile("line1\nline2\nline3"), "test.go", styles, th, 100).Content(-1)
 	if result == "" {
 		t.Error("expected non-empty render")
 	}

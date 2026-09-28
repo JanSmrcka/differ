@@ -39,6 +39,9 @@ type DiffRenderer struct {
 
 	pairs []splitRow
 	rows  []displayRow
+	// byLine is the comment index the current rows were built from, reused
+	// when re-rendering the cursor's row.
+	byLine map[int][]review.Comment
 	// rowOf maps a source line index to the display row showing it, or -1.
 	rowOf []int
 }
@@ -118,7 +121,8 @@ func (r *DiffRenderer) render() {
 	for i := range r.rowOf {
 		r.rowOf[i] = -1
 	}
-	byLine := r.commentsByLine()
+	r.byLine = r.commentsByLine()
+	byLine := r.byLine
 	r.rows = r.rows[:0]
 
 	if !r.split {
@@ -136,12 +140,9 @@ func (r *DiffRenderer) render() {
 
 	r.pairs = pairLinesIndexed(r.parsed.Lines)
 	for pi, row := range r.pairs {
-		gutter := blankGutter()
-		if r.hasComment(byLine, row.leftIdx) || r.hasComment(byLine, row.rightIdx) {
-			gutter = commentGutter(r.styles)
-		}
 		idx := len(r.rows)
-		r.rows = append(r.rows, displayRow{text: r.renderRow(row, gutter), line: -1, pair: pi})
+		lg, rg := r.rowGutters(row, -1)
+		r.rows = append(r.rows, displayRow{text: r.renderRow(row, lg, rg), line: -1, pair: pi})
 		if row.leftIdx >= 0 {
 			r.rowOf[row.leftIdx] = idx
 		}
@@ -222,15 +223,33 @@ func (r *DiffRenderer) gutterFor(byLine map[int][]review.Comment, idx int) strin
 	return blankGutter()
 }
 
-func (r *DiffRenderer) renderRow(row splitRow, gutter string) string {
-	if row.left != nil && row.left.Type == LineHunkHeader {
-		return renderHunkLine(r.displayLine(*row.left), r.styles, r.width, gutter)
+// rowGutters picks the gutter for each side of a split row. Each side gets its
+// own, so the cursor and comment markers say which version of the line they
+// refer to — a removed line and the added line replacing it share a row, and a
+// single row-wide marker cannot tell them apart.
+func (r *DiffRenderer) rowGutters(row splitRow, cursor int) (left, right string) {
+	side := func(idx int) string {
+		switch {
+		case idx >= 0 && idx == cursor:
+			return cursorGutter(r.styles)
+		case r.hasComment(r.byLine, idx):
+			return commentGutter(r.styles)
+		default:
+			return blankGutter()
+		}
 	}
-	panelW := (r.width - gutterWidth - 1) / 2
+	return side(row.leftIdx), side(row.rightIdx)
+}
+
+func (r *DiffRenderer) renderRow(row splitRow, leftGutter, rightGutter string) string {
+	if row.left != nil && row.left.Type == LineHunkHeader {
+		return renderHunkLine(r.displayLine(*row.left), r.styles, r.width, leftGutter)
+	}
+	panelW := (r.width - 2*gutterWidth - 1) / 2
 	left := renderSplitSide(r.displaySide(row.left), r.filename, r.styles, r.theme, panelW, true)
 	right := renderSplitSide(r.displaySide(row.right), r.filename, r.styles, r.theme, panelW, false)
 	sep := lipgloss.NewStyle().Foreground(lipgloss.Color(r.theme.BorderFg)).Render("│")
-	return gutter + left + sep + right
+	return leftGutter + left + sep + rightGutter + right
 }
 
 // displaySide expands tabs on one side of a split row, preserving nil.
@@ -255,18 +274,18 @@ func (r *DiffRenderer) Content(cursor int) string {
 		texts[i] = row.text
 	}
 	if row, ok := r.rowFor(cursor); ok {
-		texts[row] = r.renderCursorRow(r.rows[row])
+		texts[row] = r.renderCursorRow(r.rows[row], cursor)
 	}
 	return strings.Join(texts, "\n")
 }
 
-func (r *DiffRenderer) renderCursorRow(row displayRow) string {
-	gutter := cursorGutter(r.styles)
+func (r *DiffRenderer) renderCursorRow(row displayRow, cursor int) string {
 	switch {
 	case row.pair >= 0:
-		return r.renderRow(r.pairs[row.pair], gutter)
+		lg, rg := r.rowGutters(r.pairs[row.pair], cursor)
+		return r.renderRow(r.pairs[row.pair], lg, rg)
 	case row.line >= 0:
-		return renderDiffLineGutter(r.displayLine(r.parsed.Lines[row.line]), r.filename, r.styles, r.theme, r.width, gutter)
+		return renderDiffLineGutter(r.displayLine(r.parsed.Lines[row.line]), r.filename, r.styles, r.theme, r.width, cursorGutter(r.styles))
 	default:
 		return row.text
 	}

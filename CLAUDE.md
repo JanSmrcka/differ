@@ -51,7 +51,7 @@ main.go → cmd/root.go (cobra commands)
                    ├── update_dispatch.go — Update dispatcher only
                    ├── mode_*.go   — per-mode key handling
                    ├── log.go      — LogModel (commit log browser)
-                   ├── diff.go     — diff parser + line rendering
+                   ├── diff.go     — diff parser + single-line rendering
                    ├── hunk.go     — hunk model, line addressing, navigation
                    ├── diffrender.go — DiffRenderer: cached rendering, cursor, inline comments
                    ├── comment*.go — building, editing and rendering review comments
@@ -65,6 +65,11 @@ main.go → cmd/root.go (cobra commands)
 owns the diff parser, and a cycle would follow. A `review.Comment` therefore
 carries its own anchor text and a plain-text excerpt, which keeps feedback
 generation a pure string transformation.
+
+`DiffRenderer` is the only rendering path — the diff viewer, untracked files
+and the commit log browser all go through it, so tab expansion, syntax
+highlighting and the cursor cannot diverge between them. There are no
+standalone `Render*` helpers any more.
 
 `DiffRenderer` distinguishes **line indexes** (address `ParsedDiff.Lines`; what
 the cursor and comments refer to) from **display rows** (what is printed).
@@ -139,5 +144,5 @@ github.com/spf13/cobra                # CLI
 - **Viewport**: call `viewport.SetContent()` on content change, `viewport.GotoTop()` on file switch.
 - **Unicode width**: use `lipgloss.Width()` not `len()`.
 - **Git diff flags**: always `--no-ext-diff --color=never` for predictable output.
-- **Untracked files**: no diff available — read file content directly, format as new-file diff via `RenderNewFile()`.
+- **Untracked files**: no diff available — read file content directly and turn it into an all-added diff with `ParseNewFile()`, then render it through `DiffRenderer` like any other diff.
 - **AI commit messages**: runs configurable `commit_msg_cmd` (default `claude -p`). Diff truncated to 8000 chars. Falls back gracefully if CLI unavailable.

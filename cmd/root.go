@@ -186,7 +186,7 @@ func runLog(cmd *cobra.Command, args []string) error {
 	t := resolveTheme(cfg)
 	styles := ui.NewStyles(t)
 
-	model := ui.NewLogModel(repo, styles, t)
+	model := ui.NewLogModel(repo, styles, t, cfg.TabWidth)
 	p := tea.NewProgram(model, tea.WithAltScreen())
 	_, err = p.Run()
 	return err

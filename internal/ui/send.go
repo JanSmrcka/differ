@@ -26,6 +26,21 @@ func (m Model) FlushFeedback(w io.Writer) error {
 	return nil
 }
 
+// confirmQuit asks once before quitting with comments that were never sent.
+// Review state is session-only, so quitting really does discard them.
+func (m Model) confirmQuit() (tea.Model, tea.Cmd) {
+	pending := 0
+	if m.session != nil {
+		pending = m.session.PendingCount()
+	}
+	if pending == 0 || m.quitConfirm {
+		return m, tea.Quit
+	}
+	m.quitConfirm = true
+	m.statusMsg = fmt.Sprintf("%s not sent — q again to discard, S to send", plural(pending, "comment"))
+	return m, nil
+}
+
 // sendCommentAtCursor delivers just the comment under the cursor.
 func (m Model) sendCommentAtCursor() (tea.Model, tea.Cmd) {
 	c, ok := m.commentAtCursor()

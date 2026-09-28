@@ -117,18 +117,28 @@ func ParseNewFile(content string) ParsedDiff {
 	}
 
 	lines := make([]DiffLine, 0, len(raw))
+	truncated := false
 	for i, l := range raw {
 		if len(lines) >= maxDiffLines {
 			lines = append(lines, DiffLine{
 				Type: LineHunkHeader, Content: fmt.Sprintf("… truncated (%d+ lines)", maxDiffLines),
 				OldNum: -1, NewNum: -1,
 			})
+			truncated = true
 			break
 		}
 		lines = append(lines, DiffLine{Type: LineAdded, Content: l, OldNum: -1, NewNum: i + 1})
 	}
 	if len(lines) == 0 {
 		return ParsedDiff{}
+	}
+
+	// The truncation marker is not file content: counting it would make a
+	// hunk comment claim a line that does not exist and paste the marker into
+	// the excerpt.
+	contentLines := len(lines)
+	if truncated {
+		contentLines--
 	}
 	return ParsedDiff{
 		Lines: lines,
@@ -137,9 +147,9 @@ func ParseNewFile(content string) ParsedDiff {
 			OldStart:  0,
 			OldCount:  0,
 			NewStart:  1,
-			NewCount:  len(lines),
+			NewCount:  contentLines,
 			StartLine: 0,
-			LastLine:  len(lines) - 1,
+			LastLine:  contentLines - 1,
 		}},
 	}
 }
