@@ -118,14 +118,14 @@ func TestStale_RenderedDistinctlyInTheDiff(t *testing.T) {
 	}
 }
 
-func TestStale_CountedInTheStatusBar(t *testing.T) {
+func TestStale_CountedInTheReviewSummary(t *testing.T) {
 	m, tr := reviewOnRepo(t)
 	content := tr.Read("src.ts")
 	tr.ExternalEdit("src.ts", strings.Replace(content, "await getUser(id)", "await getUser(id, o)", 1))
 	m = reload(t, m)
 
-	if bar := m.renderStatusBar(); !strings.Contains(bar, "stale") {
-		t.Errorf("status bar does not report stale comments: %q", bar)
+	if seg := m.statusSegment(); !strings.Contains(seg, "stale") {
+		t.Errorf("review summary does not report stale comments: %q", seg)
 	}
 }
 

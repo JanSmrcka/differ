@@ -267,34 +267,28 @@ func (m Model) Init() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-// footerHeight is how many rows the bar below the status line takes.
-//
-// It is measured, not assumed: the comment editor is a multiline textarea, and
-// the help hints wrap onto a second row on narrow terminals. Guessing one row
-// pushed the top of the layout off screen.
+// footerHeight is how many rows the footer takes, measured from what is
+// actually rendered rather than assumed: the comment editor is a multiline
+// textarea, the key hints wrap on narrow terminals, and the status may take a
+// row of its own.
 func (m Model) footerHeight() int {
-	if m.commenting {
-		return 1 + commentEditorHeight // label + textarea
-	}
 	if m.width <= 0 {
 		return 1
 	}
-	return lipgloss.Height(lipgloss.NewStyle().Width(m.width).Render(m.footerContent()))
+	return lipgloss.Height(m.renderFooter())
 }
 
-// footerContent is the text of the bar below the status line.
-func (m Model) footerContent() string {
-	switch {
-	case m.mode == modeCommit:
-		return m.commitBarContent()
-	case m.mode == modeBranchPicker && m.branchCreating:
-		return m.branchCreateContent()
-	default:
-		return m.helpContent(m.helpPairs())
-	}
-}
+// contentHeight is the room left for the panels.
+func (m Model) contentHeight() int { return m.height - chromeRows - m.footerHeight() }
 
-// contentHeight is the room left for the cards: the terminal minus the card
-// borders, the status line and the footer.
-func (m Model) contentHeight() int { return m.height - 3 - m.footerHeight() }
-func (m Model) diffWidth() int     { return m.width - fileListWidth - 2 - 1 - 2 }
+// listHeight is the rows a panel's list actually gets: the panel area less its
+// label and the blank line under it. Scroll clamping and rendering must both
+// use this, or the cursor can sit outside the visible window.
+func (m Model) listHeight() int { return max(m.contentHeight()-2, 0) }
+
+// diffWidth is what the right-hand panel gets: the terminal less the file
+// list, the divider and the space either side of it. The old figure still
+// budgeted for card borders that no longer exist.
+func (m Model) diffWidth() int {
+	return m.width - fileListWidth - verticalDividerWidth - 2*panelGap
+}

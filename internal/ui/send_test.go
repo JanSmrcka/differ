@@ -173,7 +173,7 @@ func TestSend_StatusBarCountsSent(t *testing.T) {
 	updated, cmd := m.updateReviewMode(key("S"))
 	m = runCmd(t, updated.(Model), cmd)
 
-	if bar := m.renderStatusBar(); !strings.Contains(bar, "2 sent") {
+	if bar := m.statusSegment(); !strings.Contains(bar, "2 sent") {
 		t.Errorf("status bar should report sent comments: %q", bar)
 	}
 }

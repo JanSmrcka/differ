@@ -13,40 +13,6 @@ import (
 
 // View composition and all rendering helpers.
 
-func (m Model) View() string {
-	if m.width == 0 || !m.ready {
-		return ""
-	}
-	if m.width < minWidth || m.height < minHeight {
-		return fmt.Sprintf("Terminal too small (%dx%d). Minimum: %dx%d", m.width, m.height, minWidth, minHeight)
-	}
-	contentH := m.contentHeight()
-	var fileContent string
-	if m.mode == modeBranchPicker {
-		fileContent = m.renderBranchList(contentH)
-	} else {
-		fileContent = m.renderFileList(contentH)
-	}
-	fileCard := m.renderCard(m.fileCardTitle(), fileContent, m.mode == modeFileList || m.mode == modeBranchPicker, fileListWidth, contentH)
-	diffCard := m.renderCard(m.diffCardTitle(), m.viewport.View(), m.mode == modeDiff || m.mode == modeReview, m.diffWidth(), contentH)
-	main := lipgloss.JoinHorizontal(lipgloss.Top, fileCard, " ", diffCard)
-	statusBar := m.renderStatusBar()
-	if m.mode == modeCommit {
-		return lipgloss.JoinVertical(lipgloss.Left, main, statusBar, m.renderCommitBar())
-	}
-	if m.mode == modeBranchPicker && m.branchCreating {
-		return lipgloss.JoinVertical(lipgloss.Left, main, statusBar, m.renderBranchCreateBar())
-	}
-	if m.commenting {
-		return lipgloss.JoinVertical(lipgloss.Left, main, statusBar, m.renderCommentEditor())
-	}
-	return lipgloss.JoinVertical(lipgloss.Left, main, statusBar, m.renderHelpBar())
-}
-
-func (m Model) renderCard(title, content string, focused bool, w, h int) string {
-	return renderCard(m.theme, title, content, focused, w, h)
-}
-
 func renderCard(t theme.Theme, title, content string, focused bool, w, h int) string {
 	borderColor := lipgloss.Color(t.BorderFg)
 	if focused {
@@ -86,45 +52,11 @@ func renderCard(t theme.Theme, title, content string, focused bool, w, h int) st
 	return lipgloss.JoinVertical(lipgloss.Left, top, strings.Join(rows, "\n"), bottom)
 }
 
-func (m Model) fileCardTitle() string {
-	if m.mode == modeBranchPicker {
-		return "Branches"
-	}
-	title := m.branchName()
-	if m.ref != "" {
-		title += " ref:" + m.ref
-	} else if m.stagedOnly {
-		title += " staged"
-	}
-	return title
-}
-
-// branchName is nil-safe so the view can render before a repo is attached.
 func (m Model) branchName() string {
 	if m.repo == nil {
 		return ""
 	}
 	return m.repo.BranchName()
-}
-
-func (m Model) diffCardTitle() string {
-	if len(m.files) == 0 || m.cursor >= len(m.files) {
-		return ""
-	}
-	f := m.files[m.cursor]
-	name := f.change.Path
-	if f.change.Staged {
-		name += " [staged]"
-	}
-	if m.mode == modeReview {
-		name = "review · " + name
-		if m.session != nil {
-			if n := m.session.CountFor(f.change.Path); n > 0 {
-				name += " · " + plural(n, "comment")
-			}
-		}
-	}
-	return name
 }
 
 func (m Model) renderFileList(height int) string {
@@ -285,42 +217,6 @@ func (m Model) renderBar(style lipgloss.Style, content string) string {
 	return style.Width(m.width).MaxHeight(1).Render(content)
 }
 
-func (m Model) renderStatusBar() string {
-	stagedCount := 0
-	for _, f := range m.files {
-		if f.change.Staged {
-			stagedCount++
-		}
-	}
-	left := fmt.Sprintf(" %d staged  %d files", stagedCount, len(m.files))
-	if m.mode == modeReview {
-		p := m.reviewProgress()
-		left = fmt.Sprintf(" review %d/%d files", p.Reviewed, p.Total)
-		if p.Comments > 0 {
-			left += fmt.Sprintf("  %d comments", p.Comments)
-		}
-		if p.Pending > 0 {
-			left += fmt.Sprintf("  %d pending", p.Pending)
-		}
-		if p.Sent > 0 {
-			left += fmt.Sprintf("  %d sent", p.Sent)
-		}
-		if p.Stale > 0 {
-			left += fmt.Sprintf("  %s stale", plural(p.Stale, "comment"))
-		}
-	}
-	if m.upstream.Upstream != "" && (m.upstream.Ahead > 0 || m.upstream.Behind > 0) {
-		left += fmt.Sprintf("  ↑%d ↓%d", m.upstream.Ahead, m.upstream.Behind)
-	}
-	if m.splitDiff {
-		left += "  split"
-	}
-	if m.statusMsg != "" {
-		left += "  " + m.statusMsg
-	}
-	return m.renderBar(m.styles.StatusBar, left)
-}
-
 // helpPairs is the hint list for the current mode.
 func (m Model) helpPairs() []struct{ key, desc string } {
 	var pairs []struct{ key, desc string }
@@ -339,15 +235,6 @@ func (m Model) helpPairs() []struct{ key, desc string } {
 	return pairs
 }
 
-func (m Model) renderHelpBar() string {
-	// Deliberately not clamped: losing the last hints is worse than a second
-	// row, and footerHeight measures the wrapped height so the cards fit.
-	return lipgloss.NewStyle().Width(m.width).Render(m.helpContent(m.helpPairs()))
-}
-
-// helpContent builds the hint line. Kept separate so its width can be
-// asserted: renderBar clamps to one row, which would silently cut the last
-// hints off rather than wrapping.
 func (m Model) helpContent(pairs []struct{ key, desc string }) string {
 	parts := make([]string, 0, len(pairs))
 	for _, p := range pairs {
