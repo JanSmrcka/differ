@@ -48,6 +48,7 @@ type Theme struct {
 	// Review comments
 	CommentFg     string
 	CommentMetaFg string
+	StaleFg       string
 
 	// Accent
 	AccentFg string
@@ -102,6 +103,7 @@ func DarkTheme() Theme {
 
 		CommentFg:     "#f9e2af",
 		CommentMetaFg: "#9399b2",
+		StaleFg:       "#fab387",
 
 		AccentFg: "#c678dd",
 
@@ -149,6 +151,7 @@ func LightTheme() Theme {
 
 		CommentFg:     "#df8e1d",
 		CommentMetaFg: "#8c8fa1",
+		StaleFg:       "#fe640b",
 
 		AccentFg: "#8839ef",
 

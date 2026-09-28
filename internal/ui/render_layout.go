@@ -7,6 +7,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/jansmrcka/differ/internal/git"
+	"github.com/jansmrcka/differ/internal/review"
 	"github.com/jansmrcka/differ/internal/theme"
 )
 
@@ -147,6 +148,9 @@ func (m Model) renderFileItem(f fileItem, selected bool) string {
 		stagedRaw = "● "
 	}
 	stats := fmt.Sprintf("+%d -%d", f.change.AddedLines, f.change.DeletedLines)
+	if m.hasStaleComments(f.change.Path) {
+		stats = staleMarker + " " + stats
+	}
 	name := filepath.Base(f.change.Path)
 	if f.change.OldPath != "" {
 		name = filepath.Base(f.change.OldPath) + " → " + filepath.Base(f.change.Path)
@@ -165,6 +169,20 @@ func (m Model) renderFileItem(f fileItem, selected bool) string {
 	}
 	line := fmt.Sprintf("%s%s %s %s", staged, m.styleStatus(status, f.change.Status), name, stats)
 	return m.styles.FileItem.Width(fileListWidth).Render(line)
+}
+
+// hasStaleComments reports whether a file carries comments that no longer
+// match the diff.
+func (m Model) hasStaleComments(path string) bool {
+	if m.session == nil {
+		return false
+	}
+	for _, c := range m.session.CommentsFor(path) {
+		if c.State == review.StateStale {
+			return true
+		}
+	}
+	return false
 }
 
 func (m Model) renderBranchList(height int) string {
@@ -286,6 +304,9 @@ func (m Model) renderStatusBar() string {
 		}
 		if p.Sent > 0 {
 			left += fmt.Sprintf("  %d sent", p.Sent)
+		}
+		if p.Stale > 0 {
+			left += fmt.Sprintf("  %s stale", plural(p.Stale, "comment"))
 		}
 	}
 	if m.upstream.Upstream != "" && (m.upstream.Ahead > 0 || m.upstream.Behind > 0) {

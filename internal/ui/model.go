@@ -123,9 +123,10 @@ type Model struct {
 	branchCreating   bool
 	branchInput      textinput.Model
 
-	upstream    git.UpstreamInfo
-	pushConfirm bool
-	quitConfirm bool
+	upstream     git.UpstreamInfo
+	pushConfirm  bool
+	quitConfirm  bool
+	staleConfirm bool
 
 	// commenting is true while the comment editor is open; draft is the
 	// comment being written, and editingID is set when editing an existing

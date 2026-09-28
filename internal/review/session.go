@@ -59,11 +59,17 @@ type Comment struct {
 	Excerpt string
 	Body    string
 	State   State
+	// StaleReason says why a comment no longer matches the diff, so the user
+	// can judge whether to re-create or discard it.
+	StaleReason string
 
 	// seq is the creation order, used to break ties between comments on the
 	// same line. IDs are strings ("c9", "c10"), so comparing them would order
 	// the tenth comment before the ninth.
 	seq int
+	// stateBeforeStale remembers what a comment was before going stale, so a
+	// transient refresh does not permanently demote it.
+	stateBeforeStale State
 }
 
 // FileState is how far the user has got with one file.

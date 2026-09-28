@@ -18,6 +18,24 @@ import (
 // the feedback needs the change, not the file.
 const maxExcerptChars = 1200
 
+// diffLocations describes where every addressable line of a diff currently
+// lives, which is what review.Reanchor matches comments against.
+func diffLocations(p ParsedDiff) []review.Location {
+	out := make([]review.Location, 0, len(p.Lines))
+	for i := range p.Lines {
+		addr, ok := p.AddressOf(i)
+		if !ok || addr.Type == LineHunkHeader {
+			continue
+		}
+		side, line := sideAndLine(addr)
+		if line < 0 {
+			continue
+		}
+		out = append(out, review.Location{Side: side, Line: line, Content: p.Lines[i].Content})
+	}
+	return out
+}
+
 // buildLineComment describes the line under the cursor.
 func (m Model) buildLineComment() (review.Comment, bool) {
 	if m.renderer == nil {

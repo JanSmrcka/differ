@@ -88,6 +88,10 @@ func (m Model) handleDiffLoaded(msg diffLoadedMsg) (tea.Model, tea.Cmd) {
 
 	m.renderer = msg.renderer
 	if m.session != nil {
+		// Re-resolve this file's comments against the diff that just arrived,
+		// so a comment follows its line or is marked stale — never left
+		// pointing at whatever now occupies its old line number.
+		m.session.Reanchor(m.currentFilePath(), diffLocations(msg.renderer.Parsed()))
 		m.renderer.SetComments(m.session.CommentsFor(m.currentFilePath()))
 	}
 	// A new file, or the very first diff of the session, starts at the first
@@ -108,6 +112,13 @@ func (m Model) handleFilesRefreshed(msg filesRefreshedMsg) (tea.Model, tea.Cmd) 
 		return m, m.loadDiffCmd(false)
 	}
 	m.files = msg.files
+	if m.session != nil {
+		paths := make([]string, 0, len(m.files))
+		for _, f := range m.files {
+			paths = append(paths, f.change.Path)
+		}
+		m.session.StaleMissingFiles(paths)
+	}
 	if m.cursor >= len(m.files) {
 		m.cursor = max(0, len(m.files)-1)
 	}

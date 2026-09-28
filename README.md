@@ -94,6 +94,15 @@ It never changes git state — staging and committing stay explicit actions.
 
 Quitting with unsent comments asks for confirmation — review state is
 session-only, so `q` really does discard them.
+
+### Stale comments
+
+When the agent edits a file you are reviewing, comments follow the line they
+were written against rather than a line number. If that line is gone the
+comment is marked `stale` (`!`), with the reason shown inline and the file
+flagged in the list. Sending stale comments takes a second, explicit press —
+feedback about code that no longer exists is never sent by accident. If the
+line comes back, so does the comment.
 | `n/p`     | next/prev file                  |
 | `v`       | toggle split diff               |
 | `esc`     | back to file list               |

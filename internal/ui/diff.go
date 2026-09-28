@@ -256,6 +256,10 @@ const commentMarker = "●"
 
 const commentBar = "▏"
 
+// staleMarker flags a comment, or a file, whose comments no longer match the
+// diff they were written against.
+const staleMarker = "!"
+
 func renderDiffLineGutter(dl DiffLine, filename string, styles Styles, t theme.Theme, width int, gutter string) string {
 	switch dl.Type {
 	case LineHunkHeader:
