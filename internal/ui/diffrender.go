@@ -208,10 +208,18 @@ func (r *DiffRenderer) renderComment(c review.Comment) []string {
 		label = fmt.Sprintf("lines %d-%d", c.StartLine, c.EndLine)
 	}
 	header := fmt.Sprintf("%s · %s", label, c.State)
+	meta := r.styles.CommentMeta
+	if c.State == review.StateStale {
+		header = staleMarker + " " + header
+		meta = r.styles.CommentStale
+	}
 
-	rows := []string{indent + bar + " " + r.styles.CommentMeta.Render(header)}
+	rows := []string{indent + bar + " " + meta.Render(header)}
 	for _, line := range strings.Split(c.Body, "\n") {
 		rows = append(rows, indent+bar+" "+r.styles.CommentBody.Render(line))
+	}
+	if c.StaleReason != "" {
+		rows = append(rows, indent+bar+" "+r.styles.CommentStale.Render(c.StaleReason))
 	}
 	return rows
 }

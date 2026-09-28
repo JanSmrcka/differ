@@ -46,9 +46,10 @@ type Styles struct {
 	CardBg    lipgloss.Style
 
 	// Review comments
-	CommentBar  lipgloss.Style
-	CommentMeta lipgloss.Style
-	CommentBody lipgloss.Style
+	CommentBar   lipgloss.Style
+	CommentMeta  lipgloss.Style
+	CommentBody  lipgloss.Style
+	CommentStale lipgloss.Style
 
 	// Commit input
 	CommitInput lipgloss.Style
@@ -147,6 +148,9 @@ func NewStyles(t theme.Theme) Styles {
 			Foreground(lipgloss.Color(t.CommentMetaFg)),
 		CommentBody: lipgloss.NewStyle().
 			Foreground(lipgloss.Color(t.CommentFg)),
+		CommentStale: lipgloss.NewStyle().
+			Foreground(lipgloss.Color(t.StaleFg)).
+			Bold(true),
 
 		CommitInput: lipgloss.NewStyle().
 			Foreground(lipgloss.Color(t.Fg)),

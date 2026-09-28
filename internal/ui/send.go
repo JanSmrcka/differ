@@ -48,30 +48,67 @@ func (m Model) sendCommentAtCursor() (tea.Model, tea.Cmd) {
 		m.statusMsg = "no comment here to send"
 		return m, nil
 	}
-	if c.State == review.StateSent {
+	if c.WasSent() {
 		m.statusMsg = "already sent"
+		return m, nil
+	}
+	if c.State == review.StateStale && !m.staleConfirm {
+		m.staleConfirm = true
+		m.statusMsg = "comment is stale — s again to send anyway"
 		return m, nil
 	}
 	return m.send([]review.Comment{c})
 }
 
 // sendAllPending delivers every comment that has not gone out yet.
+//
+// Healthy comments go immediately. Stale ones — whose code has changed since
+// they were written — need a second, explicit press, so feedback about code
+// that no longer exists is never sent by accident.
 func (m Model) sendAllPending() (tea.Model, tea.Cmd) {
 	if m.session == nil {
 		m.statusMsg = "no comments to send"
 		return m, nil
 	}
-	var pending []review.Comment
+
+	var pending, stale []review.Comment
 	for _, c := range m.session.Comments() {
-		if c.State == review.StatePending {
+		// Anything already delivered is history, even if it later went stale
+		// because its file left the diff. Re-sending would hand the agent the
+		// whole review a second time.
+		if c.WasSent() {
+			continue
+		}
+		switch c.State {
+		case review.StatePending:
 			pending = append(pending, c)
+		case review.StateStale:
+			stale = append(stale, c)
 		}
 	}
-	if len(pending) == 0 {
+
+	switch {
+	case len(pending) > 0:
+		updated, cmd := m.send(pending)
+		if len(stale) > 0 {
+			// Arm the guard now, so the promised "S again" actually sends them
+			// rather than only re-prompting.
+			mm := updated.(Model)
+			mm.staleConfirm = true
+			mm.statusMsg += fmt.Sprintf(" · %s stale, S again to send", plural(len(stale), "comment"))
+			return mm, cmd
+		}
+		return updated, cmd
+	case len(stale) == 0:
 		m.statusMsg = "no pending comments to send"
 		return m, nil
+	case !m.staleConfirm:
+		m.staleConfirm = true
+		m.statusMsg = fmt.Sprintf("%s stale — S again to send anyway", plural(len(stale), "comment"))
+		return m, nil
+	default:
+		return m.send(stale)
 	}
-	return m.send(pending)
 }
 
 func (m Model) send(cs []review.Comment) (tea.Model, tea.Cmd) {

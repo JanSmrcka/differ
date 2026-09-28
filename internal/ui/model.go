@@ -46,8 +46,20 @@ type diffLoadedMsg struct {
 	resetScroll bool
 }
 
-type filesRefreshedMsg struct{ files []fileItem }
+// filesRefreshedMsg carries the current changeset. err is set when git could
+// not be read — an empty file list then means "unknown", not "nothing
+// changed", which matters because review comments are staled off this.
+type filesRefreshedMsg struct {
+	files []fileItem
+	err   error
+}
 type commitDoneMsg struct{ err error }
+
+// reanchorMsg carries each commented file's current line positions, so
+// comments on files that are not on screen can be re-resolved too.
+type reanchorMsg struct {
+	locations map[string][]review.Location
+}
 
 // feedbackSentMsg reports the outcome of a delivery attempt. ids names the
 // comments that were in the payload, so they are marked sent only on success.
@@ -123,9 +135,10 @@ type Model struct {
 	branchCreating   bool
 	branchInput      textinput.Model
 
-	upstream    git.UpstreamInfo
-	pushConfirm bool
-	quitConfirm bool
+	upstream     git.UpstreamInfo
+	pushConfirm  bool
+	quitConfirm  bool
+	staleConfirm bool
 
 	// commenting is true while the comment editor is open; draft is the
 	// comment being written, and editingID is set when editing an existing

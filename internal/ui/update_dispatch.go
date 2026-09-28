@@ -29,6 +29,8 @@ func (m Model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleDiffLoaded(msg)
 	case filesRefreshedMsg:
 		return m.handleFilesRefreshed(msg)
+	case reanchorMsg:
+		return m.handleReanchor(msg)
 	case feedbackSentMsg:
 		return m.handleFeedbackSent(msg)
 	case commitDoneMsg:
@@ -105,6 +107,10 @@ func (m Model) handleDiffLoaded(msg diffLoadedMsg) (tea.Model, tea.Cmd) {
 
 	m.renderer = msg.renderer
 	if m.session != nil {
+		// Re-resolve this file's comments against the diff that just arrived,
+		// so a comment follows its line or is marked stale — never left
+		// pointing at whatever now occupies its old line number.
+		m.session.Reanchor(m.currentFilePath(), diffLocations(msg.renderer.Parsed()))
 		m.renderer.SetComments(m.session.CommentsFor(m.currentFilePath()))
 	}
 	// A new file, or the very first diff of the session, starts at the first
@@ -121,10 +127,25 @@ func (m Model) handleDiffLoaded(msg diffLoadedMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleFilesRefreshed(msg filesRefreshedMsg) (tea.Model, tea.Cmd) {
+	if msg.err != nil {
+		// git could not be read. An empty file list here means "unknown", not
+		// "everything was committed", so nothing may be staled off it — a held
+		// index.lock while the agent stages files would otherwise demote the
+		// whole review with no way back.
+		m.statusMsg = "refresh failed: " + msg.err.Error()
+		return m, nil
+	}
 	if filesEqual(m.files, msg.files) {
 		return m, m.loadDiffCmd(false)
 	}
 	m.files = msg.files
+	if m.session != nil {
+		paths := make([]string, 0, len(m.files))
+		for _, f := range m.files {
+			paths = append(paths, f.change.Path)
+		}
+		m.session.StaleMissingFiles(paths)
+	}
 	if m.cursor >= len(m.files) {
 		m.cursor = max(0, len(m.files)-1)
 	}
@@ -134,7 +155,19 @@ func (m Model) handleFilesRefreshed(msg filesRefreshedMsg) (tea.Model, tea.Cmd) 
 		m.viewport.SetContent("")
 		return m, nil
 	}
-	return m, m.loadDiffCmd(true)
+	// The changeset moved, so comments on files that are not on screen need
+	// re-anchoring too, not just the one being viewed.
+	return m, tea.Batch(m.loadDiffCmd(true), m.reanchorAllCmd())
+}
+
+func (m Model) handleReanchor(msg reanchorMsg) (tea.Model, tea.Cmd) {
+	if m.session == nil {
+		return m, nil
+	}
+	for file, locations := range msg.locations {
+		m.session.Reanchor(file, locations)
+	}
+	return m.refreshCommentMarks(), nil
 }
 
 func (m Model) handleCommitDone(msg commitDoneMsg) (tea.Model, tea.Cmd) {
