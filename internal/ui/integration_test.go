@@ -193,7 +193,7 @@ func TestIntegration_WriteACommentAndSeeItInTheDiff(t *testing.T) {
 	if !strings.Contains(moved.View(), commentMarker) {
 		t.Errorf("no comment gutter marker on screen:\n%s", moved.View())
 	}
-	if !strings.Contains(view, "1 comments") {
+	if !strings.Contains(view, "1 comment") {
 		t.Errorf("status bar does not report the comment:\n%s", view)
 	}
 

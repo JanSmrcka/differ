@@ -62,7 +62,7 @@ func TestCommentEditor_ShrinksTheDiffViewport(t *testing.T) {
 	m := liveModel(t, tr)
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
 	m = updated.(Model)
-	updated, _ = m.updateFileListMode(key("r"))
+	updated, _ = m.Update(key("r"))
 	m = updated.(Model)
 	before := m.viewport.Height
 
@@ -78,6 +78,11 @@ func TestCommentEditor_ShrinksTheDiffViewport(t *testing.T) {
 	if m.viewport.Height != before {
 		t.Errorf("viewport height %d not restored after closing the editor (was %d)", m.viewport.Height, before)
 	}
+	// The viewport matches the panel's list rows, not the whole panel: two
+	// rows go to the label and the blank line under it.
+	if m.viewport.Height != m.listHeight() {
+		t.Errorf("viewport height %d != listHeight %d", m.viewport.Height, m.listHeight())
+	}
 }
 
 // #5: a single comment must not read "1 comments", and the title must not
@@ -88,7 +93,7 @@ func TestDiffCardTitle_SingularCommentCount(t *testing.T) {
 	m.session = review.NewSession()
 	m.session.Add(review.Comment{File: "a.ts", Side: review.SideNew, StartLine: 1, EndLine: 1, Body: "x"})
 
-	title := m.diffCardTitle()
+	title := m.diffLabel()
 	if strings.Contains(title, "1 comments") {
 		t.Errorf("title says %q, want a singular form", title)
 	}
@@ -97,7 +102,7 @@ func TestDiffCardTitle_SingularCommentCount(t *testing.T) {
 	}
 
 	m.session.Add(review.Comment{File: "a.ts", Side: review.SideNew, StartLine: 2, EndLine: 2, Body: "y"})
-	if got := m.diffCardTitle(); !strings.Contains(got, "2 comments") {
+	if got := m.diffLabel(); !strings.Contains(got, "2 comments") {
 		t.Errorf("title = %q, want plural for two", got)
 	}
 }
@@ -112,7 +117,7 @@ func TestDiffCardTitle_SurvivesAMissingSession(t *testing.T) {
 			t.Fatalf("diffCardTitle panicked without a session: %v", r)
 		}
 	}()
-	if got := m.diffCardTitle(); !strings.Contains(got, "a.ts") {
+	if got := m.diffLabel(); !strings.Contains(got, "a.ts") {
 		t.Errorf("title = %q", got)
 	}
 }
@@ -354,7 +359,7 @@ func TestHelpBar_KeepsEveryHintAtEveryWidth(t *testing.T) {
 		m.mode = mode
 		for _, width := range []int{80, 100, 120} {
 			m.width = width
-			bar := m.renderHelpBar()
+			bar := m.renderHintBar()
 			for _, p := range m.helpPairs() {
 				if !strings.Contains(bar, p.desc) {
 					t.Errorf("mode %d at width %d dropped hint %q %q", mode, width, p.key, p.desc)
@@ -369,7 +374,7 @@ func TestHelpBar_KeepsQuitAndReviewHints(t *testing.T) {
 	m.mode = modeFileList
 	m.width = 80
 
-	bar := m.renderHelpBar()
+	bar := m.renderHintBar()
 	for _, want := range []string{"q", "quit", "review", "commit", "stage"} {
 		if !strings.Contains(bar, want) {
 			t.Errorf("file list help lost %q: %q", want, bar)

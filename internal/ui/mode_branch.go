@@ -127,7 +127,8 @@ func (m Model) updateBranchCreateMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) clampBranchScroll() Model {
-	h := m.contentHeight() - 1
+	// One row of the list goes to the filter bar.
+	h := m.listHeight() - 1
 	if h <= 0 {
 		return m
 	}

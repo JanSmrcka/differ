@@ -38,6 +38,14 @@ type Theme struct {
 	// Card
 	CardBg string
 
+	// Chrome — deliberately dim. Colour is reserved for content that carries
+	// meaning: diff lines, file status, review state, syntax.
+	ChromeFg       string
+	PanelLabelFg   string
+	HeaderNameFg   string
+	HeaderBranchFg string
+	HeaderMetaFg   string
+
 	// Chrome
 	BorderFg    string
 	StatusBarBg string
@@ -94,6 +102,12 @@ func DarkTheme() Theme {
 		RenamedFg:   "#cba6f7",
 		UntrackedFg: "#7f849c",
 
+		ChromeFg:       "#45475a",
+		PanelLabelFg:   "#6c7086",
+		HeaderNameFg:   "#cba6f7",
+		HeaderBranchFg: "#a6adc8",
+		HeaderMetaFg:   "#6c7086",
+
 		BorderFg:    "#6c5ce7",
 		StatusBarBg: "#1a1a2e",
 		StatusBarFg: "#b4befe",
@@ -140,6 +154,12 @@ func LightTheme() Theme {
 		DeletedFg:   "#d20f39",
 		RenamedFg:   "#8839ef",
 		UntrackedFg: "#8c8fa1",
+
+		ChromeFg:       "#bcc0cc",
+		PanelLabelFg:   "#8c8fa1",
+		HeaderNameFg:   "#8839ef",
+		HeaderBranchFg: "#5c5f77",
+		HeaderMetaFg:   "#8c8fa1",
 
 		BorderFg:    "#8839ef",
 		StatusBarBg: "#e6e9ef",

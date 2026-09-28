@@ -102,12 +102,12 @@ func TestReviewMode_StatusBarShowsProgress(t *testing.T) {
 	m := diffModel(t, "multi_hunk", 20)
 	m = pressIn(t, m, "r")
 
-	bar := m.renderStatusBar()
-	if !strings.Contains(bar, "review") && !strings.Contains(bar, "Review") {
-		t.Errorf("status bar should say review mode is active: %q", bar)
+	m.width = 100
+	if header := m.renderHeader(); !strings.Contains(header, "review") {
+		t.Errorf("header should say review mode is active: %q", header)
 	}
-	if !strings.Contains(bar, "1/1") {
-		t.Errorf("status bar should show file progress: %q", bar)
+	if seg := m.statusSegment(); !strings.Contains(seg, "1/1") {
+		t.Errorf("footer should show review progress: %q", seg)
 	}
 }
 
@@ -115,7 +115,7 @@ func TestReviewMode_HelpBarIsReviewSpecific(t *testing.T) {
 	m := diffModel(t, "multi_hunk", 20)
 	m = pressIn(t, m, "r")
 
-	help := m.renderHelpBar()
+	help := m.renderHintBar()
 	if !strings.Contains(help, "hunk") {
 		t.Errorf("review help should mention hunk navigation: %q", help)
 	}
@@ -150,7 +150,7 @@ func TestReviewMode_StagingStillReachableFromFileList(t *testing.T) {
 	// Review mode must not break the existing git flows.
 	m := newTestModel(t, []fileItem{{change: git.FileChange{Path: "a.go", Status: git.StatusModified}}})
 	m.mode = modeFileList
-	help := m.renderHelpBar()
+	help := m.renderHintBar()
 	for _, want := range []string{"stage", "commit"} {
 		if !strings.Contains(help, want) {
 			t.Errorf("file list help lost %q: %q", want, help)

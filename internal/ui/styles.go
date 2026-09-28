@@ -30,7 +30,15 @@ type Styles struct {
 	DiffLineNumAdded   lipgloss.Style
 	DiffLineNumRemoved lipgloss.Style
 
-	// Chrome
+	// Chrome — dim structure, so content stands out against it.
+	Chrome          lipgloss.Style
+	PanelLabel      lipgloss.Style
+	PanelLabelFocus lipgloss.Style
+	HeaderName      lipgloss.Style
+	HeaderBranch    lipgloss.Style
+	HeaderMeta      lipgloss.Style
+	StatusText      lipgloss.Style
+
 	HeaderBar lipgloss.Style
 	StatusBar lipgloss.Style
 	HelpKey   lipgloss.Style
@@ -96,6 +104,23 @@ func NewStyles(t theme.Theme) Styles {
 		DiffLineNumRemoved: lipgloss.NewStyle().
 			Foreground(lipgloss.Color(t.LineNumRemovedFg)).
 			Background(lipgloss.Color(t.RemovedBg)),
+
+		Chrome: lipgloss.NewStyle().
+			Foreground(lipgloss.Color(t.ChromeFg)),
+		PanelLabel: lipgloss.NewStyle().
+			Foreground(lipgloss.Color(t.PanelLabelFg)),
+		PanelLabelFocus: lipgloss.NewStyle().
+			Foreground(lipgloss.Color(t.AccentFg)).
+			Bold(true),
+		HeaderName: lipgloss.NewStyle().
+			Foreground(lipgloss.Color(t.HeaderNameFg)).
+			Bold(true),
+		HeaderBranch: lipgloss.NewStyle().
+			Foreground(lipgloss.Color(t.HeaderBranchFg)),
+		HeaderMeta: lipgloss.NewStyle().
+			Foreground(lipgloss.Color(t.HeaderMetaFg)),
+		StatusText: lipgloss.NewStyle().
+			Foreground(lipgloss.Color(t.StatusBarFg)),
 
 		HeaderBar: lipgloss.NewStyle().
 			Background(lipgloss.Color(t.HeaderBg)).
