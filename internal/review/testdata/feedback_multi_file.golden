@@ -1,0 +1,25 @@
+Review feedback: 2 comments
+
+File: src/api/client.ts
+Line: 10 (old)
+
+Changed code:
+-  return fetch(url)
++  return await fetch(url)
+
+Comment:
+Same problem here.
+
+---
+
+File: src/auth/login.ts
+Line: 43 (new)
+
+Changed code:
+ export function load(id: string) {
+-  const user = getUser(id)
++  const user = await getUser(id)
+   return user
+
+Comment:
+This should remain awaited. We need the resolved user here.

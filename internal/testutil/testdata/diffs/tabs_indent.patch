@@ -1,0 +1,11 @@
+diff --git a/tabs.go b/tabs.go
+index 47596ba..0f266b8 100644
+--- a/tabs.go
++++ b/tabs.go
+@@ -1,5 +1,5 @@
+ func main() {
+ 	if ok {
+-		return 1
++		return 2
+ 	}
+ }

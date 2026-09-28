@@ -29,9 +29,9 @@ func TestSaveAndLoad(t *testing.T) {
 	path := filepath.Join(dir, "config.json")
 
 	cfg := Config{
-		Theme:    "light",
-		TabWidth: 8,
-		SplitDiff: true,
+		Theme:        "light",
+		TabWidth:     8,
+		SplitDiff:    true,
 		CommitMsgCmd: "echo test",
 	}
 	if err := SaveTo(cfg, path); err != nil {

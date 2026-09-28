@@ -17,6 +17,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleDiffLoaded(msg)
 	case filesRefreshedMsg:
 		return m.handleFilesRefreshed(msg)
+	case feedbackSentMsg:
+		return m.handleFeedbackSent(msg)
 	case commitDoneMsg:
 		return m.handleCommitDone(msg)
 	case commitMsgGeneratedMsg:
@@ -49,6 +51,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateCommitMode(msg)
 		case modeBranchPicker:
 			return m.updateBranchMode(msg)
+		case modeReview:
+			return m.updateReviewMode(msg)
 		}
 	}
 	return m, nil
@@ -60,19 +64,43 @@ func (m Model) handleResize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 	m.viewport = viewport.New(m.diffWidth(), m.contentHeight())
 	m.lastDiffContent = ""
 	m.ready = true
-	return m, m.loadDiffCmd(true)
+	// Re-render at the new size without resetting: a resize (or a tmux pane
+	// split) must not send the reviewer back to the top of the diff.
+	return m, m.loadDiffCmd(false)
 }
 
 func (m Model) handleDiffLoaded(msg diffLoadedMsg) (tea.Model, tea.Cmd) {
-	if msg.index != m.cursor || msg.content == m.lastDiffContent {
+	if msg.index != m.cursor {
 		return m, nil
 	}
-	m.lastDiffContent = msg.content
-	m.viewport.SetContent(msg.content)
-	if msg.resetScroll {
-		m.viewport.GotoTop()
+	if msg.renderer == nil {
+		if msg.errContent == m.lastDiffContent {
+			return m, nil
+		}
+		m.renderer = nil
+		m.lastDiffContent = msg.errContent
+		m.viewport.SetContent(msg.errContent)
+		if msg.resetScroll {
+			m.viewport.GotoTop()
+		}
+		return m, nil
 	}
-	return m, nil
+
+	m.renderer = msg.renderer
+	if m.session != nil {
+		m.renderer.SetComments(m.session.CommentsFor(m.currentFilePath()))
+	}
+	// A new file, or the very first diff of the session, starts at the first
+	// line worth reviewing. Everything else keeps the reviewer's position.
+	if msg.resetScroll || !m.cursorPlaced {
+		m.viewport.GotoTop()
+		return m.setCursor(msg.renderer.Parsed().FirstCommentableLine()), nil
+	}
+	// A background refresh: keep the cursor where the user left it, clamped in
+	// case the diff shrank underneath. applyContent leaves the viewport alone
+	// when nothing changed, so polling cannot undo the user's own scrolling.
+	m.diffCursor = clampCursor(m.diffCursor, m.renderer.LineCount())
+	return m.applyContent(false), nil
 }
 
 func (m Model) handleFilesRefreshed(msg filesRefreshedMsg) (tea.Model, tea.Cmd) {

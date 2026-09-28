@@ -46,6 +46,7 @@ differ commit     # review staged + commit
 | `enter` / `l` | view diff                                  |
 | `tab`         | stage/unstage file                         |
 | `a`           | stage all                                  |
+| `r`           | enter review mode                          |
 | `c`           | commit (AI-generated message via `claude`) |
 | `b`           | open branch picker                         |
 | `v`           | toggle split (side-by-side) diff           |
@@ -57,17 +58,49 @@ differ commit     # review staged + commit
 
 ### Diff View
 
-| Key         | Action             |
-| ----------- | ------------------ |
-| `j/k`       | scroll             |
-| `d/u`       | half page down/up  |
-| `g/G`       | top/bottom         |
-| `n/p`       | next/prev file     |
-| `tab`       | stage/unstage      |
-| `b`         | open branch picker |
-| `v`         | toggle split diff  |
-| `e`         | open in editor     |
-| `esc` / `h` | back to file list  |
+| Key         | Action                    |
+| ----------- | ------------------------- |
+| `j/k`       | move line cursor          |
+| `}` / `{`   | next/prev hunk            |
+| `d/u`       | half page down/up         |
+| `g/G`       | first/last line           |
+| `n/p`       | next/prev file            |
+| `tab`       | stage/unstage             |
+| `b`         | open branch picker        |
+| `v`         | toggle split diff         |
+| `e`         | open in editor            |
+| `esc` / `h` | back to file list         |
+
+The diff view has a line cursor (`▌`) marking the current line. It is the
+anchor review comments attach to, and it keeps the same position when you
+toggle between unified and split view.
+
+### Review Mode
+
+Review mode is the diff view with review state on top: it tracks which files
+you have looked at and (from the next release) holds your review comments.
+It never changes git state — staging and committing stay explicit actions.
+
+| Key       | Action                          |
+| --------- | ------------------------------- |
+| `r`       | toggle review mode              |
+| `j/k`     | move line cursor                |
+| `}` / `{` | next/prev hunk                  |
+| `c`       | comment on line (edit existing) |
+| `C`       | comment on whole hunk           |
+| `x`       | delete comment under cursor     |
+| `s`       | send comment under cursor       |
+| `S`       | send all pending comments       |
+
+Quitting with unsent comments asks for confirmation — review state is
+session-only, so `q` really does discard them.
+| `n/p`     | next/prev file                  |
+| `v`       | toggle split diff               |
+| `esc`     | back to file list               |
+
+In the comment editor: `ctrl+s` saves, `esc` cancels. Comments are multiline,
+shown inline under the line they refer to, and marked `pending` until sent.
+They live for the session only — nothing is written to disk or to git.
 
 ### Commit Mode
 
@@ -107,9 +140,50 @@ Config file: `~/.config/differ/config.json`
   "commit_msg_cmd": "claude -p",
   "commit_msg_prompt": "Write a concise git commit message for this diff:",
   "editor_cmd": "tmux new-window -c {repo} nvim {file}",
-  "split_diff": false
+  "split_diff": false,
+  "feedback_target": "clipboard",
+  "tmux_target": ""
 }
 ```
+
+`feedback_target` decides where review feedback goes: `clipboard` (default),
+`stdout`, or `tmux`. The clipboard target shells out to `pbcopy` on macOS and
+`wl-copy`/`xclip`/`xsel` on Linux, so it does the right thing over SSH.
+
+A failed send never discards comments — they stay pending and the error is
+shown, so you can fix the target and send again.
+
+## Reviewing agent changes in tmux
+
+The workflow differ is built for: a coding agent in one pane, differ in another.
+
+```text
+tmux
+├── Claude Code
+└── differ
+```
+
+```json
+{
+  "feedback_target": "tmux",
+  "tmux_target": ""
+}
+```
+
+An empty `tmux_target` means the last active pane — in a two-pane layout, and
+from a `display-popup`, that is the pane you came from. Set it explicitly to
+any tmux pane target (`%12`, `session:window.pane`) to pin it.
+
+Press `r` to review, `c` to comment on a line, `S` to send everything pending.
+The payload is pasted into the target pane's prompt using a tmux paste buffer,
+so multiline feedback arrives intact.
+
+differ does **not** press Enter for you. The feedback lands in the agent's
+prompt and you send it — which means a misconfigured target can never execute
+anything. differ also refuses to paste into its own pane.
+
+If tmux is unavailable, the pane is gone, or the target resolves to differ
+itself, the send fails with a specific error and your comments stay pending.
 
 `editor_cmd` supports `{file}` (absolute path) and `{repo}` (repo root) placeholders. Defaults to `$EDITOR {file}` (falls back to `vi`).
 

@@ -27,7 +27,7 @@ func (m Model) View() string {
 		fileContent = m.renderFileList(contentH)
 	}
 	fileCard := m.renderCard(m.fileCardTitle(), fileContent, m.mode == modeFileList || m.mode == modeBranchPicker, fileListWidth, contentH)
-	diffCard := m.renderCard(m.diffCardTitle(), m.viewport.View(), m.mode == modeDiff, m.diffWidth(), contentH)
+	diffCard := m.renderCard(m.diffCardTitle(), m.viewport.View(), m.mode == modeDiff || m.mode == modeReview, m.diffWidth(), contentH)
 	main := lipgloss.JoinHorizontal(lipgloss.Top, fileCard, " ", diffCard)
 	statusBar := m.renderStatusBar()
 	if m.mode == modeCommit {
@@ -35,6 +35,9 @@ func (m Model) View() string {
 	}
 	if m.mode == modeBranchPicker && m.branchCreating {
 		return lipgloss.JoinVertical(lipgloss.Left, main, statusBar, m.renderBranchCreateBar())
+	}
+	if m.commenting {
+		return lipgloss.JoinVertical(lipgloss.Left, main, statusBar, m.renderCommentEditor())
 	}
 	return lipgloss.JoinVertical(lipgloss.Left, main, statusBar, m.renderHelpBar())
 }
@@ -49,9 +52,15 @@ func renderCard(t theme.Theme, title, content string, focused bool, w, h int) st
 		borderColor = lipgloss.Color(t.AccentFg)
 	}
 	bs := lipgloss.NewStyle().Foreground(borderColor)
+	// The top border is "╭─" + title + fill + "╮", so the title has w-3 columns
+	// to live in. A longer one must be truncated: clamping the fill instead
+	// makes the border wider than the card, which ragged the whole layout.
 	titleStr := ""
 	if title != "" {
-		titleStr = " " + title + " "
+		titleStr = " " + truncateEnd(title, max(w-3, 0)) + " "
+		if lipgloss.Width(titleStr) > w-1 {
+			titleStr = ""
+		}
 	}
 	topFill := w - lipgloss.Width(titleStr) - 1
 	if topFill < 0 {
@@ -80,13 +89,21 @@ func (m Model) fileCardTitle() string {
 	if m.mode == modeBranchPicker {
 		return "Branches"
 	}
-	title := m.repo.BranchName()
+	title := m.branchName()
 	if m.ref != "" {
 		title += " ref:" + m.ref
 	} else if m.stagedOnly {
 		title += " staged"
 	}
 	return title
+}
+
+// branchName is nil-safe so the view can render before a repo is attached.
+func (m Model) branchName() string {
+	if m.repo == nil {
+		return ""
+	}
+	return m.repo.BranchName()
 }
 
 func (m Model) diffCardTitle() string {
@@ -97,6 +114,14 @@ func (m Model) diffCardTitle() string {
 	name := f.change.Path
 	if f.change.Staged {
 		name += " [staged]"
+	}
+	if m.mode == modeReview {
+		name = "review · " + name
+		if m.session != nil {
+			if n := m.session.CountFor(f.change.Path); n > 0 {
+				name += " · " + plural(n, "comment")
+			}
+		}
 	}
 	return name
 }
@@ -188,6 +213,26 @@ func (m Model) renderBranchItem(name string, selected, current bool) string {
 	return m.styles.FileItem.Width(fileListWidth).Render(line)
 }
 
+// truncateEnd shortens text to maxW columns, marking the cut with an ellipsis.
+// Unlike truncatePath it keeps the start, which is what identifies a branch or
+// a card.
+func truncateEnd(s string, maxW int) string {
+	if maxW <= 0 {
+		return ""
+	}
+	if lipgloss.Width(s) <= maxW {
+		return s
+	}
+	if maxW == 1 {
+		return "…"
+	}
+	runes := []rune(s)
+	for len(runes) > 0 && lipgloss.Width(string(runes))+1 > maxW {
+		runes = runes[:len(runes)-1]
+	}
+	return string(runes) + "…"
+}
+
 func truncatePath(path string, maxW int) string {
 	if lipgloss.Width(path) <= maxW {
 		return path
@@ -215,6 +260,13 @@ func (m Model) styleStatus(icon string, status git.FileStatus) string {
 	}
 }
 
+// renderBar renders a single full-width line. Width() on its own wraps
+// content that is too long onto a second row, which pushes the top of the
+// layout off screen — MaxHeight(1) keeps it to one row.
+func (m Model) renderBar(style lipgloss.Style, content string) string {
+	return style.Width(m.width).MaxHeight(1).Render(content)
+}
+
 func (m Model) renderStatusBar() string {
 	stagedCount := 0
 	for _, f := range m.files {
@@ -223,6 +275,19 @@ func (m Model) renderStatusBar() string {
 		}
 	}
 	left := fmt.Sprintf(" %d staged  %d files", stagedCount, len(m.files))
+	if m.mode == modeReview {
+		p := m.reviewProgress()
+		left = fmt.Sprintf(" review %d/%d files", p.Reviewed, p.Total)
+		if p.Comments > 0 {
+			left += fmt.Sprintf("  %d comments", p.Comments)
+		}
+		if p.Pending > 0 {
+			left += fmt.Sprintf("  %d pending", p.Pending)
+		}
+		if p.Sent > 0 {
+			left += fmt.Sprintf("  %d sent", p.Sent)
+		}
+	}
 	if m.upstream.Upstream != "" && (m.upstream.Ahead > 0 || m.upstream.Behind > 0) {
 		left += fmt.Sprintf("  ↑%d ↓%d", m.upstream.Ahead, m.upstream.Behind)
 	}
@@ -232,35 +297,73 @@ func (m Model) renderStatusBar() string {
 	if m.statusMsg != "" {
 		left += "  " + m.statusMsg
 	}
-	return m.styles.StatusBar.Width(m.width).Render(left)
+	return m.renderBar(m.styles.StatusBar, left)
 }
 
-func (m Model) renderHelpBar() string {
+// helpPairs is the hint list for the current mode.
+func (m Model) helpPairs() []struct{ key, desc string } {
 	var pairs []struct{ key, desc string }
 	switch m.mode {
 	case modeDiff:
-		pairs = []struct{ key, desc string }{{"j/k", "scroll"}, {"d/u", "½ page"}, {"n/p", "next/prev"}, {"v", "split"}, {"tab", "stage"}, {"e", "edit"}, {"b", "branches"}, {"esc", "back"}, {"q", "quit"}}
+		pairs = []struct{ key, desc string }{{"j/k", "line"}, {"}/{", "hunk"}, {"d/u", "½ page"}, {"n/p", "file"}, {"r", "review"}, {"v", "split"}, {"tab", "stage"}, {"esc", "back"}, {"q", "quit"}}
+	case modeReview:
+		pairs = []struct{ key, desc string }{{"j/k", "line"}, {"}/{", "hunk"}, {"c", "comment"}, {"C", "hunk comment"}, {"x", "delete"}, {"s/S", "send one/all"}, {"n/p", "file"}, {"r", "exit review"}, {"q", "quit"}}
 	case modeBranchPicker:
 		pairs = []struct{ key, desc string }{{"type", "filter"}, {"↑/↓/^j/^k", "navigate"}, {"enter", "switch"}, {"^n", "new"}, {"esc", "clear/close"}}
 	default:
-		pairs = []struct{ key, desc string }{{"j/k", "navigate"}, {"enter", "view diff"}, {"v", "split"}, {"tab", "stage/unstage"}, {"a", "stage all"}, {"e", "edit"}, {"b", "branches"}, {"c", "commit"}, {"P", "push"}, {"F", "pull"}, {"q", "quit"}}
+		// Kept short enough to fit without truncation; the full keymap belongs
+		// in a help overlay.
+		pairs = []struct{ key, desc string }{{"j/k", "nav"}, {"enter", "diff"}, {"r", "review"}, {"tab", "stage"}, {"a", "all"}, {"c", "commit"}, {"b", "branch"}, {"e", "edit"}, {"P/F", "push/pull"}, {"q", "quit"}}
 	}
+	return pairs
+}
+
+func (m Model) renderHelpBar() string {
+	// Deliberately not clamped: losing the last hints is worse than a second
+	// row, and footerHeight measures the wrapped height so the cards fit.
+	return lipgloss.NewStyle().Width(m.width).Render(m.helpContent(m.helpPairs()))
+}
+
+// helpContent builds the hint line. Kept separate so its width can be
+// asserted: renderBar clamps to one row, which would silently cut the last
+// hints off rather than wrapping.
+func (m Model) helpContent(pairs []struct{ key, desc string }) string {
 	parts := make([]string, 0, len(pairs))
 	for _, p := range pairs {
 		parts = append(parts, m.styles.HelpKey.Render(p.key)+" "+m.styles.HelpDesc.Render(p.desc))
 	}
-	return lipgloss.NewStyle().Width(m.width).Render(" " + strings.Join(parts, "  ·  "))
+	return " " + strings.Join(parts, "  ·  ")
 }
 
 func (m Model) renderCommitBar() string {
-	prompt := m.styles.HelpKey.Render(" commit: ")
-	if m.generatingMsg {
-		return lipgloss.NewStyle().Width(m.width).Render(prompt + m.styles.HelpDesc.Render("generating...  esc cancel"))
+	return lipgloss.NewStyle().Width(m.width).Render(m.commitBarContent())
+}
+
+// renderCommentEditor shows the textarea plus what the two closing keys do.
+func (m Model) renderCommentEditor() string {
+	label := fmt.Sprintf(" comment · line %d ", m.draft.StartLine)
+	if m.draft.EndLine > m.draft.StartLine {
+		label = fmt.Sprintf(" comment · lines %d-%d ", m.draft.StartLine, m.draft.EndLine)
 	}
-	return lipgloss.NewStyle().Width(m.width).Render(prompt + m.commitInput.View() + "  " + m.styles.HelpDesc.Render("esc cancel · enter commit"))
+	if m.editingID != "" {
+		label = " edit" + label
+	}
+	head := m.renderBar(lipgloss.NewStyle(), m.styles.HelpKey.Render(label)+m.styles.HelpDesc.Render("· ctrl+s save · esc cancel"))
+	return lipgloss.JoinVertical(lipgloss.Left, head, m.commentInput.View())
 }
 
 func (m Model) renderBranchCreateBar() string {
-	prompt := m.styles.HelpKey.Render(" new branch: ")
-	return lipgloss.NewStyle().Width(m.width).Render(prompt + m.branchInput.View() + "  " + m.styles.HelpDesc.Render("esc cancel · enter create"))
+	return lipgloss.NewStyle().Width(m.width).Render(m.branchCreateContent())
+}
+
+func (m Model) commitBarContent() string {
+	prompt := m.styles.HelpKey.Render(" commit: ")
+	if m.generatingMsg {
+		return prompt + m.styles.HelpDesc.Render("generating...  esc cancel")
+	}
+	return prompt + m.commitInput.View() + "  " + m.styles.HelpDesc.Render("esc cancel · enter commit")
+}
+
+func (m Model) branchCreateContent() string {
+	return m.styles.HelpKey.Render(" new branch: ") + m.branchInput.View() + "  " + m.styles.HelpDesc.Render("esc cancel · enter create")
 }

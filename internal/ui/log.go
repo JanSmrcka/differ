@@ -32,6 +32,7 @@ type LogModel struct {
 	repo     *git.Repo
 	styles   Styles
 	theme    theme.Theme
+	tabWidth int
 	commits  []git.Commit
 	cursor   int
 	mode     logMode
@@ -42,8 +43,8 @@ type LogModel struct {
 }
 
 // NewLogModel creates the log browser model.
-func NewLogModel(repo *git.Repo, styles Styles, t theme.Theme) LogModel {
-	return LogModel{repo: repo, styles: styles, theme: t}
+func NewLogModel(repo *git.Repo, styles Styles, t theme.Theme, tabWidth int) LogModel {
+	return LogModel{repo: repo, styles: styles, theme: t, tabWidth: tabWidth}
 }
 
 func (m LogModel) Init() tea.Cmd {
@@ -119,6 +120,7 @@ func (m LogModel) loadCommitDiff() tea.Cmd {
 	commit := m.commits[m.cursor]
 	repo := m.repo
 	styles := m.styles
+	tabWidth := m.tabWidth
 	t := m.theme
 	width := m.width
 
@@ -128,14 +130,18 @@ func (m LogModel) loadCommitDiff() tea.Cmd {
 			return logDiffLoadedMsg{content: "Error: " + err.Error(), hash: commit.Hash}
 		}
 		// Guess filename from diff headers for syntax highlighting
-		content := renderCommitDiff(raw, styles, t, width)
+		content := renderCommitDiff(raw, styles, t, width, tabWidth)
 		return logDiffLoadedMsg{content: content, hash: commit.Hash}
 	}
 }
 
 // renderCommitDiff renders a full commit diff (may contain multiple files).
-func renderCommitDiff(raw string, styles Styles, t theme.Theme, width int) string {
-	initChromaStyle(t.ChromaStyle)
+func renderCommitDiff(raw string, styles Styles, t theme.Theme, width, tabWidth int) string {
+	render := func(parsed ParsedDiff, file string) string {
+		r := NewDiffRenderer(parsed, file, styles, t, width)
+		r.SetTabWidth(tabWidth)
+		return r.Content(-1) + "\n"
+	}
 
 	var b strings.Builder
 	// Split by file boundaries and render each section
@@ -146,8 +152,7 @@ func renderCommitDiff(raw string, styles Styles, t theme.Theme, width int) strin
 		if strings.HasPrefix(line, "diff --git") {
 			// Flush previous file
 			if len(currentLines) > 0 {
-				parsed := ParseDiff(strings.Join(currentLines, "\n"))
-				b.WriteString(RenderDiff(parsed, currentFile, styles, t, width))
+				b.WriteString(render(ParseDiff(strings.Join(currentLines, "\n")), currentFile))
 			}
 			currentFile = extractFilename(line)
 			// Add file separator
@@ -160,8 +165,7 @@ func renderCommitDiff(raw string, styles Styles, t theme.Theme, width int) strin
 	}
 	// Flush last file
 	if len(currentLines) > 0 {
-		parsed := ParseDiff(strings.Join(currentLines, "\n"))
-		b.WriteString(RenderDiff(parsed, currentFile, styles, t, width))
+		b.WriteString(render(ParseDiff(strings.Join(currentLines, "\n")), currentFile))
 	}
 	return b.String()
 }

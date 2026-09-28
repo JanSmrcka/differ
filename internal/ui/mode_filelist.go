@@ -29,10 +29,15 @@ func (m Model) updateFileListMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.pushConfirm = false
+	if msg.String() != "q" {
+		m.quitConfirm = false
+	}
 
 	switch msg.String() {
-	case "q", "ctrl+c":
+	case "ctrl+c":
 		return m, tea.Quit
+	case "q":
+		return m.confirmQuit()
 	case "j", "down":
 		if m.cursor < len(m.files)-1 {
 			m.cursor++
@@ -57,6 +62,8 @@ func (m Model) updateFileListMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.toggleStage()
 	case "a":
 		return m.stageAll()
+	case "r":
+		return m.enterReviewMode()
 	case "c":
 		return m.enterCommitMode()
 	case "b":
@@ -85,7 +92,7 @@ func (m Model) nextFile() (tea.Model, tea.Cmd) {
 	if m.cursor < len(m.files)-1 {
 		m.cursor++
 		m.prevCurs = m.cursor
-		return m, m.loadDiffCmd(true)
+		return m.onFileFocused(), m.loadDiffCmd(true)
 	}
 	return m, nil
 }
@@ -94,7 +101,16 @@ func (m Model) prevFile() (tea.Model, tea.Cmd) {
 	if m.cursor > 0 {
 		m.cursor--
 		m.prevCurs = m.cursor
-		return m, m.loadDiffCmd(true)
+		return m.onFileFocused(), m.loadDiffCmd(true)
 	}
 	return m, nil
+}
+
+// onFileFocused records that a file has been looked at, but only while
+// reviewing — browsing the file list is not reviewing.
+func (m Model) onFileFocused() Model {
+	if m.mode == modeReview && m.session != nil {
+		m.session.MarkViewed(m.currentFilePath())
+	}
+	return m
 }

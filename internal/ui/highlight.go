@@ -12,8 +12,8 @@ import (
 )
 
 var (
-	lexerCache   sync.Map // ext -> chroma.Lexer
-	chromaStyle  *chroma.Style
+	lexerCache    sync.Map // ext -> chroma.Lexer
+	chromaStyle   *chroma.Style
 	chromaStyleMu sync.Once
 )
 

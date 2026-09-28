@@ -406,7 +406,7 @@ func TestHandleResize_ClearsDiffCache(t *testing.T) {
 	}
 
 	// handleDiffLoaded with same content should apply (not skip) after resize
-	result2, _ := rm.handleDiffLoaded(diffLoadedMsg{content: "old diff", index: 0})
+	result2, _ := rm.handleDiffLoaded(diffLoadedMsg{errContent: "old diff", index: 0})
 	rm2 := result2.(Model)
 	if rm2.lastDiffContent != "old diff" {
 		t.Error("handleDiffLoaded should apply content after resize cleared cache")
@@ -425,7 +425,7 @@ func TestHandleDiffLoaded_SkipsDuplicate(t *testing.T) {
 	m.lastDiffContent = "same diff"
 
 	// Same content as cache — should be a no-op
-	result, _ := m.handleDiffLoaded(diffLoadedMsg{content: "same diff", index: 0})
+	result, _ := m.handleDiffLoaded(diffLoadedMsg{errContent: "same diff", index: 0})
 	rm := result.(Model)
 	if rm.lastDiffContent != "same diff" {
 		t.Error("cache should remain unchanged on duplicate")

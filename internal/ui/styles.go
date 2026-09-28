@@ -20,22 +20,27 @@ type Styles struct {
 	StatusUntracked lipgloss.Style
 
 	// Diff
-	DiffAdded           lipgloss.Style
-	DiffRemoved         lipgloss.Style
-	DiffAddedBg         lipgloss.Style // bg-only, for padding highlighted lines
-	DiffRemovedBg       lipgloss.Style // bg-only, for padding highlighted lines
-	DiffContext         lipgloss.Style
-	DiffHunkHeader      lipgloss.Style
-	DiffLineNum         lipgloss.Style
-	DiffLineNumAdded    lipgloss.Style
-	DiffLineNumRemoved  lipgloss.Style
+	DiffAdded          lipgloss.Style
+	DiffRemoved        lipgloss.Style
+	DiffAddedBg        lipgloss.Style // bg-only, for padding highlighted lines
+	DiffRemovedBg      lipgloss.Style // bg-only, for padding highlighted lines
+	DiffContext        lipgloss.Style
+	DiffHunkHeader     lipgloss.Style
+	DiffLineNum        lipgloss.Style
+	DiffLineNumAdded   lipgloss.Style
+	DiffLineNumRemoved lipgloss.Style
 
 	// Chrome
-	HeaderBar   lipgloss.Style
-	StatusBar   lipgloss.Style
-	HelpKey  lipgloss.Style
-	HelpDesc lipgloss.Style
-	CardBg   lipgloss.Style
+	HeaderBar lipgloss.Style
+	StatusBar lipgloss.Style
+	HelpKey   lipgloss.Style
+	HelpDesc  lipgloss.Style
+	CardBg    lipgloss.Style
+
+	// Review comments
+	CommentBar  lipgloss.Style
+	CommentMeta lipgloss.Style
+	CommentBody lipgloss.Style
 
 	// Commit input
 	CommitInput lipgloss.Style
@@ -109,6 +114,14 @@ func NewStyles(t theme.Theme) Styles {
 			Foreground(lipgloss.Color(t.HelpDescFg)),
 		CardBg: lipgloss.NewStyle().
 			Background(lipgloss.Color(t.CardBg)),
+
+		CommentBar: lipgloss.NewStyle().
+			Foreground(lipgloss.Color(t.CommentFg)).
+			Bold(true),
+		CommentMeta: lipgloss.NewStyle().
+			Foreground(lipgloss.Color(t.CommentMetaFg)),
+		CommentBody: lipgloss.NewStyle().
+			Foreground(lipgloss.Color(t.CommentFg)),
 
 		CommitInput: lipgloss.NewStyle().
 			Foreground(lipgloss.Color(t.Fg)),

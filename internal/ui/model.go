@@ -4,11 +4,16 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
+
+	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/jansmrcka/differ/internal/config"
+	"github.com/jansmrcka/differ/internal/feedback"
 	"github.com/jansmrcka/differ/internal/git"
+	"github.com/jansmrcka/differ/internal/review"
 	"github.com/jansmrcka/differ/internal/theme"
 )
 
@@ -19,6 +24,7 @@ const (
 	modeDiff
 	modeCommit
 	modeBranchPicker
+	modeReview
 )
 
 const fileListWidth = 35
@@ -32,13 +38,24 @@ const (
 type tickMsg time.Time
 
 type diffLoadedMsg struct {
-	content     string
+	// renderer is nil when the diff could not be loaded; errContent then holds
+	// the message to show instead.
+	renderer    *DiffRenderer
+	errContent  string
 	index       int
 	resetScroll bool
 }
 
 type filesRefreshedMsg struct{ files []fileItem }
 type commitDoneMsg struct{ err error }
+
+// feedbackSentMsg reports the outcome of a delivery attempt. ids names the
+// comments that were in the payload, so they are marked sent only on success.
+type feedbackSentMsg struct {
+	ids    []string
+	target string
+	err    error
+}
 
 type commitMsgGeneratedMsg struct {
 	message string
@@ -88,6 +105,15 @@ type Model struct {
 
 	lastDiffContent string
 
+	// renderer holds the diff currently on screen; diffCursor indexes into its
+	// lines and is the anchor review comments will attach to.
+	renderer   *DiffRenderer
+	diffCursor int
+	// cursorPlaced records that the cursor has been positioned for the
+	// current diff, so a resize preserves it but the first load still lands
+	// on the first reviewable line.
+	cursorPlaced bool
+
 	branches         []string
 	filteredBranches []string
 	branchCursor     int
@@ -99,6 +125,26 @@ type Model struct {
 
 	upstream    git.UpstreamInfo
 	pushConfirm bool
+	quitConfirm bool
+
+	// commenting is true while the comment editor is open; draft is the
+	// comment being written, and editingID is set when editing an existing
+	// one rather than creating a new comment.
+	commenting   bool
+	draft        review.Comment
+	editingID    string
+	commentInput textarea.Model
+
+	// target delivers review feedback; targetErr records why it could not be
+	// built, so the problem is reported when the user tries to send rather
+	// than at startup.
+	target    feedback.Target
+	targetErr error
+
+	// session holds review state — comments and per-file progress. It is
+	// created on first entering review mode and lives until the process ends;
+	// it is never written to disk and never mirrored into the git index.
+	session *review.Session
 }
 
 type fileItem struct {
@@ -122,6 +168,19 @@ func NewModel(repo *git.Repo, cfg config.Config, changes []git.FileChange, untra
 	bi.Placeholder = "branch name..."
 	bi.CharLimit = 100
 
+	// Resolving the target up front keeps the failure (missing clipboard
+	// command, not inside tmux) attached to the send action rather than
+	// blocking startup.
+	target, targetErr := feedback.Resolve(feedback.Config{
+		Target:     cfg.FeedbackTarget,
+		TmuxTarget: cfg.TmuxTarget,
+	})
+
+	ca := textarea.New()
+	ca.Placeholder = "review comment..."
+	ca.ShowLineNumbers = false
+	ca.SetHeight(commentEditorHeight)
+
 	return Model{
 		repo:         repo,
 		cfg:          cfg,
@@ -135,6 +194,9 @@ func NewModel(repo *git.Repo, cfg config.Config, changes []git.FileChange, untra
 		commitInput:  ti,
 		branchFilter: bf,
 		branchInput:  bi,
+		commentInput: ca,
+		target:       target,
+		targetErr:    targetErr,
 	}
 }
 
@@ -192,5 +254,34 @@ func (m Model) Init() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-func (m Model) contentHeight() int { return m.height - 4 }
+// footerHeight is how many rows the bar below the status line takes.
+//
+// It is measured, not assumed: the comment editor is a multiline textarea, and
+// the help hints wrap onto a second row on narrow terminals. Guessing one row
+// pushed the top of the layout off screen.
+func (m Model) footerHeight() int {
+	if m.commenting {
+		return 1 + commentEditorHeight // label + textarea
+	}
+	if m.width <= 0 {
+		return 1
+	}
+	return lipgloss.Height(lipgloss.NewStyle().Width(m.width).Render(m.footerContent()))
+}
+
+// footerContent is the text of the bar below the status line.
+func (m Model) footerContent() string {
+	switch {
+	case m.mode == modeCommit:
+		return m.commitBarContent()
+	case m.mode == modeBranchPicker && m.branchCreating:
+		return m.branchCreateContent()
+	default:
+		return m.helpContent(m.helpPairs())
+	}
+}
+
+// contentHeight is the room left for the cards: the terminal minus the card
+// borders, the status line and the footer.
+func (m Model) contentHeight() int { return m.height - 3 - m.footerHeight() }
 func (m Model) diffWidth() int     { return m.width - fileListWidth - 2 - 1 - 2 }

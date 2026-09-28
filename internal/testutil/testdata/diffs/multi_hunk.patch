@@ -1,0 +1,19 @@
+diff --git a/src.ts b/src.ts
+index d84f8f0..f93fa4d 100644
+--- a/src.ts
++++ b/src.ts
+@@ -1,5 +1,5 @@
+ export function load(id: string) {
+-  const user = getUser(id)
++  const user = await getUser(id)
+   return user
+ }
+ 
+@@ -8,6 +8,6 @@ function helper(a: number) {
+ }
+ 
+ export function save(data: Data) {
+-  await persist(data)
++  persist(data)
+   return true
+ }

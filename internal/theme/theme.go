@@ -14,8 +14,8 @@ type Theme struct {
 	HunkFg    string
 
 	// Line numbers
-	LineNumFg       string
-	LineNumAddedFg  string
+	LineNumFg        string
+	LineNumAddedFg   string
 	LineNumRemovedFg string
 
 	// Header bar
@@ -26,13 +26,13 @@ type Theme struct {
 	HunkBg string
 
 	// File list
-	SelectedBg string
-	SelectedFg string
-	StagedFg   string
-	ModifiedFg string
-	AddedFileFg  string
-	DeletedFg  string
-	RenamedFg  string
+	SelectedBg  string
+	SelectedFg  string
+	StagedFg    string
+	ModifiedFg  string
+	AddedFileFg string
+	DeletedFg   string
+	RenamedFg   string
 	UntrackedFg string
 
 	// Card
@@ -44,6 +44,10 @@ type Theme struct {
 	StatusBarFg string
 	HelpKeyFg   string
 	HelpDescFg  string
+
+	// Review comments
+	CommentFg     string
+	CommentMetaFg string
 
 	// Accent
 	AccentFg string
@@ -96,6 +100,9 @@ func DarkTheme() Theme {
 		HelpKeyFg:   "#c678dd",
 		HelpDescFg:  "#9399b2",
 
+		CommentFg:     "#f9e2af",
+		CommentMetaFg: "#9399b2",
+
 		AccentFg: "#c678dd",
 
 		ChromaStyle: "catppuccin-mocha",
@@ -139,6 +146,9 @@ func LightTheme() Theme {
 		StatusBarFg: "#6c6f85",
 		HelpKeyFg:   "#8839ef",
 		HelpDescFg:  "#8c8fa1",
+
+		CommentFg:     "#df8e1d",
+		CommentMetaFg: "#8c8fa1",
 
 		AccentFg: "#8839ef",
 
