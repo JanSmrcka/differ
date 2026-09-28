@@ -42,18 +42,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case tea.KeyMsg:
-		switch m.mode {
-		case modeFileList:
-			return m.updateFileListMode(msg)
-		case modeDiff:
-			return m.updateDiffMode(msg)
-		case modeCommit:
-			return m.updateCommitMode(msg)
-		case modeBranchPicker:
-			return m.updateBranchMode(msg)
-		case modeReview:
-			return m.updateReviewMode(msg)
+		updated, cmd := m.routeKey(msg)
+		// Any mode change can change the footer's height — a status row
+		// appears, an input opens — so the panels must be re-measured in one
+		// place rather than at every transition.
+		if mm, ok := updated.(Model); ok {
+			return mm.fitViewport(), cmd
 		}
+		return updated, cmd
+	}
+	return m, nil
+}
+
+func (m Model) routeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch m.mode {
+	case modeFileList:
+		return m.updateFileListMode(msg)
+	case modeDiff:
+		return m.updateDiffMode(msg)
+	case modeCommit:
+		return m.updateCommitMode(msg)
+	case modeBranchPicker:
+		return m.updateBranchMode(msg)
+	case modeReview:
+		return m.updateReviewMode(msg)
 	}
 	return m, nil
 }

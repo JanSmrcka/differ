@@ -273,7 +273,7 @@ func TestCommentEditor_IsVisibleWhileOpen(t *testing.T) {
 
 func TestReviewHelpBar_MentionsCommentKeys(t *testing.T) {
 	m := reviewModel(t, "multi_hunk")
-	help := m.renderHelpBar()
+	help := m.renderHintBar()
 	for _, want := range []string{"comment", "delete"} {
 		if !strings.Contains(help, want) {
 			t.Errorf("review help missing %q: %q", want, help)

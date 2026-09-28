@@ -118,7 +118,7 @@ func TestFilesEqual_OneEmpty(t *testing.T) {
 func TestContentHeight(t *testing.T) {
 	t.Parallel()
 	m := Model{height: 30}
-	// height - 4: cards add top+bottom border (+2), header removed (-1), net +1
+	// 30 less the chrome (header and two rules = 3) and a one-row footer.
 	if got := m.contentHeight(); got != 26 {
 		t.Errorf("contentHeight()=%d, want 26", got)
 	}
@@ -138,7 +138,7 @@ func TestRenderCard_Dimensions(t *testing.T) {
 	t.Parallel()
 	m := newTestModel(t, nil)
 	content := "line1\nline2\nline3"
-	card := m.renderCard("Title", content, true, 20, 5)
+	card := renderCard(m.theme, "Title", content, true, 20, 5)
 	lines := strings.Split(card, "\n")
 	// h=5 content lines + 2 border lines (top + bottom) = 7
 	if len(lines) != 7 {
@@ -149,7 +149,7 @@ func TestRenderCard_Dimensions(t *testing.T) {
 func TestRenderCard_Title(t *testing.T) {
 	t.Parallel()
 	m := newTestModel(t, nil)
-	card := m.renderCard("MyTitle", "content", false, 20, 3)
+	card := renderCard(m.theme, "MyTitle", "content", false, 20, 3)
 	firstLine := strings.Split(card, "\n")[0]
 	if !strings.Contains(firstLine, "MyTitle") {
 		t.Errorf("first line should contain title, got %q", firstLine)
@@ -159,7 +159,7 @@ func TestRenderCard_Title(t *testing.T) {
 func TestRenderCard_BorderChars(t *testing.T) {
 	t.Parallel()
 	m := newTestModel(t, nil)
-	card := m.renderCard("T", "x", false, 10, 2)
+	card := renderCard(m.theme, "T", "x", false, 10, 2)
 	for _, ch := range []string{"╭", "╮", "╰", "╯", "│"} {
 		if !strings.Contains(card, ch) {
 			t.Errorf("card missing border char %q", ch)
@@ -171,8 +171,8 @@ func TestRenderCard_FocusedVsUnfocused(t *testing.T) {
 	t.Parallel()
 	m := newTestModel(t, nil)
 	// Both should render without panic and contain border chars
-	focused := m.renderCard("T", "x", true, 10, 2)
-	unfocused := m.renderCard("T", "x", false, 10, 2)
+	focused := renderCard(m.theme, "T", "x", true, 10, 2)
+	unfocused := renderCard(m.theme, "T", "x", false, 10, 2)
 	for _, card := range []string{focused, unfocused} {
 		if !strings.Contains(card, "╭") {
 			t.Error("card should contain border chars")
@@ -183,7 +183,7 @@ func TestRenderCard_FocusedVsUnfocused(t *testing.T) {
 func TestRenderCard_EmptyTitle(t *testing.T) {
 	t.Parallel()
 	m := newTestModel(t, nil)
-	card := m.renderCard("", "content", false, 15, 2)
+	card := renderCard(m.theme, "", "content", false, 15, 2)
 	firstLine := strings.Split(card, "\n")[0]
 	if !strings.Contains(firstLine, "╭") || !strings.Contains(firstLine, "╮") {
 		t.Error("card with empty title should still have border corners")
@@ -213,34 +213,42 @@ func newTestModel(t *testing.T, files []fileItem) Model {
 	}
 }
 
-func TestRenderStatusBar_StagedCount(t *testing.T) {
+func TestRenderHeader_StagedCount(t *testing.T) {
 	t.Parallel()
 	files := []fileItem{
 		{change: git.FileChange{Path: "a.go", Staged: true}},
 		{change: git.FileChange{Path: "b.go", Staged: false}},
 	}
 	m := newTestModel(t, files)
-	bar := m.renderStatusBar()
-	if !strings.Contains(bar, "1 staged") {
-		t.Errorf("status bar should show staged count, got %q", bar)
+	m.width = 100
+	// Changeset counts live in the header, not repeated in the footer.
+	header := m.renderHeader()
+	if !strings.Contains(header, "1 staged") {
+		t.Errorf("header should show staged count, got %q", header)
+	}
+	if !strings.Contains(header, "2 files") {
+		t.Errorf("header should show file count, got %q", header)
+	}
+	if strings.Contains(m.statusSegment(), "staged") {
+		t.Errorf("footer should not repeat the counts, got %q", m.statusSegment())
 	}
 }
 
-func TestRenderStatusBar_SplitIndicator(t *testing.T) {
+func TestStatusSegment_SplitIndicator(t *testing.T) {
 	t.Parallel()
 	m := newTestModel(t, nil)
 	m.splitDiff = true
-	bar := m.renderStatusBar()
+	bar := m.statusSegment()
 	if !strings.Contains(bar, "split") {
 		t.Error("status bar should show split indicator when splitDiff=true")
 	}
 }
 
-func TestRenderStatusBar_StatusMsg(t *testing.T) {
+func TestStatusSegment_StatusMsg(t *testing.T) {
 	t.Parallel()
 	m := newTestModel(t, nil)
 	m.statusMsg = "committed!"
-	bar := m.renderStatusBar()
+	bar := m.statusSegment()
 	if !strings.Contains(bar, "committed!") {
 		t.Error("status bar should show status message")
 	}
@@ -250,7 +258,7 @@ func TestRenderHelpBar_FileListMode(t *testing.T) {
 	t.Parallel()
 	m := newTestModel(t, nil)
 	m.mode = modeFileList
-	bar := m.renderHelpBar()
+	bar := m.renderHintBar()
 	for _, key := range []string{"j/k", "enter", "tab", "q"} {
 		if !strings.Contains(bar, key) {
 			t.Errorf("file list help should contain %q", key)
@@ -262,7 +270,7 @@ func TestRenderHelpBar_DiffMode(t *testing.T) {
 	t.Parallel()
 	m := newTestModel(t, nil)
 	m.mode = modeDiff
-	bar := m.renderHelpBar()
+	bar := m.renderHintBar()
 	for _, key := range []string{"j/k", "esc", "n/p", "q"} {
 		if !strings.Contains(bar, key) {
 			t.Errorf("diff help should contain %q", key)
@@ -274,7 +282,7 @@ func TestRenderHelpBar_BranchMode(t *testing.T) {
 	t.Parallel()
 	m := newTestModel(t, nil)
 	m.mode = modeBranchPicker
-	bar := m.renderHelpBar()
+	bar := m.renderHintBar()
 	for _, key := range []string{"↑/↓/^j/^k", "enter", "esc", "filter"} {
 		if !strings.Contains(bar, key) {
 			t.Errorf("branch help should contain %q", key)
@@ -286,7 +294,7 @@ func TestRenderHelpBar_FileListShowsBranches(t *testing.T) {
 	t.Parallel()
 	m := newTestModel(t, nil)
 	m.mode = modeFileList
-	bar := m.renderHelpBar()
+	bar := m.renderHintBar()
 	if !strings.Contains(bar, "b") {
 		t.Error("file list help should contain b for branches")
 	}
@@ -436,16 +444,16 @@ func TestBranchListScroll(t *testing.T) {
 	t.Parallel()
 	m := newTestModel(t, nil)
 	m.mode = modeBranchPicker
-	// height=30, contentHeight=26, itemH=25 (minus filter bar).
 	branches := make([]string, 40)
 	for i := range branches {
 		branches[i] = fmt.Sprintf("branch-%02d", i)
 	}
 	m.branches = branches
+	itemH := m.listHeight() - 1 // the filter bar takes one row
 	m.branchCursor = 35
-	m.branchOffset = 35 - 25 + 1 // 11
+	m.branchOffset = 35 - itemH + 1
 
-	out := m.renderBranchList(m.contentHeight())
+	out := m.renderBranchList(m.listHeight())
 	if !strings.Contains(out, "branch-35") {
 		t.Error("branch list should show cursor branch when scrolled")
 	}
@@ -769,7 +777,7 @@ func TestRenderHelpBar_BranchMode_ShowsNewKey(t *testing.T) {
 	t.Parallel()
 	m := newTestModel(t, nil)
 	m.mode = modeBranchPicker
-	bar := m.renderHelpBar()
+	bar := m.renderHintBar()
 	if !strings.Contains(bar, "^n") {
 		t.Error("branch help should contain ^n for new branch")
 	}

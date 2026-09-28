@@ -71,7 +71,16 @@ func (m Model) scrollToCursor() Model {
 	return m
 }
 
-// resizeViewport matches the viewport to the space the cards currently have,
+// fitViewport resizes the viewport when the space available to it has changed,
+// and does nothing otherwise so it is cheap to call after every key.
+func (m Model) fitViewport() Model {
+	if !m.ready || m.viewport.Height == m.contentHeight() {
+		return m
+	}
+	return m.resizeViewport()
+}
+
+// resizeViewport matches the viewport to the space the panels currently have,
 // which changes when the footer grows or shrinks, then keeps the cursor in
 // view.
 func (m Model) resizeViewport() Model {

@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"fmt"
+
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/jansmrcka/differ/internal/review"
 )
@@ -78,4 +80,20 @@ func (m Model) reviewProgress() review.Progress {
 		paths = append(paths, f.change.Path)
 	}
 	return m.session.Progress(paths)
+}
+
+// reviewSummary is the one-line progress readout shown while reviewing.
+func (m Model) reviewSummary() string {
+	p := m.reviewProgress()
+	out := fmt.Sprintf("%d/%d reviewed", p.Reviewed, p.Total)
+	if p.Comments > 0 {
+		out += "  " + plural(p.Comments, "comment")
+	}
+	if p.Pending > 0 {
+		out += fmt.Sprintf("  %d pending", p.Pending)
+	}
+	if p.Sent > 0 {
+		out += fmt.Sprintf("  %d sent", p.Sent)
+	}
+	return out
 }
