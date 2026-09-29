@@ -3,10 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"runtime/debug"
-	"strings"
 
 	"github.com/jansmrcka/differ/internal/config"
 	"github.com/jansmrcka/differ/internal/git"
@@ -113,31 +110,8 @@ func runDiff(cmd *cobra.Command, args []string) error {
 		if err := m.FlushFeedback(os.Stdout); err != nil {
 			return err
 		}
-		if m.SelectedFile != "" {
-			return openInEditor(cfg.EditorCmd, m.SelectedFile, repo.Dir())
-		}
 	}
 	return nil
-}
-
-func openInEditor(editorCmd, file, repoRoot string) error {
-	absPath := filepath.Join(repoRoot, file)
-	if editorCmd == "" {
-		editor := os.Getenv("EDITOR")
-		if editor == "" {
-			editor = "vi"
-		}
-		editorCmd = editor + " {file}"
-	}
-	expanded := strings.ReplaceAll(editorCmd, "{file}", absPath)
-	expanded = strings.ReplaceAll(expanded, "{repo}", repoRoot)
-	parts := strings.Fields(expanded)
-	cmd := exec.Command(parts[0], parts[1:]...)
-	cmd.Dir = repoRoot
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
 }
 
 func runCommit(cmd *cobra.Command, args []string) error {

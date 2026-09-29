@@ -222,9 +222,9 @@ func (m Model) helpPairs() []struct{ key, desc string } {
 	var pairs []struct{ key, desc string }
 	switch m.mode {
 	case modeDiff:
-		pairs = []struct{ key, desc string }{{"j/k", "line"}, {"}/{", "hunk"}, {"d/u", "½ page"}, {"n/p", "file"}, {"r", "review"}, {"v", "split"}, {"tab", "stage"}, {"esc", "back"}, {"q", "quit"}}
+		pairs = []struct{ key, desc string }{{"j/k", "line"}, {"}/{", "hunk"}, {"d/u", "½ page"}, {"n/p", "file"}, {"e", "edit"}, {"r", "review"}, {"v", "split"}, {"tab", "stage"}, {"esc", "back"}, {"q", "quit"}}
 	case modeReview:
-		pairs = []struct{ key, desc string }{{"j/k", "line"}, {"}/{", "hunk"}, {"c", "comment"}, {"C", "hunk comment"}, {"x", "delete"}, {"s/S", "send one/all"}, {"n/p", "file"}, {"r", "exit review"}, {"q", "quit"}}
+		pairs = []struct{ key, desc string }{{"j/k", "line"}, {"}/{", "hunk"}, {"c", "comment"}, {"C", "hunk comment"}, {"x", "delete"}, {"s/S", "send one/all"}, {"e", "edit"}, {"n/p", "file"}, {"r", "exit review"}, {"q", "quit"}}
 	case modeBranchPicker:
 		pairs = []struct{ key, desc string }{{"type", "filter"}, {"↑/↓/^j/^k", "navigate"}, {"enter", "switch"}, {"^n", "new"}, {"esc", "clear/close"}}
 	default:

@@ -33,6 +33,10 @@ func (m Model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleReanchor(msg)
 	case feedbackSentMsg:
 		return m.handleFeedbackSent(msg)
+	case editorPlanMsg:
+		return m.handleEditorPlan(msg)
+	case editorDoneMsg:
+		return m.handleEditorDone(msg)
 	case commitDoneMsg:
 		return m.handleCommitDone(msg)
 	case commitMsgGeneratedMsg:
@@ -97,6 +101,7 @@ func (m Model) handleDiffLoaded(msg diffLoadedMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.renderer = nil
+		m.rendererPath = ""
 		m.lastDiffContent = msg.errContent
 		m.viewport.SetContent(msg.errContent)
 		if msg.resetScroll {
@@ -106,6 +111,7 @@ func (m Model) handleDiffLoaded(msg diffLoadedMsg) (tea.Model, tea.Cmd) {
 	}
 
 	m.renderer = msg.renderer
+	m.rendererPath = m.currentFilePath()
 	if m.session != nil {
 		// Re-resolve this file's comments against the diff that just arrived,
 		// so a comment follows its line or is marked stale — never left

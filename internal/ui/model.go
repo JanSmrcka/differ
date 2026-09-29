@@ -113,14 +113,18 @@ type Model struct {
 	width         int
 	height        int
 	ready         bool
-	SelectedFile  string
 
 	lastDiffContent string
 
 	// renderer holds the diff currently on screen; diffCursor indexes into its
 	// lines and is the anchor review comments will attach to.
-	renderer   *DiffRenderer
-	diffCursor int
+	renderer *DiffRenderer
+	// rendererPath is the file the renderer describes. Diffs load
+	// asynchronously, so between switching files and the diff arriving the
+	// renderer still belongs to the previous one, and anything derived from
+	// it would be about the wrong file.
+	rendererPath string
+	diffCursor   int
 	// cursorPlaced records that the cursor has been positioned for the
 	// current diff, so a resize preserves it but the first load still lands
 	// on the first reviewable line.
