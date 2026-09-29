@@ -28,12 +28,28 @@ const (
 	modeReview
 )
 
-const fileListWidth = 35
+const (
+	// The file list takes a share of the terminal rather than a fixed slice,
+	// between these bounds: below minListWidth a path tells you nothing, and
+	// above maxListWidth the extra columns are better spent on the diff.
+	minListWidth = 24
+	maxListWidth = 44
+	// listShare is the fraction of the terminal the file list asks for.
+	listShare = 4
+
+	// twoPanelWidth is the narrowest terminal that fits both panels with the
+	// diff still readable. Below it one panel takes the whole width — a
+	// squeezed pair is worse than one of them.
+	twoPanelWidth = 72
+)
+
 const pollInterval = 2 * time.Second
 
 const (
-	minWidth  = 60
-	minHeight = 10
+	// The last resort. Below this there is not room for one usable panel, let
+	// alone two, and saying so is better than drawing nonsense.
+	minWidth  = 40
+	minHeight = 8
 )
 
 type tickMsg time.Time
@@ -223,7 +239,7 @@ func NewModel(repo *git.Repo, cfg config.Config, changes []git.FileChange, untra
 	bf := textinput.New()
 	bf.Placeholder = "filter..."
 	bf.CharLimit = 100
-	bf.Width = fileListWidth - 8
+	bf.Width = minListWidth - 8
 
 	bi := textinput.New()
 	bi.Placeholder = "branch name..."
@@ -341,17 +357,68 @@ func (m Model) footerHeight() int {
 	return lipgloss.Height(m.renderFooter())
 }
 
+// footerBudget is the most rows the footer may take.
+//
+// The frame is a header, two rules, the content and the footer. Whatever the
+// footer would like, it never gets so much that no content row is left: the
+// panels are what the user came for, and a frame taller than the terminal
+// scrolls its own header off the screen.
+func (m Model) footerBudget() int { return max(m.height-chromeRows-1, 1) }
+
 // contentHeight is the room left for the panels.
-func (m Model) contentHeight() int { return m.height - chromeRows - m.footerHeight() }
+//
+// Never negative: View builds a slice of this length, and a footer that
+// outgrew the terminal used to make that a panic rather than a squeeze.
+func (m Model) contentHeight() int {
+	return max(m.height-chromeRows-min(m.footerHeight(), m.footerBudget()), 0)
+}
 
 // listHeight is the rows a panel's list actually gets: the panel area less its
 // label and the blank line under it. Scroll clamping and rendering must both
 // use this, or the cursor can sit outside the visible window.
 func (m Model) listHeight() int { return max(m.contentHeight()-2, 0) }
 
+// listWidth is what the file list actually gets.
+//
+// A fixed 35 columns meant a narrow tmux split spent a third of itself on file
+// names and left the diff — the thing differ is for — with whatever remained.
+// It is a share of the terminal now, bounded at both ends, and the whole width
+// when the layout has collapsed to one panel.
+func (m Model) listWidth() int {
+	// Deliberately not mode-dependent. In a collapsed layout both panels are
+	// conceptually full width and only one is drawn — showsFileList decides
+	// which. Sizing them by the mode instead meant a resize taken in the file
+	// list built the diff viewport at width 0, and enter then opened a panel
+	// with no room to render anything.
+	if m.onePanel() {
+		return m.width
+	}
+	return min(max(m.width/listShare, minListWidth), maxListWidth)
+}
+
+// onePanel reports whether only one panel is drawn.
+//
+// Either because the terminal is too narrow for both, or because there is no
+// diff to put beside the list: with a clean tree the right-hand panel has
+// nothing in it, and the empty state was being cut to a 24-column list while
+// the empty panel next to it stayed blank.
+func (m Model) onePanel() bool { return m.width < twoPanelWidth || len(m.files) == 0 }
+
+// showsFileList reports which panel a collapsed layout keeps: the one the user
+// is working in — or the file list regardless when there is no diff to show,
+// since that is where the empty state explains why.
+func (m Model) showsFileList() bool {
+	if len(m.files) == 0 {
+		return true
+	}
+	return m.mode == modeFileList || m.mode == modeBranchPicker
+}
+
 // diffWidth is what the right-hand panel gets: the terminal less the file
-// list, the divider and the space either side of it. The old figure still
-// budgeted for card borders that no longer exist.
+// list, the divider and the space either side of it.
 func (m Model) diffWidth() int {
-	return m.width - fileListWidth - verticalDividerWidth - 2*panelGap
+	if m.onePanel() {
+		return m.width
+	}
+	return m.width - m.listWidth() - verticalDividerWidth - 2*panelGap
 }

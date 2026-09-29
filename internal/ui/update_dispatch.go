@@ -147,6 +147,7 @@ func (m Model) handleResize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 	m.width = msg.Width
 	m.height = msg.Height
 	m.viewport = viewport.New(m.diffWidth(), m.listHeight())
+	m = m.fitInputsToPanels()
 	m.lastDiffContent = ""
 	m.ready = true
 	// The scroll offsets are the only list state that depends on the height.
@@ -217,6 +218,9 @@ func (m Model) handleFilesRefreshed(msg filesRefreshedMsg) (tea.Model, tea.Cmd) 
 		return m, m.loadDiffCmd(false)
 	}
 	m.files = msg.files
+	// The file count decides whether the layout is one panel or two, so the
+	// panels can change width here without any resize.
+	m = m.fitInputsToPanels()
 	if m.session != nil {
 		paths := make([]string, 0, len(m.files))
 		for _, f := range m.files {
@@ -339,4 +343,22 @@ func (m Model) handleBranchCreated(msg branchCreatedMsg) (tea.Model, tea.Cmd) {
 	m.cursor = 0
 	m = m.clampFileScroll()
 	return m, m.refreshFilesCmd()
+}
+
+// fitInputsToPanels sizes the two text inputs from the panels they sit in.
+//
+// Not only on resize: listWidth() depends on whether there are any files, so
+// the last file going away widens the file-list panel with no WindowSizeMsg
+// involved at all — and the branch filter, sized once at 112 columns, then
+// wrapped onto a second row and ate a row of the branch list.
+func (m Model) fitInputsToPanels() Model {
+	m.branchFilter.Width = max(m.listWidth()-8, 1)
+	// The comment textarea is sized when the editor opens and was never
+	// resized after. lipgloss.JoinVertical pads every row of the frame to the
+	// widest one, so a textarea left at its old width made the whole frame
+	// that wide — thirty rows of 149 columns in a 120-column terminal.
+	if m.commenting {
+		m.commentInput.SetWidth(max(m.diffWidth()-4, 1))
+	}
+	return m
 }

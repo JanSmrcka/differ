@@ -124,14 +124,22 @@ func TestContentHeight(t *testing.T) {
 	}
 }
 
+// The two panels divide the terminal between them, with the diff taking what
+// the file list does not. The file list's share is no longer fixed, so this
+// checks the arithmetic holds at several widths rather than pinning one.
 func TestDiffWidth(t *testing.T) {
 	t.Parallel()
-	m := Model{width: 120}
-	// 120 less the file list (35), the divider (1) and the space either side
-	// of it (2). The old figure also budgeted for card borders that the frame
-	// no longer draws.
-	if got := m.diffWidth(); got != 82 {
-		t.Errorf("diffWidth()=%d, want 82", got)
+	for _, w := range []int{80, 100, 120, 160, 200} {
+		m := Model{width: w, files: []fileItem{{}}}
+		want := w - m.listWidth() - verticalDividerWidth - 2*panelGap
+		if got := m.diffWidth(); got != want {
+			t.Errorf("width %d: diffWidth() = %d, want %d", w, got, want)
+		}
+		// Nothing is unaccounted for: the two panels plus the divider and its
+		// spaces are exactly the terminal.
+		if total := m.listWidth() + verticalDividerWidth + 2*panelGap + m.diffWidth(); total != w {
+			t.Errorf("width %d: the panels add up to %d", w, total)
+		}
 	}
 }
 
@@ -141,7 +149,7 @@ func newTestModel(t *testing.T, files []fileItem) Model {
 	bf := textinput.New()
 	bf.Placeholder = "filter..."
 	bf.CharLimit = 100
-	bf.Width = fileListWidth - 8
+	bf.Width = minListWidth - 8
 	bi := textinput.New()
 	bi.Placeholder = "branch name..."
 	bi.CharLimit = 100

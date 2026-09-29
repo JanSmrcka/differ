@@ -47,13 +47,29 @@ func (m Model) View() string {
 		body = m.renderHistoryOverlay(m.width, contentH)
 	case m.showProblem:
 		body = m.renderProblemOverlay(m.width, contentH)
+	case m.onePanel():
+		// One panel takes the terminal. A pair squeezed into sixty columns is
+		// two unusable panels rather than one usable one, and the diff is what
+		// differ is for — so the file list keeps the width only while it is
+		// what the user is working in.
+		only := m.rightPanel()
+		if m.showsFileList() {
+			only = m.leftPanel()
+		}
+		if m.showThemes {
+			// One panel means the picker cannot sit beside the diff, so it
+			// takes the panel outright. The preview still repaints the frame
+			// around it, which is all the room there is.
+			only = strings.Split(m.renderThemeOverlay(m.width, contentH), "\n")
+		}
+		body = strings.Join(padLines(only, contentH), "\n")
 	default:
 		left := padLines(m.leftPanel(), contentH)
 		if m.showThemes {
 			// The picker takes the file list's panel rather than the whole
 			// area, so the diff beside it stays on screen — repainted in the
 			// theme under the cursor, which is the point of a picker.
-			left = padLines(strings.Split(m.renderThemeOverlay(fileListWidth, contentH), "\n"), contentH)
+			left = padLines(strings.Split(m.renderThemeOverlay(m.listWidth(), contentH), "\n"), contentH)
 		}
 		right := padLines(m.rightPanel(), contentH)
 		rows := make([]string, contentH)
@@ -75,7 +91,7 @@ func (m Model) View() string {
 // panelRow places one line from each panel either side of the divider.
 func (m Model) panelRow(left, right string) string {
 	gap := strings.Repeat(" ", panelGap)
-	return padTo(left, fileListWidth) + gap + m.styles.Chrome.Render(verticalDivider) + gap + right
+	return padTo(left, m.listWidth()) + gap + m.styles.Chrome.Render(verticalDivider) + gap + right
 }
 
 // leftPanel is the file list, or the branch picker, under its own label.
@@ -202,10 +218,19 @@ func (m Model) rule() string {
 // renderFooter is the bar below the content: hints, or an input when one is
 // open.
 func (m Model) renderFooter() string {
+	// The status row is part of the footer's budget, not an extra on top of it:
+	// counting it afterwards is how the frame came out a row taller than the
+	// terminal at heights 8 and 9.
+	segment := m.statusSegment()
+	budget := m.footerBudget()
+	if segment != "" {
+		budget = max(budget-1, 1)
+	}
+
 	var input string
 	switch {
 	case m.commenting:
-		input = m.renderCommentEditor()
+		input = m.renderCommentEditor(budget)
 	case m.mode == modeCommit:
 		input = m.renderCommitBar()
 	case m.mode == modeBranchPicker && m.branchCreating:
@@ -217,7 +242,7 @@ func (m Model) renderFooter() string {
 	// An open input replaces the hints, but not the status: "comment is empty
 	// — esc to cancel" and "ai msg failed" are only reachable here, and the
 	// whole point of those messages is not to fail silently.
-	if segment := m.statusSegment(); segment != "" {
+	if segment != "" {
 		return lipgloss.JoinVertical(lipgloss.Left,
 			input,
 			m.renderBar(m.styles.StatusText, " "+segment),

@@ -60,12 +60,12 @@ func (m Model) renderFileItem(f fileItem, selected bool, short map[string]string
 	// down it. The name is padded to whatever is left — after the panel's own
 	// left padding, which the old arithmetic forgot, leaving names a column
 	// too long and the column ragged.
-	room := fileListWidth - filePanelPadding
+	room := m.listWidth() - filePanelPadding
 	nameW := max(room-lipgloss.Width(stagedRaw)-lipgloss.Width(status)-1-lipgloss.Width(right.text)-1, 1)
 	name := padTo(truncatePath(m.displayName(f, short), nameW), nameW)
 
 	if selected {
-		return m.styles.FileSelected.Width(fileListWidth).Render(fmt.Sprintf("%s%s %s %s", stagedRaw, status, name, right.text))
+		return m.styles.FileSelected.Width(m.listWidth()).Render(fmt.Sprintf("%s%s %s %s", stagedRaw, status, name, right.text))
 	}
 
 	staged := stagedRaw
@@ -73,7 +73,7 @@ func (m Model) renderFileItem(f fileItem, selected bool, short map[string]string
 		staged = m.styles.StagedIcon.Render("● ")
 	}
 	line := fmt.Sprintf("%s%s %s %s", staged, m.styleStatus(status, f.change.Status), name, right.render(m.styles))
-	return m.styles.FileItem.Width(fileListWidth).Render(line)
+	return m.styles.FileItem.Width(m.listWidth()).Render(line)
 }
 
 // displayName is how a file is named in the list: enough of its path to tell
@@ -198,7 +198,7 @@ func (m Model) renderBranchList(height int) string {
 	list := m.activeBranches()
 	itemH := height - 1
 	if len(list) == 0 {
-		b.WriteString(m.styles.FileItem.Width(fileListWidth).Render(m.styles.HelpDesc.Render("  no matches")))
+		b.WriteString(m.styles.FileItem.Width(m.listWidth()).Render(m.styles.HelpDesc.Render("  no matches")))
 		return b.String()
 	}
 	end := m.branchOffset + itemH
@@ -218,11 +218,11 @@ func (m Model) renderBranchFilterBar() string {
 	list := m.activeBranches()
 	countStyled := m.styles.HelpDesc.Render(fmt.Sprintf("%d/%d", len(list), len(m.branches)))
 	input := m.branchFilter.View()
-	gap := fileListWidth - lipgloss.Width(input) - lipgloss.Width(countStyled) - 1
+	gap := m.listWidth() - lipgloss.Width(input) - lipgloss.Width(countStyled) - 1
 	if gap < 0 {
 		gap = 0
 	}
-	return lipgloss.NewStyle().Width(fileListWidth).Render(input + strings.Repeat(" ", gap) + countStyled)
+	return lipgloss.NewStyle().Width(m.listWidth()).Render(input + strings.Repeat(" ", gap) + countStyled)
 }
 
 func (m Model) renderBranchItem(name string, selected, current bool) string {
@@ -230,11 +230,11 @@ func (m Model) renderBranchItem(name string, selected, current bool) string {
 	if current {
 		prefix = m.styles.StagedIcon.Render("* ")
 	}
-	line := prefix + truncatePath(name, fileListWidth-4)
+	line := prefix + truncatePath(name, m.listWidth()-4)
 	if selected {
-		return m.styles.FileSelected.Width(fileListWidth).Render(line)
+		return m.styles.FileSelected.Width(m.listWidth()).Render(line)
 	}
-	return m.styles.FileItem.Width(fileListWidth).Render(line)
+	return m.styles.FileItem.Width(m.listWidth()).Render(line)
 }
 
 // truncateEnd shortens text to maxW columns, marking the cut with an ellipsis.
@@ -310,8 +310,9 @@ func (m Model) renderCommitBar() string {
 	return lipgloss.NewStyle().Width(m.width).Render(m.commitBarContent())
 }
 
-// renderCommentEditor shows the textarea plus what the two closing keys do.
-func (m Model) renderCommentEditor() string {
+// renderCommentEditor shows the textarea plus what the two closing keys do,
+// inside budget rows.
+func (m Model) renderCommentEditor(budget int) string {
 	label := fmt.Sprintf(" comment · line %d ", m.draft.StartLine)
 	if m.draft.EndLine > m.draft.StartLine {
 		label = fmt.Sprintf(" comment · lines %d-%d ", m.draft.StartLine, m.draft.EndLine)
@@ -320,6 +321,16 @@ func (m Model) renderCommentEditor() string {
 		label = " edit" + label
 	}
 	head := m.renderBar(lipgloss.NewStyle(), m.styles.HelpKey.Render(label)+m.styles.HelpDesc.Render("· ctrl+s save · esc cancel"))
+
+	// The textarea takes whatever is left rather than a fixed five rows. It was
+	// fixed, and the frame was built as though the footer could always have it:
+	// at height 8 the content area came out at -1 and View() panicked in
+	// make([]string, -1). The head stays whatever happens — it is the only
+	// place "ctrl+s save · esc cancel" is written.
+	rows := max(budget-lipgloss.Height(head), 1)
+	if rows < commentEditorHeight {
+		m.commentInput.SetHeight(rows)
+	}
 	return lipgloss.JoinVertical(lipgloss.Left, head, m.commentInput.View())
 }
 

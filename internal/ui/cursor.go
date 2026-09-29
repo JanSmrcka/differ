@@ -74,7 +74,10 @@ func (m Model) scrollToCursor() Model {
 // fitViewport resizes the viewport when the space available to it has changed,
 // and does nothing otherwise so it is cheap to call after every key.
 func (m Model) fitViewport() Model {
-	if !m.ready || m.viewport.Height == m.listHeight() {
+	// Width as well as height: the panel can change width without the terminal
+	// changing height at all — collapsing to one panel is exactly that — and a
+	// viewport left at the old width renders every row to the wrong size.
+	if !m.ready || (m.viewport.Height == m.listHeight() && m.viewport.Width == m.diffWidth()) {
 		return m
 	}
 	return m.resizeViewport()
