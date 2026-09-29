@@ -168,9 +168,18 @@ func (m Model) renderHelpOverlay(width, height int) string {
 // are pushed off screen — the very failure overlays are drawn over the panels
 // to avoid. A long file path in the history and a long help sentence both
 // reach that width on a 60-column terminal.
+//
+// The rows arrive already styled, so this cannot be truncateEnd: an escape
+// sequence measures zero columns, and dropping runes off the end takes the
+// reset with it — the colour then bleeds down the rest of the screen — or cuts
+// an escape in half. MaxWidth understands escapes and closes what it cuts; the
+// ellipsis goes on afterwards, outside the styled text.
 func fitOverlay(rows []string, width, height int) string {
 	for i, r := range rows {
-		rows[i] = padTo(truncateEnd(r, width), width)
+		if lipgloss.Width(r) > width && width > 0 {
+			r = lipgloss.NewStyle().MaxWidth(width-1).Render(r) + "…"
+		}
+		rows[i] = padTo(r, width)
 	}
 	for len(rows) < height {
 		rows = append(rows, padTo("", width))

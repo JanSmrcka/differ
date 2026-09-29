@@ -281,3 +281,45 @@ func TestOverlays_ViewDrawsThemOverThePanelsWithoutResizing(t *testing.T) {
 		t.Errorf("the help overlay changed the layout height: %d rows, was %d", got, plain)
 	}
 }
+
+// Clipping a row that is already styled is not a rune operation: an escape
+// sequence measures zero columns, so cutting runes off the end can drop the
+// reset — and the colour then bleeds into the rest of the screen — or cut an
+// escape in half.
+//
+// lipgloss emits no escapes under `go test` (there is no TTY), so the row is
+// built the way a real terminal would receive it.
+func TestOverlays_ClippingAStyledRowLeavesTheTerminalClean(t *testing.T) {
+	t.Parallel()
+	row := "\x1b[38;2;147;153;178m16:39:06\x1b[0m  2 comments → tmux  " +
+		"\x1b[38;2;147;153;178minternal/api/client/transport.ts\x1b[0m"
+
+	for _, width := range []int{20, 40, 57, 58, 59} {
+		got := fitOverlay([]string{row}, width, 1)
+
+		if w := lipgloss.Width(got); w != width {
+			t.Errorf("width %d: clipped row is %d columns", width, w)
+		}
+		if i := strings.LastIndex(got, "\x1b"); i >= 0 && !strings.Contains(got[i:], "m") {
+			t.Errorf("width %d: truncated escape sequence: %q", width, got[i:])
+		}
+		// The *last* sequence has to be the reset. An earlier one does not
+		// help: whatever colour was set after it is still active when the row
+		// ends, and it carries on down the screen.
+		if last := lastEscape(got); last != "" && last != "\x1b[0m" {
+			t.Errorf("width %d: row ends with %q still in effect: %q", width, last, got)
+		}
+	}
+}
+
+// lastEscape is the final SGR sequence in s, or "" when there is none.
+func lastEscape(s string) string {
+	i := strings.LastIndex(s, "\x1b[")
+	if i < 0 {
+		return ""
+	}
+	if j := strings.IndexByte(s[i:], 'm'); j >= 0 {
+		return s[i : i+j+1]
+	}
+	return s[i:]
+}
