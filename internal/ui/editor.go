@@ -25,6 +25,9 @@ type editorPlanMsg struct {
 type editorDoneMsg struct {
 	desc string
 	err  error
+	// reload is set when differ had given up the terminal, so the file may
+	// have been edited and closed while it was away.
+	reload bool
 }
 
 // openFileInEditor is the shared `e` handler. Both the file list and the diff call
@@ -39,9 +42,9 @@ func (m Model) openFileInEditor() (tea.Model, tea.Cmd) {
 		File: path,
 		Repo: m.repo.Dir(),
 		Line: m.editorLine(),
-		Env:  editor.NewEnv(),
+		Env:  m.editorEnv,
 	}
-	cfg := editor.Config{Cmd: m.cfg.EditorCmd}
+	cfg := editor.Config{Cmd: m.cfg.EditorCmd, Strategy: m.cfg.EditorStrategy}
 	return m, func() tea.Msg {
 		plan, err := editor.Resolve(context.Background(), cfg, req)
 		return editorPlanMsg{plan: plan, err: err}
@@ -97,13 +100,20 @@ func (m Model) handleEditorPlan(msg editorPlanMsg) (tea.Model, tea.Cmd) {
 		m.statusMsg = msg.err.Error()
 		return m, nil
 	}
-	// Every plan so far needs the terminal, and only the program can hand it
-	// over — hence ExecProcess rather than running the command ourselves.
 	plan := msg.plan
+	if plan.Kind == editor.KindDetached {
+		// The editor is somewhere else entirely, so this is ordinary
+		// background work and must not block Update.
+		return m, func() tea.Msg {
+			return editorDoneMsg{desc: plan.Desc, err: plan.Run(context.Background())}
+		}
+	}
+	// Only the program can hand over the terminal, which is why this one case
+	// comes back as an argv rather than being run inside internal/editor.
 	cmd := exec.Command(plan.Argv[0], plan.Argv[1:]...)
 	cmd.Dir = plan.Dir
 	return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
-		return editorDoneMsg{desc: plan.Desc, err: err}
+		return editorDoneMsg{desc: plan.Desc, err: err, reload: true}
 	})
 }
 
@@ -113,9 +123,13 @@ func (m Model) handleEditorDone(msg editorDoneMsg) (tea.Model, tea.Cmd) {
 	} else if msg.desc != "" {
 		m.statusMsg = msg.desc
 	}
-	// The file may have changed under us. Reload without resetting, so the
-	// reviewer comes back to the file and position they left — the two-second
-	// poll would get there eventually, but not before the screen has looked
-	// stale.
+	if !msg.reload {
+		// The file was handed to an editor elsewhere; nothing has been saved
+		// yet, and the two-second poll will pick it up when it is.
+		return m, nil
+	}
+	// differ had given up the terminal, so the file may already have been
+	// edited and closed. Reload without resetting, so the reviewer comes back
+	// to the file and position they left.
 	return m, tea.Batch(m.refreshFilesCmd(), m.loadDiffCmd(false))
 }

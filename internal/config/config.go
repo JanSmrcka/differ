@@ -14,6 +14,14 @@ type Config struct {
 	CommitMsgPrompt string `json:"commit_msg_prompt"`
 	SplitDiff       bool   `json:"split_diff"`
 	EditorCmd       string `json:"editor_cmd"`
+	// EditorStrategy picks how `e` opens a file:
+	//   "" / "auto" — reuse an editor already open in this tmux session, else
+	//                 a new tmux window, else take over differ's terminal
+	//   "reuse"     — only reuse; report a problem when there is nothing to
+	//                 reuse
+	//   "window"    — always a new tmux window
+	//   "inline"    — always take over differ's terminal and resume after
+	EditorStrategy string `json:"editor_strategy"`
 
 	// FeedbackTarget selects where review feedback is delivered:
 	// "clipboard" (default), "stdout" or "tmux".

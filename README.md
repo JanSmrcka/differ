@@ -152,6 +152,7 @@ Config file: `~/.config/differ/config.json`
   "commit_msg_cmd": "claude -p",
   "commit_msg_prompt": "Write a concise git commit message for this diff:",
   "editor_cmd": "",
+  "editor_strategy": "auto",
   "split_diff": false,
   "feedback_target": "clipboard",
   "tmux_target": ""
@@ -199,23 +200,64 @@ itself, the send fails with a specific error and your comments stay pending.
 
 ### Editor
 
-`e` opens the file under the cursor in your editor and differ keeps running:
-it releases the terminal, and you are back on the same file and line when the
-editor exits. From the diff or a review, the editor opens at the line the
+`e` opens the file under the cursor in your editor. differ keeps running
+either way, and from the diff or a review the editor opens at the line the
 cursor is on.
 
-The editor is `editor_cmd`, else `$EDITOR`, else `vi`. `$EDITOR` may carry
+**Which editor.** `editor_cmd`, else `$EDITOR`, else `vi`. `$EDITOR` may carry
 arguments (`code --wait`). `editor_cmd` supports `{file}` (absolute path),
-`{repo}` (repo root) and `{line}` placeholders; each is substituted inside a
-single argument, so a path containing spaces needs no quoting.
+`{repo}` (repo root) and `{line}`; each is substituted inside a single
+argument, so a path containing spaces needs no quoting.
 
 Without an explicit `{file}` in `editor_cmd`, differ adds the line itself for
-editors it knows: `+<line>` for `vi`/`vim`/`nvim`/`view`/`nano`, and
-`--goto <file>:<line>` for `code`. Any other editor gets the file alone — use
-`{line}` to place it yourself, as in `"editor_cmd": "subl {file}:{line}"`.
+editors it can check: `+<line>` for `vi`/`vim`/`nvim`/`view`/`nano`, and
+`--goto <file>:<line>` for `code`. Any other editor gets the file alone — put
+`{line}` where it belongs yourself, as in `"editor_cmd": "subl {file}:{line}"`.
 
-An `editor_cmd` that starts with `tmux` runs exactly as written, so a recipe
-like `tmux new-window -c {repo} nvim {file}` still works.
+**Where it opens** — `editor_strategy`:
+
+| value | what happens |
+|---|---|
+| `auto` (default) | reuse an editor already open in this tmux session → else a new tmux window → else take over differ's terminal |
+| `reuse` | only reuse; say so when there is nothing to reuse |
+| `window` | always a new tmux window |
+| `inline` | always take over differ's terminal, and resume when the editor exits |
+
+Outside tmux every value except `inline` is refused with a message rather
+than silently downgraded, so a setting that cannot work never looks like it
+did.
+
+**Reuse** finds a pane in differ's *own* tmux session that is running
+`nvim`/`vim`/`vi`, hands it the file over nvim's RPC socket, and focuses that
+pane. The session is a requirement — with an editor open in every session,
+anything looser would jump into a different project. Among several
+candidates, one sitting in this repository wins, then differ's own window,
+then the lowest window index.
+
+Nothing unsaved is ever at risk: differ sends `:drop`, which reuses a window
+already showing the file and, when the current buffer is modified, hides it
+(with nvim's default `hidden`) or opens a window for the target instead of
+overwriting it. differ never sends `:edit!`, and passes nvim's own complaint
+straight through if it refuses.
+
+Reuse needs nvim's RPC socket, which nvim creates by default — under
+`$XDG_RUNTIME_DIR` on Linux and `$TMPDIR/nvim.$USER/` on macOS. A plain `vim`
+has no such socket, so it gets a new window instead.
+
+**Other editors.** VS Code, Zed and Sublime reuse their own window already and
+do not want a terminal or a tmux window at all. differ does not try to guess
+which editor is which, so tell it:
+
+```json
+{
+  "editor_cmd": "code -r --goto {file}:{line}",
+  "editor_strategy": "inline"
+}
+```
+
+An `editor_cmd` that starts with `tmux` runs exactly as written and ignores
+`editor_strategy` — it is already a mechanism. So a recipe like
+`tmux new-window -c {repo} nvim {file}` keeps working.
 
 ## Tips
 

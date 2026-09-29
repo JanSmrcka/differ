@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/jansmrcka/differ/internal/config"
+	"github.com/jansmrcka/differ/internal/editor"
 	"github.com/jansmrcka/differ/internal/feedback"
 	"github.com/jansmrcka/differ/internal/git"
 	"github.com/jansmrcka/differ/internal/review"
@@ -158,6 +159,11 @@ type Model struct {
 	target    feedback.Target
 	targetErr error
 
+	// editorEnv is the process environment `e` decides from. It is read once
+	// here, at the edge, so the decision stays a pure function of its inputs
+	// and a test can describe a situation instead of arranging one.
+	editorEnv editor.Env
+
 	// session holds review state — comments and per-file progress. It is
 	// created on first entering review mode and lives until the process ends;
 	// it is never written to disk and never mirrored into the git index.
@@ -214,6 +220,7 @@ func NewModel(repo *git.Repo, cfg config.Config, changes []git.FileChange, untra
 		commentInput: ca,
 		target:       target,
 		targetErr:    targetErr,
+		editorEnv:    editor.NewEnv(),
 	}
 }
 
