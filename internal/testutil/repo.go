@@ -34,13 +34,37 @@ func NewRepo(t *testing.T) *Repo {
 	r := &Repo{t: t, Dir: dir, env: repoEnv(fakeHome)}
 
 	r.Git("init")
-	// Repo-local config so commands run by production code (which does not set
-	// our env) is isolated too.
-	r.Git("config", "user.name", "test")
-	r.Git("config", "user.email", "test@test.com")
-	r.Git("config", "commit.gpgsign", "false")
-	r.Git("config", "core.hooksPath", filepath.Join(fakeHome, "no-hooks"))
+	r.writeLocalConfig(filepath.Join(fakeHome, "no-hooks"))
 	return r
+}
+
+// writeLocalConfig appends the isolating settings to .git/config directly.
+//
+// It has to be repo-local rather than environmental: production code runs git
+// through internal/git, which builds its own exec.Cmd and never sees this
+// package's environment. It is written as a file rather than through four
+// `git config` calls because those four were costing more than everything else
+// in the suite put together — 484 of the 2006 git processes one `go test
+// ./internal/ui` run spawned, against 121 repositories. Process startup is the
+// expense here (`git --version` measures 13.6 ms on this machine against `git
+// status`'s 15.6), so five processes per repository became one.
+func (r *Repo) writeLocalConfig(hooksPath string) {
+	r.t.Helper()
+	// A repeated [core] section is valid: git merges sections by name, and keys
+	// that appear once keep their only value. `git init` already wrote one.
+	settings := "\n[user]\n\tname = test\n\temail = test@test.com\n" +
+		"[commit]\n\tgpgsign = false\n" +
+		"[core]\n\thooksPath = " + hooksPath + "\n"
+
+	path := filepath.Join(r.Dir, ".git", "config")
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		r.t.Fatalf("open %s: %v", path, err)
+	}
+	defer f.Close()
+	if _, err := f.WriteString(settings); err != nil {
+		r.t.Fatalf("write %s: %v", path, err)
+	}
 }
 
 func repoEnv(fakeHome string) []string {
