@@ -248,10 +248,14 @@ differ --theme gruvbox
 | `tokyonight` | Tokyo Night (night)                                      |
 | `github`     | GitHub Dark                                              |
 
-Each palette comes from its upstream definition rather than being eyeballed,
-and each is paired with the Chroma style of the same family, so the chrome and
-the syntax highlighting agree. Every theme is held to the same contrast floor
-by a test — including the marks differ draws inside the diff.
+Each is paired with the Chroma style of the same family, so the chrome and the
+syntax highlighting agree. Gruvbox, Tokyo Night and GitHub Dark are taken
+value-for-value from their upstream palettes; `mocha` and `latte` are differ's
+original two themes, *derived* from Catppuccin rather than equal to it.
+
+Every theme is held to the same contrast floor by a test — the diff colours,
+the marks differ draws inside the diff, and review comment text, which is the
+user's own words and gets the body-text bar rather than the accent one.
 
 An unknown `--theme` is refused and the choices are listed; a stale name in the
 config falls back quietly rather than stopping differ from opening.

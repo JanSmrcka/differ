@@ -89,10 +89,17 @@ type Theme struct {
 
 // Themes is the registry of built-in themes.
 //
-// Each palette is taken from its upstream definition rather than eyeballed,
-// and each is paired with the Chroma style of the same family so the chrome
-// and the syntax highlighting agree. "dark" and "light" are the names differ
+// Each is paired with the Chroma style of the same family, so the chrome and
+// the syntax highlighting agree. "dark" and "light" are the names differ
 // shipped with and stay as aliases, so nobody's config breaks.
+//
+// Gruvbox, Tokyo Night and GitHub Dark are taken value-for-value from their
+// upstream palettes, with the token names in comments so they can be checked
+// again later. Mocha and Latte are *derived* from Catppuccin rather than equal
+// to it — they are differ's original two themes, and a fair number of their
+// values (the purple, the staged green, the surfaces) come from elsewhere or
+// from nowhere. Renaming them did not change them, and this comment says so
+// rather than claiming a provenance they do not have.
 var Themes = map[string]Theme{
 	"mocha":      MochaTheme(),
 	"latte":      LatteTheme(),
@@ -117,8 +124,9 @@ func DarkTheme() Theme { return MochaTheme() }
 // LightTheme is the original name for Latte.
 func LightTheme() Theme { return LatteTheme() }
 
-// MochaTheme is Catppuccin Mocha.
-// https://github.com/catppuccin/catppuccin — MIT.
+// MochaTheme is differ's original dark theme, derived from Catppuccin Mocha.
+// https://github.com/catppuccin/catppuccin — MIT. Not value-for-value: see
+// the note on Themes.
 func MochaTheme() Theme {
 	return Theme{
 		Bg: "#1e1e2e",
@@ -182,8 +190,9 @@ func MochaTheme() Theme {
 	}
 }
 
-// LatteTheme is Catppuccin Latte.
-// https://github.com/catppuccin/catppuccin — MIT.
+// LatteTheme is differ's original light theme, derived from Catppuccin Latte.
+// https://github.com/catppuccin/catppuccin — MIT. Not value-for-value: see
+// the note on Themes.
 func LatteTheme() Theme {
 	return Theme{
 		Bg: "#eff1f5",
@@ -232,12 +241,18 @@ func LatteTheme() Theme {
 		HelpKeyFg:   "#8839ef",
 		HelpDescFg:  "#8c8fa1",
 
-		CommentFg:     "#df8e1d",
+		// Catppuccin Latte's own yellow (#df8e1d), green (#40a02b) and peach
+		// (#fe640b) are 2.3, 3.0 and 2.6 against its base — fine as an accent,
+		// unreadable as the text of a review comment. These are the same hues
+		// darkened until they clear the bar. The palette has no legible
+		// alternative to darken towards, which is why they are derived rather
+		// than picked from it.
+		CommentFg:     "#8a5a00",
 		CommentMetaFg: "#8c8fa1",
-		StaleFg:       "#fe640b",
+		StaleFg:       "#a64100",
 
-		SuccessFg: "#40a02b",
-		WarningFg: "#df8e1d",
+		SuccessFg: "#2d7a1f",
+		WarningFg: "#8a5a00",
 		ErrorFg:   "#d20f39",
 		MutedFg:   "#6c6f85",
 
@@ -342,17 +357,22 @@ func TokyoNightTheme() Theme {
 		AddedEmphBg:   "#2c4a3e",
 		RemovedEmphBg: "#4c2b38",
 
-		MarkFg: "#787c99",
+		// Not an upstream token: the palette's comment colour (#565f89) is
+		// 2.2 against the diff backgrounds, and these marks are notes about
+		// the code rather than chrome, so they have to be legible.
+		MarkFg: "#8189ad",
 
 		LineNumFg:        "#3b4261",
 		LineNumAddedFg:   "#9ece6a",
 		LineNumRemovedFg: "#f7768e",
 
-		HeaderBg: "#24283b",
+		// bg_highlight and bg_dark are the night variant's own; #24283b and
+		// #1f2335 are storm's, which is what these were.
+		HeaderBg: "#292e42",
 		HeaderFg: "#bb9af7",
 
-		HunkBg: "#24283b",
-		CardBg: "#1f2335",
+		HunkBg: "#292e42",
+		CardBg: "#16161e",
 
 		SelectedBg:  "#33467c",
 		SelectedFg:  "#c0caf5",
@@ -373,16 +393,16 @@ func TokyoNightTheme() Theme {
 		StatusBarBg: "#16161e",
 		StatusBarFg: "#a9b1d6",
 		HelpKeyFg:   "#7dcfff",
-		HelpDescFg:  "#787c99",
+		HelpDescFg:  "#565f89",
 
 		CommentFg:     "#e0af68",
-		CommentMetaFg: "#787c99",
+		CommentMetaFg: "#565f89",
 		StaleFg:       "#ff9e64",
 
 		SuccessFg: "#9ece6a",
 		WarningFg: "#e0af68",
 		ErrorFg:   "#f7768e",
-		MutedFg:   "#787c99",
+		MutedFg:   "#a9b1d6", // fg_dark — muted, but still text
 
 		AccentFg: "#bb9af7",
 

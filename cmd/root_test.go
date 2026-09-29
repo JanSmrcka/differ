@@ -52,6 +52,10 @@ func runCLI(t *testing.T, dir string, args ...string) result {
 	t.Helper()
 	cmd := exec.Command(binary(t), args...)
 	cmd.Dir = dir
+	// A scrubbed environment: NO_COLOR in the developer's shell would change
+	// what differ does, and the real HOME would have it read the developer's
+	// own config file.
+	cmd.Env = append(os.Environ(), "NO_COLOR=", "HOME="+t.TempDir())
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
 	err := cmd.Run()
@@ -248,9 +252,56 @@ func TestCLI_AnUnknownThemeIsAUsageError(t *testing.T) {
 func TestCLI_HelpListsTheThemes(t *testing.T) {
 	t.Parallel()
 	got := runCLI(t, notARepo(t), "--help")
-	for _, want := range []string{"mocha", "latte", "gruvbox", "tokyonight", "github"} {
-		if !strings.Contains(got.stdout, want) {
-			t.Errorf("--help does not mention the %q theme:\n%s", want, got.stdout)
+
+	// On the --theme line specifically. Somewhere in the help text would also
+	// be satisfied by a passing mention in the examples.
+	var line string
+	for _, l := range strings.Split(got.stdout, "\n") {
+		if strings.Contains(l, "--theme") {
+			line = l
 		}
+	}
+	if line == "" {
+		t.Fatalf("--help has no --theme line:\n%s", got.stdout)
+	}
+	for _, want := range []string{"mocha", "latte", "gruvbox", "tokyonight", "github"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("the --theme line does not offer %q: %q", want, line)
+		}
+	}
+}
+
+// A bad theme name is a bad theme name whatever else is on the command line.
+// It used to be accepted whenever colour was off, because the no-colour
+// short-circuit returned before the name was looked at.
+func TestCLI_ABadThemeIsRefusedEvenWithColourOff(t *testing.T) {
+	t.Parallel()
+	for _, args := range [][]string{
+		{"--no-color", "--theme", "solarised"},
+		{"--theme", "solarised", "--no-color"},
+	} {
+		got := runCLI(t, notARepo(t), args...)
+		if got.code != 2 {
+			t.Errorf("%v exited %d, want 2:\n%s", args, got.code, got.stderr)
+		}
+		if !strings.Contains(got.stderr, "solarised") {
+			t.Errorf("%v: the error does not name the theme:\n%s", args, got.stderr)
+		}
+	}
+
+	// And with NO_COLOR in the environment.
+	cmd := exec.Command(binary(t), "--theme", "solarised")
+	cmd.Dir = notARepo(t)
+	cmd.Env = append(os.Environ(), "NO_COLOR=1", "HOME="+t.TempDir())
+	var errb bytes.Buffer
+	cmd.Stderr = &errb
+	err := cmd.Run()
+
+	var ee *exec.ExitError
+	if !asExitError(err, &ee) || ee.ExitCode() != 2 {
+		t.Errorf("with NO_COLOR set, exited %v, want 2:\n%s", err, errb.String())
+	}
+	if !strings.Contains(errb.String(), "solarised") {
+		t.Errorf("with NO_COLOR set, the error does not name the theme:\n%s", errb.String())
 	}
 }

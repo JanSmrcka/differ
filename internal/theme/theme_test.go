@@ -41,13 +41,43 @@ func TestThemes_EveryThemeIsComplete(t *testing.T) {
 	}
 }
 
-// A theme's Chroma style has to exist. Naming one Chroma does not have falls
-// back to monokai, which looks nothing like the rest of the theme.
+// A theme's Chroma style has to exist.
+//
+// The check is a registry lookup, not styles.Get: Get returns Chroma's
+// Fallback — a near-monochrome style called "swapoff" — for any name it does
+// not know, and never nil. Written the obvious way this test could not fail,
+// and a typo'd style name would have shipped as a colourless diff.
 func TestThemes_EveryChromaStyleExists(t *testing.T) {
 	t.Parallel()
 	for name, th := range Themes {
-		if styles.Get(th.ChromaStyle) == nil {
+		if _, ok := styles.Registry[th.ChromaStyle]; !ok {
 			t.Errorf("%s names Chroma style %q, which does not exist", name, th.ChromaStyle)
+		}
+	}
+}
+
+// ThemeNames is what the error message and --help offer, so it has to be the
+// registry minus the aliases — nothing more, nothing less. Three mistakes were
+// possible here and none of them failed anything: a theme in the map but not
+// the list (usable but unlisted), a name in the list but not the map (offered,
+// then refused), and the aliases leaking into the list.
+func TestThemes_ThemeNamesMatchesTheRegistry(t *testing.T) {
+	t.Parallel()
+	aliases := map[string]bool{"dark": true, "light": true}
+
+	listed := map[string]bool{}
+	for _, name := range ThemeNames() {
+		if _, ok := Themes[name]; !ok {
+			t.Errorf("ThemeNames offers %q, which is not in the registry", name)
+		}
+		if aliases[name] {
+			t.Errorf("ThemeNames offers the alias %q; it should list the real names", name)
+		}
+		listed[name] = true
+	}
+	for name := range Themes {
+		if !aliases[name] && !listed[name] {
+			t.Errorf("%q is in the registry but ThemeNames does not offer it", name)
 		}
 	}
 }
@@ -142,7 +172,23 @@ func checkContrast(t *testing.T, th Theme, label string) {
 		// The emphasised span still has to be readable, not just visible.
 		{th.AddedFg, th.AddedEmphBg, 3.0, "AddedFg/AddedEmphBg"},
 		{th.RemovedFg, th.RemovedEmphBg, 3.0, "RemovedFg/RemovedEmphBg"},
+		// A review comment is the user's own text, on whichever background the
+		// line it hangs off has. It is content, so it gets the body-text bar.
+		{th.CommentFg, th.Bg, 4.5, "CommentFg/Bg"},
+		{th.CommentFg, th.AddedBg, 4.5, "CommentFg/AddedBg"},
+		{th.CommentFg, th.RemovedBg, 4.5, "CommentFg/RemovedBg"},
+		// The colours that say what happened.
+		{th.SuccessFg, th.Bg, 3.0, "SuccessFg/Bg"},
+		{th.WarningFg, th.Bg, 3.0, "WarningFg/Bg"},
+		{th.ErrorFg, th.Bg, 3.0, "ErrorFg/Bg"},
+		{th.MutedFg, th.Bg, 3.0, "MutedFg/Bg"},
+		{th.StaleFg, th.Bg, 3.0, "StaleFg/Bg"},
 	}
+	// Deliberately absent: ChromeFg, BorderFg, PanelLabelFg, LineNumFg and
+	// UntrackedFg. Those are dim on purpose — the struct says as much — and
+	// they sit between 1.7 and 2.8 in every theme, including the two differ
+	// shipped with. A 3.0 bar there would not make them legible; it would stop
+	// them being chrome.
 	for _, p := range pairs {
 		ratio := contrastRatio(p.fg, p.bg)
 		if ratio < p.minRatio {

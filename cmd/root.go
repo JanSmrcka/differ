@@ -181,18 +181,22 @@ func isUnknownCommand(err error) bool {
 // still falls back rather than refusing: a stale config file should not stop
 // differ from opening.
 func resolveTheme(cfg config.Config) (theme.Theme, error) {
+	// The name is checked before the no-colour short-circuit. Accepting a
+	// typo because NO_COLOR happened to be set would make whether differ
+	// reports the mistake depend on an unrelated environment variable.
+	named, ok := theme.Themes[flagTheme]
+	if flagTheme != "" && !ok {
+		return theme.Theme{}, fmt.Errorf("unknown theme %q — use one of: %s",
+			flagTheme, strings.Join(theme.ThemeNames(), ", "))
+	}
+
 	// NO_COLOR is a convention worth honouring: its presence, at any value,
 	// means no colour. https://no-color.org
 	if flagNoColor || os.Getenv("NO_COLOR") != "" {
 		return theme.NoColorTheme(), nil
 	}
 	if flagTheme != "" {
-		t, ok := theme.Themes[flagTheme]
-		if !ok {
-			return theme.Theme{}, fmt.Errorf("unknown theme %q — use one of: %s",
-				flagTheme, strings.Join(theme.ThemeNames(), ", "))
-		}
-		return t, nil
+		return named, nil
 	}
 	if t, ok := theme.Themes[cfg.Theme]; ok {
 		return t, nil
