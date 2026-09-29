@@ -72,9 +72,12 @@ func (m Model) panelRow(left, right string) string {
 
 // leftPanel is the file list, or the branch picker, under its own label.
 func (m Model) leftPanel() []string {
-	body := m.renderFileList()
-	if m.mode == modeBranchPicker {
-		body = m.renderBranchList(m.listHeight())
+	// The mode is chosen before rendering, not after: building the file list
+	// and discarding it meant every keystroke in the branch filter paid for a
+	// pass over every path in the changeset.
+	body := m.renderBranchList(m.listHeight())
+	if m.mode != modeBranchPicker {
+		body = m.renderFileList()
 	}
 	return append(m.panelHeader(m.leftPanelLabel(), m.focusOn(paneFiles)), strings.Split(body, "\n")...)
 }

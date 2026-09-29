@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -399,5 +400,65 @@ func TestFileList_RenderingDoesNotCostRowsTimesFiles(t *testing.T) {
 	if large > 4*small {
 		t.Errorf("a 1000-file frame took %v against %v for 100 files — %0.1f×",
 			large, small, float64(large)/float64(small))
+	}
+}
+
+// The branch picker shares the panel and had the same two holes: no
+// end-of-list clamp, so growing the terminal left its window past the tail,
+// and nothing clamped when the list first loaded — with the current branch
+// past the panel height, the picker opened with no visible selection.
+func TestBranchList_TheWindowAndTheCursorStayTogether(t *testing.T) {
+	t.Parallel()
+	branches := make([]string, 40)
+	for i := range branches {
+		branches[i] = fmt.Sprintf("branch-%02d", i)
+	}
+
+	// Opening on a branch past the panel height must scroll to it.
+	m := newTestModel(t, nil)
+	m.height = 30
+	m.ready = true
+	loaded, _ := m.handleBranchesLoaded(branchesLoadedMsg{branches: branches, current: "branch-37"})
+	m = loaded.(Model)
+	if m.branchCursor != 37 {
+		t.Fatalf("branchCursor = %d, want 37", m.branchCursor)
+	}
+	if !strings.Contains(stripANSI(m.renderBranchList(m.listHeight())), "branch-37") {
+		t.Errorf("the picker opened without the current branch on screen (offset %d)", m.branchOffset)
+	}
+
+	// And growing past the whole list must bring the window back.
+	grown, _ := m.handleResize(tea.WindowSizeMsg{Width: 120, Height: 60})
+	g := grown.(Model)
+	if !strings.Contains(stripANSI(g.renderBranchList(g.listHeight())), "branch-00") {
+		t.Errorf("the whole list fits but it starts at %d", g.branchOffset)
+	}
+}
+
+// The right-hand column decides its text and its colour together, and the row
+// arithmetic is done against the text — so what is rendered has to be exactly
+// that text. Doubling the stale marker in one branch and not the other made
+// rows two columns wider than the panel with the whole suite green.
+func TestFileList_TheRightColumnRendersExactlyWhatItMeasured(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t, []fileItem{{change: git.FileChange{Path: "a.ts", Status: git.StatusModified, AddedLines: 12, DeletedLines: 3}}})
+	styles := m.styles
+
+	for _, badge := range []string{"", "read", "1 comment", "sent", "changed"} {
+		for _, stale := range []bool{false, true} {
+			c := rightColumn{stale: stale, added: 12, deleted: 3}
+			if badge != "" {
+				c.badge, c.text = true, badge
+			} else {
+				c.text = "+12 -3"
+			}
+			if stale {
+				c.text = staleMarker + " " + c.text
+			}
+
+			if got := stripANSI(c.render(styles)); got != c.text {
+				t.Errorf("badge=%q stale=%v: rendered %q but measured %q", badge, stale, got, c.text)
+			}
+		}
 	}
 }

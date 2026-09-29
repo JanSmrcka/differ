@@ -273,6 +273,10 @@ func (m Model) handleBranchesLoaded(msg branchesLoadedMsg) (tea.Model, tea.Cmd) 
 	m.filteredBranches = nil
 	m.branchFilter.Reset()
 	m.branchFilter.Focus()
+	// The current branch can be past the panel height — git branch is sorted,
+	// so anything past the twenty-somethingth — and the picker then opened
+	// with no visible selection at all.
+	m = m.clampBranchScroll()
 	return m, textinput.Blink
 }
 
