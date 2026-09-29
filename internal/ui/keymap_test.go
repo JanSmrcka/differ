@@ -138,7 +138,7 @@ var handlerFor = map[viewMode]string{
 
 // Keys handled centrally in routeKey or dispatch rather than per mode, so a
 // mode's handler is not expected to carry them.
-var globalKeys = map[string]bool{"ctrl+c": true, "?": true, "!": true}
+var globalKeys = map[string]bool{"ctrl+c": true, "?": true, "!": true, "t": true}
 
 // typingModes are the modes where every printable character is text. ? and !
 // are commands everywhere else, and routeKey answers them — but a handler
@@ -155,7 +155,7 @@ func TestKeymap_NoTypingModeStealsAGlobalKey(t *testing.T) {
 			continue
 		}
 		for _, k := range handled[fn] {
-			if k == "?" || k == "!" {
+			if k == "?" || k == "!" || k == "t" {
 				t.Errorf("%s handles %q, which is a character there, not a command", fn, k)
 			}
 		}

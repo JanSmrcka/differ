@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/alecthomas/chroma/v2"
+
 	"github.com/charmbracelet/lipgloss"
 	"github.com/jansmrcka/differ/internal/theme"
 )
@@ -321,12 +323,12 @@ const commentBar = "▏"
 // diff they were written against.
 const staleMarker = "!"
 
-func renderDiffLineGutter(dl DiffLine, filename string, styles Styles, t theme.Theme, g geometry, gutter string) string {
+func renderDiffLineGutter(dl DiffLine, filename string, styles Styles, t theme.Theme, g geometry, gutter string, chroma *chroma.Style) string {
 	switch dl.Type {
 	case LineHunkHeader:
 		return renderHunkLine(dl, styles, g, gutter)
 	default:
-		return renderCodeLine(dl, filename, styles, t, g, gutter)
+		return renderCodeLine(dl, filename, styles, t, g, gutter, chroma)
 	}
 }
 
@@ -442,7 +444,7 @@ func stylesFor(dl DiffLine, styles Styles, t theme.Theme) lineStyles {
 	}
 }
 
-func renderCodeLine(dl DiffLine, filename string, styles Styles, t theme.Theme, g geometry, gutter string) string {
+func renderCodeLine(dl DiffLine, filename string, styles Styles, t theme.Theme, g geometry, gutter string, chroma *chroma.Style) string {
 	ls := stylesFor(dl, styles, t)
 	nums := ls.num.Render(fmtLineNum(dl.OldNum, g.numW) + " " + fmtLineNum(dl.NewNum, g.numW))
 
@@ -451,7 +453,7 @@ func renderCodeLine(dl DiffLine, filename string, styles Styles, t theme.Theme, 
 
 	// Unified view has no pairing — a removed line and the added line
 	// replacing it are separate rows — so there is nothing to compare against.
-	code := renderCode(dl, filename, ls, codeWidth-lipgloss.Width(prefix), span{})
+	code := renderCode(dl, filename, ls, codeWidth-lipgloss.Width(prefix), span{}, chroma)
 	padding := ""
 	if pad := codeWidth - lipgloss.Width(prefix) - lipgloss.Width(code); pad > 0 {
 		padding = ls.bg.Render(strings.Repeat(" ", pad))
@@ -473,14 +475,14 @@ func renderCodeLine(dl DiffLine, filename string, styles Styles, t theme.Theme, 
 // Whether the whitespace is *marked* is a separate decision: only on a line
 // the change touched. A context line carries whatever the file already had,
 // and marking those would flag the whole file rather than the change.
-func renderCode(dl DiffLine, filename string, ls lineStyles, maxW int, changed span) string {
+func renderCode(dl DiffLine, filename string, ls lineStyles, maxW int, changed span, chroma *chroma.Style) string {
 	text, cut := clipCode(dl.Content, maxW)
 	body, trailing := splitTrailing(text)
 
 	// The span was measured against the whole line, so it is re-fitted to
 	// whatever survived the cut — and widened off any grapheme boundary it
 	// landed inside, which would otherwise change the line's width.
-	out := highlightSpan(body, filename, ls.bgColor, ls.emph, changed.snap(body))
+	out := highlightSpan(chroma, body, filename, ls.bgColor, ls.emph, changed.snap(body))
 	if trailing != "" {
 		switch dl.Type {
 		case LineAdded, LineRemoved:
@@ -611,7 +613,7 @@ func pairLinesIndexed(lines []DiffLine) []splitRow {
 	return rows
 }
 
-func renderSplitSide(dl *DiffLine, filename string, styles Styles, t theme.Theme, g geometry, isLeft bool, changed span) string {
+func renderSplitSide(dl *DiffLine, filename string, styles Styles, t theme.Theme, g geometry, isLeft bool, changed span, chroma *chroma.Style) string {
 	if dl == nil {
 		if g.width > 0 {
 			return strings.Repeat(" ", g.width)
@@ -630,7 +632,7 @@ func renderSplitSide(dl *DiffLine, filename string, styles Styles, t theme.Theme
 	prefix := ls.ind.Render(ls.indicator + " ")
 
 	codeWidth := max(0, g.width-g.numbersWidth()-1)
-	code := renderCode(*dl, filename, ls, codeWidth-lipgloss.Width(prefix), changed)
+	code := renderCode(*dl, filename, ls, codeWidth-lipgloss.Width(prefix), changed, chroma)
 	padding := ""
 	if pad := codeWidth - lipgloss.Width(prefix) - lipgloss.Width(code); pad > 0 {
 		padding = ls.bg.Render(strings.Repeat(" ", pad))

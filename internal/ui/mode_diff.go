@@ -54,6 +54,7 @@ func (m Model) diffNavigation(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.toggleStage()
 	case "v":
 		m.splitDiff = !m.splitDiff
+		m.cfg.SplitDiff = m.splitDiff
 		m.prevCurs = -1
 		m.lastDiffContent = ""
 		// Reload without resetting: the cursor addresses source lines, so it
