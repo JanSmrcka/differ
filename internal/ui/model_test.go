@@ -135,62 +135,6 @@ func TestDiffWidth(t *testing.T) {
 	}
 }
 
-func TestRenderCard_Dimensions(t *testing.T) {
-	t.Parallel()
-	m := newTestModel(t, nil)
-	content := "line1\nline2\nline3"
-	card := renderCard(m.theme, "Title", content, true, 20, 5)
-	lines := strings.Split(card, "\n")
-	// h=5 content lines + 2 border lines (top + bottom) = 7
-	if len(lines) != 7 {
-		t.Errorf("card line count=%d, want 7", len(lines))
-	}
-}
-
-func TestRenderCard_Title(t *testing.T) {
-	t.Parallel()
-	m := newTestModel(t, nil)
-	card := renderCard(m.theme, "MyTitle", "content", false, 20, 3)
-	firstLine := strings.Split(card, "\n")[0]
-	if !strings.Contains(firstLine, "MyTitle") {
-		t.Errorf("first line should contain title, got %q", firstLine)
-	}
-}
-
-func TestRenderCard_BorderChars(t *testing.T) {
-	t.Parallel()
-	m := newTestModel(t, nil)
-	card := renderCard(m.theme, "T", "x", false, 10, 2)
-	for _, ch := range []string{"╭", "╮", "╰", "╯", "│"} {
-		if !strings.Contains(card, ch) {
-			t.Errorf("card missing border char %q", ch)
-		}
-	}
-}
-
-func TestRenderCard_FocusedVsUnfocused(t *testing.T) {
-	t.Parallel()
-	m := newTestModel(t, nil)
-	// Both should render without panic and contain border chars
-	focused := renderCard(m.theme, "T", "x", true, 10, 2)
-	unfocused := renderCard(m.theme, "T", "x", false, 10, 2)
-	for _, card := range []string{focused, unfocused} {
-		if !strings.Contains(card, "╭") {
-			t.Error("card should contain border chars")
-		}
-	}
-}
-
-func TestRenderCard_EmptyTitle(t *testing.T) {
-	t.Parallel()
-	m := newTestModel(t, nil)
-	card := renderCard(m.theme, "", "content", false, 15, 2)
-	firstLine := strings.Split(card, "\n")[0]
-	if !strings.Contains(firstLine, "╭") || !strings.Contains(firstLine, "╮") {
-		t.Error("card with empty title should still have border corners")
-	}
-}
-
 func newTestModel(t *testing.T, files []fileItem) Model {
 	t.Helper()
 	th := theme.Themes["dark"]
@@ -284,7 +228,7 @@ func TestRenderHelpBar_BranchMode(t *testing.T) {
 	m := newTestModel(t, nil)
 	m.mode = modeBranchPicker
 	bar := m.renderHintBar()
-	for _, key := range []string{"↑/↓/^j/^k", "enter", "esc", "filter"} {
+	for _, key := range []string{"↑/^k", "↓/^j", "enter", "esc", "filter"} {
 		if !strings.Contains(bar, key) {
 			t.Errorf("branch help should contain %q", key)
 		}

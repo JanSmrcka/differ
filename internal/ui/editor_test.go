@@ -55,19 +55,22 @@ func TestEditor_PressingEDoesNotQuitDiffer(t *testing.T) {
 	}
 }
 
-// e has always worked in the diff, and now in review too, but helpPairs only
-// ever advertised it in the file list.
-func TestEditor_TheDiffAndReviewHintsAdvertiseE(t *testing.T) {
-	for _, mode := range []viewMode{modeDiff, modeReview} {
-		m := Model{mode: mode}
+// e has always worked in the diff and in review, but the old hand-written
+// hint list only ever advertised it in the file list. It is not compact enough
+// to earn a place in the command bar, so the keymap is where it has to appear.
+func TestEditor_TheDiffAndReviewKeymapsDocumentE(t *testing.T) {
+	t.Parallel()
+	for _, mode := range []viewMode{modeFileList, modeDiff, modeReview} {
 		found := false
-		for _, p := range m.helpPairs() {
-			if p.key == "e" {
-				found = true
+		for _, b := range keymapFor(mode) {
+			for _, k := range b.Keys {
+				if k == "e" {
+					found = true
+				}
 			}
 		}
 		if !found {
-			t.Errorf("mode %v does not advertise e", mode)
+			t.Errorf("mode %v does not document e", mode)
 		}
 	}
 }

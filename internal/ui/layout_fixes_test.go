@@ -353,31 +353,27 @@ func TestQuit_SentCommentsDoNotWarn(t *testing.T) {
 
 // No hint may be dropped: the footer is allowed to wrap and footerHeight
 // measures it, so the cards shrink instead of the layout overflowing.
-func TestHelpBar_KeepsEveryHintAtEveryWidth(t *testing.T) {
+//
+// The invariant here is deliberately the opposite of what it used to be. This
+// test once asserted that no hint was ever dropped at any width, on the
+// grounds that losing a key was worse than wrapping. Wrapping turned out to
+// be worse: it made the footer two rows tall and pushed the top of the layout
+// off screen. The bar now truncates, and keeps the keys that get the user out.
+func TestCommandBar_TruncatesRatherThanWrapping(t *testing.T) {
 	for _, mode := range []viewMode{modeFileList, modeDiff, modeReview, modeBranchPicker} {
 		m := newTestModel(t, []fileItem{{change: git.FileChange{Path: "a.go", Status: git.StatusModified}}})
 		m.mode = mode
-		for _, width := range []int{80, 100, 120} {
+		for _, width := range []int{60, 80, 100, 120} {
 			m.width = width
 			bar := m.renderHintBar()
-			for _, p := range m.helpPairs() {
-				if !strings.Contains(bar, p.desc) {
-					t.Errorf("mode %d at width %d dropped hint %q %q", mode, width, p.key, p.desc)
+			for _, line := range strings.Split(bar, "\n") {
+				if w := lipgloss.Width(line); w > width {
+					t.Errorf("mode %d at width %d: a row is %d columns:\n%s", mode, width, w, bar)
 				}
 			}
-		}
-	}
-}
-
-func TestHelpBar_KeepsQuitAndReviewHints(t *testing.T) {
-	m := newTestModel(t, []fileItem{{change: git.FileChange{Path: "a.go", Status: git.StatusModified}}})
-	m.mode = modeFileList
-	m.width = 80
-
-	bar := m.renderHintBar()
-	for _, want := range []string{"q", "quit", "review", "commit", "stage"} {
-		if !strings.Contains(bar, want) {
-			t.Errorf("file list help lost %q: %q", want, bar)
+			if !strings.Contains(bar, "quit") {
+				t.Errorf("mode %d at width %d dropped quit:\n%s", mode, width, bar)
+			}
 		}
 	}
 }

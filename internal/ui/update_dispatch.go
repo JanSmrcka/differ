@@ -66,6 +66,25 @@ func (m Model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) routeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// The help overlay is global: it answers the same keys everywhere, and
+	// while it is open it swallows the rest so a stray j does not scroll a
+	// diff the user cannot see.
+	if !m.typing() {
+		switch msg.String() {
+		case "?":
+			m.showHelp = !m.showHelp
+			return m, nil
+		case "esc", "q":
+			if m.showHelp {
+				m.showHelp = false
+				return m, nil
+			}
+		}
+		if m.showHelp {
+			return m, nil
+		}
+	}
+
 	switch m.mode {
 	case modeFileList:
 		return m.updateFileListMode(msg)

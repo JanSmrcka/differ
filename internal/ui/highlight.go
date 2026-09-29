@@ -9,6 +9,7 @@ import (
 	"github.com/alecthomas/chroma/v2/lexers"
 	"github.com/alecthomas/chroma/v2/styles"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/jansmrcka/differ/internal/theme"
 )
 
 var (
@@ -20,6 +21,12 @@ var (
 // initChromaStyle initializes the chroma style (call once).
 func initChromaStyle(styleName string) {
 	chromaStyleMu.Do(func() {
+		// theme.NoHighlight means the user asked for no colour, so leave the
+		// style nil and highlightLine returns the text untouched. An empty
+		// name is different: that is "unset", and falls back to a default.
+		if styleName == theme.NoHighlight {
+			return
+		}
 		chromaStyle = styles.Get(styleName)
 		if chromaStyle == nil {
 			chromaStyle = styles.Get("monokai")

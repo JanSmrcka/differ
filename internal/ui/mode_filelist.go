@@ -28,7 +28,26 @@ func (m Model) updateFileListMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.statusMsg = "press P again to push to " + m.upstream.Upstream
 		return m, nil
 	}
+	// Pull reaches the remote and rewrites the working tree, so it asks the
+	// same way push does. It used to go straight through, while the help said
+	// it would ask — the keymap now marks both, and a test holds them to it.
+	if msg.String() == "F" {
+		if m.pullConfirm {
+			m.pullConfirm = false
+			m.statusMsg = "pulling..."
+			return m, m.pullCmd()
+		}
+		m.pullConfirm = true
+		target := m.upstream.Upstream
+		if target == "" {
+			target = "the upstream branch"
+		}
+		m.statusMsg = "press F again to pull from " + target
+		return m, nil
+	}
+
 	m.pushConfirm = false
+	m.pullConfirm = false
 	if msg.String() != "q" {
 		m.quitConfirm = false
 	}

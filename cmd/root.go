@@ -16,30 +16,75 @@ import (
 
 var version = "dev"
 
+// usageError marks a failure that is the command line's fault rather than the
+// repository's, so Execute can exit 2 for it and 1 for everything else.
+type usageError struct{ err error }
+
+func (e usageError) Error() string { return e.err.Error() }
+func (e usageError) Unwrap() error { return e.err }
+
+const (
+	exitRuntime = 1
+	exitUsage   = 2
+)
+
 var (
-	flagStaged bool
-	flagRef    string
-	flagTheme  string
-	flagCommit bool
+	flagStaged  bool
+	flagRef     string
+	flagTheme   string
+	flagCommit  bool
+	flagNoColor bool
 )
 
 var rootCmd = &cobra.Command{
-	Use:     "differ",
-	Short:   "Git diff TUI viewer",
+	Use:   "differ",
+	Short: "Review git changes in the terminal",
+	Long: `differ shows what changed and lets you review it.
+
+Run it with no arguments to see the working tree; add -s for the index, or
+-r <ref> to compare against a branch, tag or commit. "differ review" opens
+the same changes straight into review mode, where you can comment line by
+line and send the result to a coding agent.`,
+	Example: `  differ                 # everything that changed
+  differ -s              # staged changes only
+  differ -r main         # compare against main
+  differ -c              # open straight into the commit message
+  differ review          # review the working tree, ready to comment
+  differ review -s       # review the staged changes
+  differ log             # browse recent commits
+  differ commit          # review what is staged, then commit`,
 	Version: version,
 	RunE:    runDiff,
 }
 
+var reviewCmd = &cobra.Command{
+	Use:   "review",
+	Short: "Review changes and comment on them line by line",
+	Long: `review opens the same changes as differ itself, but starts in review mode.
+
+Comment on a line with c, or on a whole hunk with C, then send one comment
+with s or all of them with S. Where the feedback goes is set by
+feedback_target in the config: the clipboard, stdout, or a tmux pane running
+an agent.`,
+	Example: `  differ review          # the working tree
+  differ review -s       # the staged changes
+  differ review -r main  # everything that differs from main`,
+	RunE: runReview,
+}
+
 var logCmd = &cobra.Command{
-	Use:   "log",
-	Short: "Browse recent commits with diff preview",
-	RunE:  runLog,
+	Use:     "log",
+	Short:   "Browse recent commits with a diff preview",
+	Example: "  differ log",
+	RunE:    runLog,
 }
 
 var commitCmd = &cobra.Command{
-	Use:   "commit",
-	Short: "Review staged changes and commit",
-	RunE:  runCommit,
+	Use:     "commit",
+	Short:   "Review what is staged, then commit it",
+	Long:    "commit shows the staged changes and opens the commit message input, with an AI-generated message if commit_msg_cmd is configured.",
+	Example: "  differ commit",
+	RunE:    runCommit,
 }
 
 func init() {
@@ -48,21 +93,66 @@ func init() {
 			version = info.Main.Version
 		}
 	}
-	rootCmd.Flags().BoolVarP(&flagStaged, "staged", "s", false, "show only staged changes")
-	rootCmd.Flags().StringVarP(&flagRef, "ref", "r", "", "compare against branch/tag/commit")
-	rootCmd.Flags().BoolVarP(&flagCommit, "commit", "c", false, "enter commit mode after review")
-	rootCmd.Flags().StringVar(&flagTheme, "theme", "", "color theme (dark, light)")
-	rootCmd.AddCommand(logCmd, commitCmd)
+
+	// Usage belongs to a bad command line, not to a repository that turned
+	// out to have no such ref: printing it over a runtime failure buries the
+	// one line that says what happened. Cobra is told to stay quiet and
+	// Execute reports the error itself.
+	for _, c := range []*cobra.Command{rootCmd, reviewCmd, logCmd, commitCmd} {
+		c.SilenceUsage = true
+		c.SilenceErrors = true
+	}
+
+	// The comparison flags mean the same thing wherever they appear.
+	for _, c := range []*cobra.Command{rootCmd, reviewCmd} {
+		c.Flags().BoolVarP(&flagStaged, "staged", "s", false, "only what is staged")
+		c.Flags().StringVarP(&flagRef, "ref", "r", "", "compare against a branch, tag or commit")
+	}
+	for _, c := range []*cobra.Command{rootCmd, reviewCmd, logCmd, commitCmd} {
+		c.Flags().StringVar(&flagTheme, "theme", "", "colour theme: dark or light")
+		c.Flags().BoolVar(&flagNoColor, "no-color", false, "disable colour (also honours NO_COLOR)")
+	}
+	rootCmd.Flags().BoolVarP(&flagCommit, "commit", "c", false, "open straight into the commit message")
+
+	rootCmd.AddCommand(reviewCmd, logCmd, commitCmd)
 }
 
-// Execute runs the root CLI command.
+// Execute runs the CLI and turns a failure into a concise line and an exit
+// code: 0 success, 1 a runtime problem, 2 a bad command line.
 func Execute() {
-	if err := rootCmd.Execute(); err != nil {
-		os.Exit(1)
+	rootCmd.SetFlagErrorFunc(func(c *cobra.Command, err error) error {
+		return usageError{err}
+	})
+
+	err := rootCmd.Execute()
+	if err == nil {
+		return
 	}
+
+	var ue usageError
+	if asUsageError(err, &ue) {
+		fmt.Fprintf(os.Stderr, "differ: %v\n\n", ue.err)
+		_ = rootCmd.Usage()
+		os.Exit(exitUsage)
+	}
+	fmt.Fprintf(os.Stderr, "differ: %v\n", err)
+	os.Exit(exitRuntime)
+}
+
+func asUsageError(err error, target *usageError) bool {
+	ue, ok := err.(usageError)
+	if ok {
+		*target = ue
+	}
+	return ok
 }
 
 func resolveTheme(cfg config.Config) theme.Theme {
+	// NO_COLOR is a convention worth honouring: its presence, at any value,
+	// means no colour. https://no-color.org
+	if flagNoColor || os.Getenv("NO_COLOR") != "" {
+		return theme.NoColorTheme()
+	}
 	name := cfg.Theme
 	if flagTheme != "" {
 		name = flagTheme
@@ -73,7 +163,12 @@ func resolveTheme(cfg config.Config) theme.Theme {
 	return theme.DarkTheme()
 }
 
-func runDiff(cmd *cobra.Command, args []string) error {
+func runDiff(cmd *cobra.Command, args []string) error { return openDiff(false) }
+
+func runReview(cmd *cobra.Command, args []string) error { return openDiff(true) }
+
+// openDiff builds the model for the current changeset and runs the TUI.
+func openDiff(review bool) error {
 	repo, err := git.NewRepo(".")
 	if err != nil {
 		return err
@@ -94,12 +189,14 @@ func runDiff(cmd *cobra.Command, args []string) error {
 
 	cfg := config.Load()
 	t := resolveTheme(cfg)
-	styles := ui.NewStyles(t)
-
-	model := ui.NewModel(repo, cfg, files, untracked, styles, t, flagStaged, flagRef)
-	if flagCommit {
+	model := ui.NewModel(repo, cfg, files, untracked, ui.NewStyles(t), t, flagStaged, flagRef)
+	switch {
+	case review:
+		model.StartInReviewMode()
+	case flagCommit:
 		model.StartInCommitMode()
 	}
+
 	p := tea.NewProgram(model, tea.WithAltScreen())
 	finalModel, err := p.Run()
 	if err != nil {
@@ -113,7 +210,6 @@ func runDiff(cmd *cobra.Command, args []string) error {
 	}
 	return nil
 }
-
 func runCommit(cmd *cobra.Command, args []string) error {
 	repo, err := git.NewRepo(".")
 	if err != nil {
