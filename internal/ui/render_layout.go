@@ -25,6 +25,10 @@ func (m Model) branchName() string {
 // clamped against listHeight, so a caller passing anything else would render a
 // window the clamping never agreed to.
 func (m Model) renderFileList() string {
+	if len(m.files) == 0 {
+		// A blank panel reads as a bug. Say what is true instead.
+		return m.renderEmptyState()
+	}
 	height := m.listHeight()
 	end := min(m.fileOffset+max(height, 0), len(m.files))
 

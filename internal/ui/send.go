@@ -136,8 +136,7 @@ func (m Model) handleFeedbackSent(msg feedbackSentMsg) (tea.Model, tea.Cmd) {
 	m.recordDelivery(msg)
 	if msg.err != nil {
 		// Comments stay pending: the user can retry or switch target.
-		m.statusMsg = "send failed: " + msg.err.Error()
-		return m, nil
+		return m.fail("send", msg.err), nil
 	}
 	if m.session != nil {
 		m.session.MarkSent(msg.ids)

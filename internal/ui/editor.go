@@ -128,7 +128,7 @@ func (m Model) handleEditorPlan(msg editorPlanMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) handleEditorDone(msg editorDoneMsg) (tea.Model, tea.Cmd) {
 	if msg.err != nil {
-		m.statusMsg = "editor failed: " + msg.err.Error()
+		m = m.fail("the editor", msg.err)
 	} else if msg.desc != "" {
 		m.statusMsg = msg.desc
 	}

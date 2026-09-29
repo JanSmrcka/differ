@@ -166,9 +166,13 @@ func TestTruncateEnd(t *testing.T) {
 	}
 }
 
-// `differ review` in a clean repository used to open the plain file list with
-// no sign that review had been asked for and skipped. enterReviewMode says
-// "nothing to review"; this has to as well.
+// `differ review` in a clean repository has to say so.
+//
+// This reverses what the test used to assert. It required review mode *not* to
+// open, with "nothing to review" in the status bar — but the panel then said
+// "No changes / Your working tree is clean.", so the two disagreed about the
+// same question, and the wording the issue asked for appeared nowhere. Review
+// mode opens and the panel answers.
 func TestStartInReviewMode_SaysSoWhenThereIsNothingToReview(t *testing.T) {
 	t.Parallel()
 	tr := testutil.NewRepo(t)
@@ -179,10 +183,11 @@ func TestStartInReviewMode_SaysSoWhenThereIsNothingToReview(t *testing.T) {
 	}
 
 	m.StartInReviewMode()
-	if m.mode == modeReview {
-		t.Error("review mode opened with nothing to review")
+	if m.mode != modeReview {
+		t.Error("differ review did not open review mode")
 	}
-	if m.statusMsg == "" {
-		t.Error("nothing was said about review being skipped")
+	got := stripANSI(m.renderFileList())
+	if !strings.Contains(got, "Nothing to review") {
+		t.Errorf("the panel does not say there is nothing to review:\n%s", got)
 	}
 }

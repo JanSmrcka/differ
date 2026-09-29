@@ -55,6 +55,11 @@ func (m Model) bindingApplies(b binding) bool {
 	case "stage", "stage all":
 		// Staging is meaningless when looking at the index or a ref.
 		return !m.stagedOnly && m.ref == ""
+	case "comment", "hunk comment", "delete":
+		// Nothing to comment on, so nothing to offer. Review mode can be open
+		// with an empty changeset — that is how it says there is nothing to
+		// review — and every one of these would return early.
+		return len(m.files) > 0
 	default:
 		return true
 	}

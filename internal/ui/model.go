@@ -159,6 +159,11 @@ type Model struct {
 	// showHistory draws the session's delivery history over the panels, the
 	// same way.
 	showHistory bool
+	// showProblem draws the last failure in full, and problem is that
+	// failure — kept so the tool's own words are reachable without being in
+	// the status bar.
+	showProblem bool
+	problem     *problem
 
 	upstream     git.UpstreamInfo
 	pushConfirm  bool
@@ -287,16 +292,17 @@ func filesEqual(a, b []fileItem) bool {
 }
 
 // StartInReviewMode opens straight into review, for `differ review`.
+//
+// It enters review mode even with nothing to review, so the panel can say so
+// in the words the user asked for it in. Refusing to enter and putting
+// "nothing to review" in the status bar meant the panel said "No changes" and
+// the bar said something else — two answers to the same question.
 func (m *Model) StartInReviewMode() {
-	if len(m.files) == 0 {
-		// Falling back to the file list silently leaves no sign that review
-		// was asked for at all. enterReviewMode says the same thing.
-		m.statusMsg = "nothing to review"
-		return
-	}
 	m.mode = modeReview
 	m.session = review.NewSession()
-	m.session.MarkViewed(m.currentFilePath())
+	if len(m.files) > 0 {
+		m.session.MarkViewed(m.currentFilePath())
+	}
 }
 
 func (m *Model) StartInCommitMode() {

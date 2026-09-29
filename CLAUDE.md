@@ -54,6 +54,7 @@ main.go → cmd/root.go (cobra commands)
                    ├── keymap.go   — the keymap: one table, read by bar/overlay/tests
                    ├── commandbar.go — the one-line command bar and ? overlay
                    ├── history.go  — the H overlay: what was sent, where, and whether it arrived
+                   ├── problem.go  — how a failure is presented, and the empty states
                    ├── filelist.go — path disambiguation and the file list's own arithmetic
                    ├── intraline.go — what differs *within* a pair of split-view lines
                    ├── progress.go — review progress: which files moved under the reviewer
@@ -167,6 +168,30 @@ github.com/spf13/cobra                # CLI
    exists, and the contrast floor on every pair — including the marks drawn
    inside the diff. Take the palette from upstream rather than eyeballing it,
    and record the source and licence next to the constructor.
+
+### Failures
+
+Nothing puts a tool's *whole* output in the status bar, and nothing puts any
+of it there unshaped. `Model.fail(action, err)` is the one way a failure
+reaches the user: `describe` turns it into a summary,
+a hint and the original text, the bar gets the one-line form, and `!` shows the
+rest. The hints are matched on fragments of git's wording because git has no
+error codes — an unmatched failure still gets presented, so a reworded git
+message degrades to one line of its own words — capped, and with git's severity
+prefix stripped — rather than to something wrong. That fallback is the one
+place a tool's wording reaches the bar, and it is a deliberate last resort.
+
+`fail` touches nothing but the status bar and the stored problem. A failure
+must never cost the user their place in the diff or a comment they have
+written.
+
+`Repo.run` captures stdout and stderr separately and, on failure, returns
+whichever said something — stderr first, then stdout, because `git commit`
+writes "no changes added to commit" to stdout. `cmd.Output()` looks like it
+does this and does not: it puts stderr on `ExitError.Stderr`, whose `Error()`
+renders only "exit status 1". Every hint in the table depends on git's actual
+words reaching `describe`, so a test drives real failing git commands all the
+way to the status bar rather than handing `describe` an error built by hand.
 
 ## Gotchas
 

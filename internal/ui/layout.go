@@ -45,6 +45,8 @@ func (m Model) View() string {
 		body = m.renderHelpOverlay(m.width, contentH)
 	case m.showHistory:
 		body = m.renderHistoryOverlay(m.width, contentH)
+	case m.showProblem:
+		body = m.renderProblemOverlay(m.width, contentH)
 	default:
 		left := padLines(m.leftPanel(), contentH)
 		right := padLines(m.rightPanel(), contentH)
@@ -242,17 +244,26 @@ func (m Model) renderHintBar() string {
 // state and what just happened. The changeset counts live in the header, so
 // they are not repeated here.
 func (m Model) statusSegment() string {
+	// What just happened comes first, and the standing state after it. The
+	// row is one line and the bar drops whole words off the end to keep it
+	// that way, so the order here is a priority order: with the review
+	// progress and "split" in front, a failure at sixty columns was cut down
+	// to its first few words — "generating a commit message", with no
+	// "failed", no hint and no "!" — and read as progress rather than a
+	// failure.
 	var parts []string
+	if m.statusMsg != "" {
+		parts = append(parts, m.statusMsg)
+	}
 	if m.mode == modeReview {
 		parts = append(parts, m.reviewSummary())
 	}
 	if m.splitDiff {
 		parts = append(parts, "split")
 	}
-	if m.statusMsg != "" {
-		parts = append(parts, m.statusMsg)
-	}
-	return strings.Join(parts, "  ·  ")
+
+	// Cut here rather than leaving it to the bar, which drops words silently.
+	return truncateEnd(strings.Join(parts, "  ·  "), max(m.width-1, 0))
 }
 
 func padLines(lines []string, height int) []string {
