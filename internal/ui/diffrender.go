@@ -95,7 +95,11 @@ func (r *DiffRenderer) ensure() {
 // The original keeps its tabs so comment anchors and excerpts show the file as
 // it really is.
 func (r *DiffRenderer) displayLine(dl DiffLine) DiffLine {
-	dl.Content = expandTabs(dl.Content, r.tabWidth)
+	// Carriage returns are dropped, not rendered: a CR mid-line makes the
+	// terminal redraw over itself, and Chroma turns it into a newline which is
+	// stripped anyway. Dropping it here means the string the span is measured
+	// against is the string that gets painted.
+	dl.Content = expandTabs(strings.ReplaceAll(dl.Content, "\r", ""), r.tabWidth)
 	return dl
 }
 
@@ -273,11 +277,13 @@ func (r *DiffRenderer) renderRow(row splitRow, leftGutter, rightGutter string) s
 		// The header spans the whole row, but its line-number stand-in has to
 		// match what a split row carries — one column of numbers, not two — or
 		// its text sits several columns right of the code it heads.
-		span := geometry{numW: r.geom.numW, width: r.width, split: true}
-		return renderHunkLine(r.displayLine(*row.left), r.styles, span, leftGutter)
+		header := geometry{numW: r.geom.numW, width: r.width, split: true}
+		return renderHunkLine(r.displayLine(*row.left), r.styles, header, leftGutter)
 	}
-	left := renderSplitSide(r.displaySide(row.left), r.filename, r.styles, r.theme, leftG, true)
-	right := renderSplitSide(r.displaySide(row.right), r.filename, r.styles, r.theme, rightG, false)
+	l, rr := r.displaySide(row.left), r.displaySide(row.right)
+	oldSpan, newSpan := r.changedSpans(l, rr)
+	left := renderSplitSide(l, r.filename, r.styles, r.theme, leftG, true, oldSpan)
+	right := renderSplitSide(rr, r.filename, r.styles, r.theme, rightG, false, newSpan)
 	sep := lipgloss.NewStyle().Foreground(lipgloss.Color(r.theme.BorderFg)).Render(verticalDivider)
 	return clipRow(leftGutter+left+sep+rightGutter+right, r.width)
 }
@@ -341,3 +347,45 @@ func (r *DiffRenderer) RowFor(cursor int) (int, bool) { return r.rowFor(cursor) 
 
 // Parsed exposes the diff the renderer was built from.
 func (r *DiffRenderer) Parsed() ParsedDiff { return r.parsed }
+
+// maxChangedShare is how much of a line may differ before the pair counts as
+// a rewrite rather than an edit.
+const maxChangedShare = 0.6
+
+// share is what fraction of a line of n runes a span of length k covers. An
+// empty line has nothing to cover.
+func share(k, n int) float64 {
+	if n == 0 {
+		return 0
+	}
+	return float64(k) / float64(n)
+}
+
+// changedSpans works out which part of a paired removed/added row actually
+// differs, so each side can emphasise it.
+//
+// Only a replacement gets one: a row with one side empty is a plain insertion
+// or deletion, and the +/- already says so. A pair with nothing in common is a
+// rewritten line, where emphasising everything would be a wall of colour
+// saying no more than the line type does.
+func (r *DiffRenderer) changedSpans(left, right *DiffLine) (oldSpan, newSpan span) {
+	if left == nil || right == nil {
+		return span{}, span{}
+	}
+	if left.Type != LineRemoved || right.Type != LineAdded {
+		return span{}, span{}
+	}
+
+	start, endOld, endNew := changedRange(left.Content, right.Content)
+	oldRunes, newRunes := len([]rune(left.Content)), len([]rune(right.Content))
+
+	// Most of the line having changed makes it a rewrite, not an edit, and
+	// emphasising nearly all of it says no more than the +/- already does.
+	// Exact equality was the first test of that and far too strict: one
+	// shared character — a semicolon, a brace, a comma — was enough to defeat
+	// it, and two unrelated lines got twenty of twenty-two runes emphasised.
+	if share(endOld-start, oldRunes) > maxChangedShare || share(endNew-start, newRunes) > maxChangedShare {
+		return span{}, span{}
+	}
+	return span{from: start, to: endOld}, span{from: start, to: endNew}
+}

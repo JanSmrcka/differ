@@ -130,6 +130,9 @@ func checkContrast(t *testing.T, th Theme, label string) {
 		// the page background.
 		{th.MarkFg, th.AddedBg, 3.0, "MarkFg/AddedBg"},
 		{th.MarkFg, th.RemovedBg, 3.0, "MarkFg/RemovedBg"},
+		// The emphasised span still has to be readable, not just visible.
+		{th.AddedFg, th.AddedEmphBg, 3.0, "AddedFg/AddedEmphBg"},
+		{th.RemovedFg, th.RemovedEmphBg, 3.0, "RemovedFg/RemovedEmphBg"},
 	}
 	for _, p := range pairs {
 		ratio := contrastRatio(p.fg, p.bg)

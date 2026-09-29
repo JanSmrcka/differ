@@ -412,6 +412,9 @@ type lineStyles struct {
 	// mark draws what differ adds inside the code column: the stand-in for
 	// trailing whitespace, and the sign that the line was cut.
 	mark lipgloss.Style
+	// emph paints the part of the line that differs from the line it is
+	// paired with in split view.
+	emph lipgloss.Style
 }
 
 func stylesFor(dl DiffLine, styles Styles, t theme.Theme) lineStyles {
@@ -421,12 +424,14 @@ func stylesFor(dl DiffLine, styles Styles, t theme.Theme) lineStyles {
 			indicator: "+", bgColor: t.AddedBg,
 			num: styles.DiffLineNumAdded, ind: styles.DiffAdded,
 			bg: styles.DiffAddedBg, mark: styles.DiffMarkAdded,
+			emph: styles.DiffAddedEmph,
 		}
 	case LineRemoved:
 		return lineStyles{
 			indicator: "-", bgColor: t.RemovedBg,
 			num: styles.DiffLineNumRemoved, ind: styles.DiffRemoved,
 			bg: styles.DiffRemovedBg, mark: styles.DiffMarkRemoved,
+			emph: styles.DiffRemovedEmph,
 		}
 	default:
 		return lineStyles{
@@ -444,7 +449,9 @@ func renderCodeLine(dl DiffLine, filename string, styles Styles, t theme.Theme, 
 	codeWidth := g.width - gutterWidth - g.numbersWidth() - 1 // gutter, numbers, one space
 	prefix := ls.ind.Render(ls.indicator + " ")
 
-	code := renderCode(dl, filename, ls, codeWidth-lipgloss.Width(prefix))
+	// Unified view has no pairing — a removed line and the added line
+	// replacing it are separate rows — so there is nothing to compare against.
+	code := renderCode(dl, filename, ls, codeWidth-lipgloss.Width(prefix), span{})
 	padding := ""
 	if pad := codeWidth - lipgloss.Width(prefix) - lipgloss.Width(code); pad > 0 {
 		padding = ls.bg.Render(strings.Repeat(" ", pad))
@@ -466,11 +473,14 @@ func renderCodeLine(dl DiffLine, filename string, styles Styles, t theme.Theme, 
 // Whether the whitespace is *marked* is a separate decision: only on a line
 // the change touched. A context line carries whatever the file already had,
 // and marking those would flag the whole file rather than the change.
-func renderCode(dl DiffLine, filename string, ls lineStyles, maxW int) string {
+func renderCode(dl DiffLine, filename string, ls lineStyles, maxW int, changed span) string {
 	text, cut := clipCode(dl.Content, maxW)
 	body, trailing := splitTrailing(text)
 
-	out := highlightLine(body, filename, ls.bgColor)
+	// The span was measured against the whole line, so it is re-fitted to
+	// whatever survived the cut — and widened off any grapheme boundary it
+	// landed inside, which would otherwise change the line's width.
+	out := highlightSpan(body, filename, ls.bgColor, ls.emph, changed.snap(body))
 	if trailing != "" {
 		switch dl.Type {
 		case LineAdded, LineRemoved:
@@ -601,7 +611,7 @@ func pairLinesIndexed(lines []DiffLine) []splitRow {
 	return rows
 }
 
-func renderSplitSide(dl *DiffLine, filename string, styles Styles, t theme.Theme, g geometry, isLeft bool) string {
+func renderSplitSide(dl *DiffLine, filename string, styles Styles, t theme.Theme, g geometry, isLeft bool, changed span) string {
 	if dl == nil {
 		if g.width > 0 {
 			return strings.Repeat(" ", g.width)
@@ -620,7 +630,7 @@ func renderSplitSide(dl *DiffLine, filename string, styles Styles, t theme.Theme
 	prefix := ls.ind.Render(ls.indicator + " ")
 
 	codeWidth := max(0, g.width-g.numbersWidth()-1)
-	code := renderCode(*dl, filename, ls, codeWidth-lipgloss.Width(prefix))
+	code := renderCode(*dl, filename, ls, codeWidth-lipgloss.Width(prefix), changed)
 	padding := ""
 	if pad := codeWidth - lipgloss.Width(prefix) - lipgloss.Width(code); pad > 0 {
 		padding = ls.bg.Render(strings.Repeat(" ", pad))
