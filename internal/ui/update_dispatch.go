@@ -283,7 +283,14 @@ func (m Model) handleBranchesLoaded(msg branchesLoadedMsg) (tea.Model, tea.Cmd) 
 	// An overlay belongs to the view it was opened over, and this is a
 	// different view arriving in the background.
 	m.showHelp, m.showHistory, m.showProblem = false, false, false
-	m.showThemes = false
+	// The theme picker is closed through cancelTheme rather than by clearing
+	// the flag: it is the only overlay that changes the session as you move
+	// through it, so dropping it without restoring left the user in a theme
+	// they never confirmed, with esc no longer able to undo it.
+	var restore tea.Cmd
+	if m.showThemes {
+		m, restore = m.cancelTheme()
+	}
 	m.mode = modeBranchPicker
 	m.branches = msg.branches
 	m.currentBranch = msg.current
@@ -302,7 +309,7 @@ func (m Model) handleBranchesLoaded(msg branchesLoadedMsg) (tea.Model, tea.Cmd) 
 	// so anything past the twenty-somethingth — and the picker then opened
 	// with no visible selection at all.
 	m = m.clampBranchScroll()
-	return m, textinput.Blink
+	return m, tea.Batch(restore, textinput.Blink)
 }
 
 func (m Model) handleBranchSwitched(msg branchSwitchedMsg) (tea.Model, tea.Cmd) {

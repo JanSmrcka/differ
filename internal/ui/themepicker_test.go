@@ -1,10 +1,15 @@
 package ui
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/jansmrcka/differ/internal/config"
 	"github.com/jansmrcka/differ/internal/git"
 	"github.com/jansmrcka/differ/internal/testutil"
 	"github.com/jansmrcka/differ/internal/theme"
@@ -273,5 +278,334 @@ func TestThemePicker_EnterAppliesWhatItWrites(t *testing.T) {
 	name := confirmed.cfg.Theme
 	if confirmed.theme != theme.Themes[name] {
 		t.Errorf("wrote theme %q but the session is using something else", name)
+	}
+}
+
+// A preview that was never confirmed must not survive the picker being closed
+// from underneath it.
+//
+// The branch list arrives asynchronously, and handleBranchesLoaded closes every
+// overlay because a different view is taking over. It was clearing showThemes
+// directly, which dropped the picker without putting the theme back: press b,
+// press t, move the cursor, and the list lands — the session then runs in a
+// theme the user never chose, nothing is written to config, and esc can no
+// longer undo it.
+func TestThemePicker_TheBranchListArrivingRestoresThePreviewedTheme(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("a.ts", "one\n", "first")
+	tr.Modify("a.ts", "two\n")
+	m := liveModel(t, tr)
+
+	before, beforeCfg := m.theme, m.cfg.Theme
+	m, _ = m.openThemePicker()
+	m, _ = m.moveThemeCursor(1)
+	if m.theme == before {
+		t.Fatal("moving the cursor did not preview a different theme")
+	}
+
+	updated, _ := m.Update(branchesLoadedMsg{branches: []string{"master", "other"}, current: "master"})
+	m = updated.(Model)
+
+	if m.showThemes {
+		t.Error("the picker is still open after the branch list arrived")
+	}
+	if m.theme != before {
+		t.Error("an unconfirmed preview survived the picker being closed")
+	}
+	if m.cfg.Theme != beforeCfg {
+		t.Errorf("nothing was confirmed, but the config moved to theme=%q", m.cfg.Theme)
+	}
+}
+
+// The picker has to be exercised through View(), not only through
+// renderThemeOverlay. Three separate sabotages of layout.go left the suite
+// green — widening the overlay to the whole terminal, moving it into the
+// overlay switch so the diff is hidden, and disabling it entirely — which
+// means the change this PR exists to make was defended by nothing.
+func TestThemePicker_TheDiffStaysOnScreenBesideThePicker(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("src.ts", "one\ntwo\n", "first")
+	tr.Modify("src.ts", "one\nCHANGED\n")
+	m := liveModel(t, tr)
+
+	closed := m.View()
+	if !strings.Contains(closed, "CHANGED") {
+		t.Fatal("the diff is not on screen before the picker opens")
+	}
+
+	m, _ = m.openThemePicker()
+	open := m.View()
+
+	if !strings.Contains(open, "theme") {
+		t.Error("the picker is not drawn at all")
+	}
+	// The whole point: the theme under the cursor is judged by the diff, so
+	// the diff has to still be there.
+	if !strings.Contains(open, "CHANGED") {
+		t.Errorf("the picker hid the diff:\n%s", open)
+	}
+	// And it takes the file list's panel, so the divider survives.
+	if !strings.Contains(open, verticalDivider) {
+		t.Errorf("the picker took the whole width:\n%s", open)
+	}
+	for i, row := range strings.Split(open, "\n") {
+		if w := lipgloss.Width(row); w > m.width {
+			t.Errorf("row %d is %d wide in a %d-column terminal", i, w, m.width)
+		}
+	}
+}
+
+// A diff that was built under the old palette must be dropped, not installed.
+// Both halves of the mechanism were unprotected: deleting the guard was green,
+// and so was stamping every load with 0 — which would freeze the diff pane for
+// the rest of the session after the first theme change.
+func TestThemePicker_ADiffBuiltUnderTheOldPaletteIsDropped(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("src.ts", "one\n", "first")
+	tr.Modify("src.ts", "two\n")
+	m := liveModel(t, tr)
+
+	// A load issued now carries the current generation and is installed.
+	fresh, ok := m.loadDiffCmd(false)().(diffLoadedMsg)
+	if !ok {
+		t.Fatal("loadDiffCmd did not produce a diffLoadedMsg")
+	}
+	if fresh.themeGen != m.themeGen {
+		t.Fatalf("a fresh load is stamped %d, but the model is at %d", fresh.themeGen, m.themeGen)
+	}
+
+	// Switching theme invalidates it.
+	m, _ = m.applyTheme(theme.Themes["gruvbox"])
+	if fresh.themeGen == m.themeGen {
+		t.Fatal("applyTheme did not advance the generation")
+	}
+
+	before := m.renderer
+	updated, _ := m.Update(fresh)
+	m = updated.(Model)
+	if m.renderer != before {
+		t.Error("a diff built under the previous palette was installed anyway")
+	}
+
+	// And the other half: a load issued *after* the switch has to be installed.
+	// Stamping every load with a constant passes the check above and freezes
+	// the diff pane for the rest of the session — the guard then rejects
+	// everything, because the model's generation has moved on and the stamp
+	// never will.
+	next, ok := m.loadDiffCmd(false)().(diffLoadedMsg)
+	if !ok {
+		t.Fatal("loadDiffCmd did not produce a diffLoadedMsg")
+	}
+	if next.themeGen != m.themeGen {
+		t.Fatalf("after the switch a load is stamped %d but the model is at %d — every diff would be dropped",
+			next.themeGen, m.themeGen)
+	}
+	updated, _ = m.Update(next)
+	m = updated.(Model)
+	if m.renderer == before {
+		t.Error("a diff built under the current palette was dropped")
+	}
+}
+
+// applyTheme has to rebuild everything derived from the palette, not just set
+// the field. Deleting the Styles rebuild, and deleting the cache reset, were
+// both green: the model would claim the new theme while every row on screen
+// kept the old one's colours.
+func TestThemePicker_ApplyingAThemeRebuildsWhatIsDerivedFromIt(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("src.ts", "one\n", "first")
+	tr.Modify("src.ts", "two\n")
+	m := liveModel(t, tr)
+	m.lastDiffContent = "stale content from the previous palette"
+
+	// Styles holds lipgloss.Style values, which are not comparable — and
+	// Render tells you nothing here, because under go test lipgloss emits no
+	// escapes at all. What the style *stores* is the observable thing.
+	gruvbox := theme.Themes["gruvbox"]
+	if m.styles.DiffAdded.GetBackground() == lipgloss.Color(gruvbox.AddedBg) {
+		t.Fatal("the model already uses gruvbox, so this test proves nothing")
+	}
+
+	m, cmd := m.applyTheme(gruvbox)
+
+	if m.styles.DiffAdded.GetBackground() != lipgloss.Color(gruvbox.AddedBg) {
+		t.Errorf("DiffAdded still paints %v, not gruvbox's %s",
+			m.styles.DiffAdded.GetBackground(), gruvbox.AddedBg)
+	}
+	if m.lastDiffContent != "" {
+		t.Error("the cached diff was kept, so the rows would keep the old colours")
+	}
+	if cmd == nil {
+		t.Error("nothing was scheduled to re-render the diff")
+	}
+}
+
+// The file-list v handler is now the only thing keeping cfg.SplitDiff correct
+// on that path, because saveSplitPrefCmd writes m.cfg verbatim. Removing it was
+// green: the existing test drives updateDiffMode only.
+func TestThemePicker_TheFileListSplitToggleAlsoKeepsTheConfigCurrent(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("src.ts", "one\n", "first")
+	tr.Modify("src.ts", "two\n")
+
+	for _, tc := range []struct {
+		name string
+		call func(Model) (tea.Model, tea.Cmd)
+	}{
+		{"file list", func(m Model) (tea.Model, tea.Cmd) { return m.updateFileListMode(key("v")) }},
+		{"diff", func(m Model) (tea.Model, tea.Cmd) { return m.updateDiffMode(key("v")) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			m := liveModel(t, tr)
+			before := m.splitDiff
+
+			updated, _ := tc.call(m)
+			m = updated.(Model)
+
+			if m.splitDiff == before {
+				t.Fatal("v did not toggle split view")
+			}
+			if m.cfg.SplitDiff != m.splitDiff {
+				t.Errorf("cfg.SplitDiff is %v but the session is %v — a theme write would revert it",
+					m.cfg.SplitDiff, m.splitDiff)
+			}
+		})
+	}
+}
+
+// Every key that closes the picker. Narrowing the case to "esc" alone was
+// green, so the documented toggle — press t again to dismiss — had no test.
+func TestThemePicker_EveryClosingKeyCloses(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("src.ts", "one\n", "first")
+	tr.Modify("src.ts", "two\n")
+
+	for _, k := range []string{"esc", "q", "t"} {
+		t.Run(k, func(t *testing.T) {
+			t.Parallel()
+			m := liveModel(t, tr)
+			before := m.theme
+			m, _ = m.openThemePicker()
+			m, _ = m.moveThemeCursor(1)
+
+			m, _, handled := m.themePickerKey(k)
+			if !handled {
+				t.Fatalf("%q was not handled by the picker", k)
+			}
+			if m.showThemes {
+				t.Errorf("%q did not close the picker", k)
+			}
+			if m.theme != before {
+				t.Errorf("%q closed the picker without restoring the theme", k)
+			}
+		})
+	}
+}
+
+// Opening the picker has to close the other overlays. Without it, ! then t
+// leaves the problem overlay on screen — View() checks showProblem before the
+// branch that draws the picker — while the picker silently owns the keyboard
+// and swallows every key. The screen looks frozen.
+func TestThemePicker_OpeningItClosesTheOtherOverlays(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("src.ts", "one\n", "first")
+	tr.Modify("src.ts", "two\n")
+	m := liveModel(t, tr)
+
+	m.showProblem, m.showHelp, m.showHistory = true, true, true
+	m, _ = m.openThemePicker()
+
+	if m.showProblem || m.showHelp || m.showHistory {
+		t.Errorf("another overlay survived: problem=%v help=%v history=%v",
+			m.showProblem, m.showHelp, m.showHistory)
+	}
+	if !strings.Contains(m.View(), "theme") {
+		t.Errorf("the picker is not what is on screen:\n%s", m.View())
+	}
+}
+
+// The cursor stops at the ends rather than wrapping.
+func TestThemePicker_TheCursorClampsAtBothEnds(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("src.ts", "one\n", "first")
+	tr.Modify("src.ts", "two\n")
+	m := liveModel(t, tr)
+	m, _ = m.openThemePicker()
+
+	m.themeCursor = 0
+	m, _ = m.moveThemeCursor(-1)
+	if m.themeCursor != 0 {
+		t.Errorf("up from the first theme went to %d, not staying at 0", m.themeCursor)
+	}
+
+	last := len(theme.ThemeNames()) - 1
+	m.themeCursor = last
+	m, _ = m.moveThemeCursor(1)
+	if m.themeCursor != last {
+		t.Errorf("down from the last theme went to %d, not staying at %d", m.themeCursor, last)
+	}
+}
+
+// Confirming has to reach the disk. "Enter persists the choice" was asserted
+// only as cmd != nil, which applyTheme's reload satisfies on its own — so
+// removing the config write entirely left the suite green, and the issue's
+// "used on next launch" criterion was untested.
+//
+// Not t.Parallel: it points HOME at a temp dir, which t.Setenv forbids in a
+// parallel test. That isolation is the point — without it this test would
+// rewrite the developer's own ~/.config/differ/config.json, which is a hazard
+// every test that executes a returned Cmd has been carrying.
+func TestThemePicker_ConfirmingWritesTheThemeToDisk(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("src.ts", "one\n", "first")
+	tr.Modify("src.ts", "two\n")
+	m := liveModel(t, tr)
+
+	m, _ = m.openThemePicker()
+	m, _ = m.moveThemeCursor(1)
+	want := theme.ThemeNames()[m.themeCursor]
+
+	m, cmd := m.confirmTheme()
+	if cmd == nil {
+		t.Fatal("enter returned no command at all")
+	}
+	drain(cmd)
+
+	path := filepath.Join(home, ".config", "differ", "config.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("enter did not write a config: %v", err)
+	}
+	var saved config.Config
+	if err := json.Unmarshal(data, &saved); err != nil {
+		t.Fatalf("the config it wrote is not valid JSON: %v", err)
+	}
+	if saved.Theme != want {
+		t.Errorf("the config on disk says theme=%q, want %q", saved.Theme, want)
+	}
+}
+
+// drain runs a command and everything a tea.Batch fans out to.
+func drain(cmd tea.Cmd) {
+	if cmd == nil {
+		return
+	}
+	switch msg := cmd().(type) {
+	case tea.BatchMsg:
+		for _, c := range msg {
+			drain(c)
+		}
 	}
 }
