@@ -382,9 +382,31 @@ func TestRun_TheErrorCarriesTmuxsOwnWords(t *testing.T) {
 	if err == nil {
 		t.Fatal("want an error for a session that does not exist")
 	}
-	// "can't find" is tmux's own wording and appears nowhere in the arguments
-	// we pass, so it cannot come from the command echo.
-	if !strings.Contains(err.Error(), "can't find") {
-		t.Errorf("error = %q, want tmux's own complaint in it", err)
+	// Assert the shape, not the wording: tmux says "can't find session" when
+	// a server is up and "no server running on …" when one is not, and a CI
+	// runner has no server. Either way something of tmux's own has to follow
+	// the exit status.
+	msg := err.Error()
+	i := strings.Index(msg, "exit status")
+	if i < 0 {
+		t.Fatalf("error = %q, expected it to carry an exit status", msg)
+	}
+	if tail := strings.TrimSpace(msg[i+len("exit status"):]); len(tail) < 4 {
+		t.Errorf("error = %q, want tmux's own complaint after the exit status", msg)
+	}
+}
+
+// stderrOf is what makes those errors useful, and it needs no tmux at all.
+func TestStderrOf(t *testing.T) {
+	t.Parallel()
+	_, err := exec.Command("sh", "-c", "echo 'the reason' >&2; exit 1").Output()
+	if err == nil {
+		t.Fatal("want a failing command")
+	}
+	if got := stderrOf(err); !strings.Contains(got, "the reason") {
+		t.Errorf("stderrOf = %q, want the command's stderr", got)
+	}
+	if got := stderrOf(context.Canceled); got != "" {
+		t.Errorf("stderrOf(non-exit error) = %q, want empty", got)
 	}
 }
