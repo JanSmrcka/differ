@@ -129,6 +129,10 @@ func (r *DiffRenderer) render() {
 	byLine := r.byLine
 	r.rows = r.rows[:0]
 
+	// The number block is one column per side in split view and two in
+	// unified, and the comment indent is measured from it.
+	r.geom.split = r.split
+
 	if !r.split {
 		r.pairs = nil
 		for i, dl := range r.parsed.Lines {
@@ -167,7 +171,10 @@ func (r *DiffRenderer) hasComment(byLine map[int][]review.Comment, idx int) bool
 func (r *DiffRenderer) appendCommentRows(cs []review.Comment) {
 	for _, c := range cs {
 		for _, text := range r.renderComment(c) {
-			r.rows = append(r.rows, displayRow{text: text, line: -1, pair: -1})
+			// A comment body is text the user typed, so it needs the same
+			// guard the code rows have: a long one wrapped and shifted every
+			// row below it.
+			r.rows = append(r.rows, displayRow{text: clipRow(text, r.width), line: -1, pair: -1})
 		}
 	}
 }

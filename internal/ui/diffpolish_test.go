@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/jansmrcka/differ/internal/review"
 	"github.com/jansmrcka/differ/internal/theme"
 )
 
@@ -283,5 +284,83 @@ func TestDiffRender_ALongLineRendersQuickly(t *testing.T) {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("rendering one 150,000-column line took over 2s")
+	}
+}
+
+// Chroma appends a newline to its input and coalesces it into the last token,
+// so *any* token that runs to end of line carries one — not just a trailing
+// run of spaces. Splitting the spaces off was treating one instance of the
+// class; these are the others, and each one produced a phantom row that put
+// every row index below it out by one.
+func TestDiffRender_NoTokenSmugglesInANewline(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name, file, raw string
+	}{
+		{
+			name: "an open block comment",
+			file: "main.c",
+			raw:  "@@ -1,4 +1,4 @@ int main()\n /* this comment\n    spans lines */\n+int x = 1;\n return 0;\n",
+		},
+		{
+			name: "a CRLF checkout",
+			file: "a.ts",
+			raw:  "@@ -1,2 +1,2 @@\n+const a = 1;\r\n context\n",
+		},
+		{
+			name: "a non-breaking space at the end",
+			file: "a.ts",
+			raw:  "@@ -1,2 +1,2 @@\n+const a = 1; \n context\n",
+		},
+		{
+			name: "an unterminated string",
+			file: "a.rs",
+			raw:  "@@ -1,2 +1,2 @@\n+let x = \"abc\n context\n",
+		},
+	}
+
+	th := theme.Themes["dark"]
+	for _, c := range cases {
+		for _, split := range []bool{false, true} {
+			r := NewDiffRenderer(ParseDiff(c.raw), c.file, NewStyles(th), th, 60)
+			r.SetSplit(split)
+
+			rows := strings.Split(r.Content(-1), "\n")
+			if r.DisplayRows() != len(rows) {
+				t.Errorf("%s (split=%v): DisplayRows() = %d but Content() has %d rows",
+					c.name, split, r.DisplayRows(), len(rows))
+			}
+			for i, row := range rows {
+				if got := lipgloss.Width(row); got != 60 {
+					t.Errorf("%s (split=%v): row %d is %d columns, want 60: %q",
+						c.name, split, i, got, stripANSI(row))
+				}
+			}
+		}
+	}
+}
+
+// A review comment's body is arbitrary text the user typed. It is rendered
+// into rows of its own, which had no width guard at all: a long one wrapped
+// and shifted every row below it.
+func TestDiffRender_ACommentBodyIsClippedToThePanel(t *testing.T) {
+	t.Parallel()
+	th := theme.Themes["dark"]
+	for _, width := range []int{20, 40, 80} {
+		r := NewDiffRenderer(ParseDiff("@@ -1,2 +1,2 @@\n+const a = 1;\n context\n"), "a.ts", NewStyles(th), th, width)
+		r.SetComments([]review.Comment{{
+			ID: "c1", File: "a.ts", Side: review.SideNew, StartLine: 1, EndLine: 1,
+			Body: strings.Repeat("this needs renaming for clarity ", 5),
+		}})
+
+		rows := strings.Split(r.Content(-1), "\n")
+		if r.DisplayRows() != len(rows) {
+			t.Errorf("width %d: DisplayRows() = %d but Content() has %d rows", width, r.DisplayRows(), len(rows))
+		}
+		for i, row := range rows {
+			if got := lipgloss.Width(row); got > width {
+				t.Errorf("width %d: row %d is %d columns: %q", width, i, got, stripANSI(row))
+			}
+		}
 	}
 }
