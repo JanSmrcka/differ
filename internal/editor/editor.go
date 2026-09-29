@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -41,8 +42,20 @@ func NewEnv() Env {
 		TmuxPane:      os.Getenv("TMUX_PANE"),
 		TmpDir:        os.Getenv("TMPDIR"),
 		XDGRuntimeDir: os.Getenv("XDG_RUNTIME_DIR"),
-		User:          os.Getenv("USER"),
+		User:          currentUser(os.Getenv("USER")),
 	}
+}
+
+// currentUser is the login name nvim builds its socket directory from.
+// $USER is unset in containers and under systemd, so fall back to asking.
+func currentUser(fromEnv string) string {
+	if fromEnv != "" {
+		return fromEnv
+	}
+	if u, err := user.Current(); err == nil {
+		return u.Username
+	}
+	return ""
 }
 
 // Config mirrors the two configuration fields this package cares about rather
@@ -70,12 +83,23 @@ func (r Request) abs() string { return filepath.Join(r.Repo, r.File) }
 type Strategy string
 
 const (
+	StrategyAuto   Strategy = "auto"   // reuse, else a new window, else inline
+	StrategyReuse  Strategy = "reuse"  // an editor already open in this session
+	StrategyWindow Strategy = "window" // a new tmux window
 	StrategyInline Strategy = "inline" // take over differ's terminal
 	// StrategyCustom is an editor_cmd that is itself a tmux command. It is
 	// not an editor invocation but a mechanism, so it runs as written instead
-	// of being wrapped in one of ours.
+	// of being wrapped in one of ours. It cannot be configured.
 	StrategyCustom Strategy = "custom"
 )
+
+// Strategies lists the values a user may configure, for error messages.
+func Strategies() []string {
+	return []string{
+		string(StrategyAuto), string(StrategyReuse),
+		string(StrategyWindow), string(StrategyInline),
+	}
+}
 
 // Kind says how the caller must run a plan.
 type Kind int
@@ -84,6 +108,9 @@ const (
 	// KindTerminal needs differ's terminal. The caller must run Argv in Dir
 	// with tea.ExecProcess, so differ suspends and resumes around it.
 	KindTerminal Kind = iota
+	// KindDetached touches nothing the TUI owns, so Run may be called from an
+	// ordinary tea.Cmd.
+	KindDetached
 )
 
 // Plan is a decided course of action.
@@ -95,11 +122,21 @@ type Plan struct {
 	Dir  string
 	// Desc is the status line for a success. Empty means say nothing.
 	Desc string
+
+	run func(context.Context) error
+}
+
+// Run performs a KindDetached plan.
+func (p Plan) Run(ctx context.Context) error {
+	if p.run == nil {
+		return fmt.Errorf("%s does not run on its own", p.Strategy)
+	}
+	return p.run(ctx)
 }
 
 // Resolve picks a strategy and returns the plan. Errors carry text already fit
 // for differ's status bar — the caller never reformats them.
-func Resolve(_ context.Context, cfg Config, req Request) (Plan, error) {
+func Resolve(ctx context.Context, cfg Config, req Request) (Plan, error) {
 	if req.File == "" {
 		return Plan{}, errors.New("no file selected")
 	}
@@ -111,20 +148,73 @@ func Resolve(_ context.Context, cfg Config, req Request) (Plan, error) {
 		return Plan{}, fmt.Errorf("%s is gone — nothing to edit", req.File)
 	}
 
+	want, err := wantedStrategy(cfg.Strategy)
+	if err != nil {
+		return Plan{}, err
+	}
+
 	argv := buildArgv(cfg.Cmd, req)
 	if _, err := exec.LookPath(argv[0]); err != nil {
 		return Plan{}, fmt.Errorf("editor %q not found on PATH — set editor_cmd or $EDITOR", argv[0])
 	}
+
+	// An editor_cmd that is itself a tmux command is already a mechanism;
+	// wrapping it in another one would nest tmux inside tmux. It wins over
+	// editor_strategy outright.
+	if filepath.Base(argv[0]) == "tmux" {
+		return inlinePlan(argv, req), nil
+	}
+	return planFor(ctx, want, argv, req)
+}
+
+func wantedStrategy(s string) (Strategy, error) {
+	switch st := Strategy(strings.TrimSpace(s)); st {
+	case "", StrategyAuto:
+		return StrategyAuto, nil
+	case StrategyReuse, StrategyWindow, StrategyInline:
+		return st, nil
+	default:
+		return "", fmt.Errorf("unknown editor_strategy %q — use one of: %s",
+			s, strings.Join(Strategies(), ", "))
+	}
+}
+
+// planFor turns a wanted strategy into a plan.
+//
+// An explicitly chosen strategy that cannot be honoured is an error rather
+// than a silent downgrade — the same call internal/feedback makes when its
+// tmux target is unavailable. Only auto falls back, because falling back is
+// what auto means.
+func planFor(ctx context.Context, want Strategy, argv []string, req Request) (Plan, error) {
+	if want == StrategyInline {
+		return inlinePlan(argv, req), nil
+	}
+	if !req.Env.InTmux {
+		if want == StrategyAuto {
+			return inlinePlan(argv, req), nil
+		}
+		return Plan{}, fmt.Errorf(
+			"editor_strategy is %q but differ is not running inside tmux — set editor_strategy to inline", want)
+	}
+
+	if want == StrategyReuse || want == StrategyAuto {
+		plan, err := reusePlan(ctx, req)
+		switch {
+		case err == nil:
+			return plan, nil
+		case want == StrategyReuse:
+			return Plan{}, err
+		}
+	}
+	return windowPlan(argv, req), nil
+}
+
+func inlinePlan(argv []string, req Request) Plan {
 	strategy := StrategyInline
 	if filepath.Base(argv[0]) == "tmux" {
 		strategy = StrategyCustom
 	}
-	return Plan{
-		Kind:     KindTerminal,
-		Strategy: strategy,
-		Argv:     argv,
-		Dir:      req.Repo,
-	}, nil
+	return Plan{Kind: KindTerminal, Strategy: strategy, Argv: argv, Dir: req.Repo}
 }
 
 // buildArgv expands the placeholders in tmpl and splits it into an argv.

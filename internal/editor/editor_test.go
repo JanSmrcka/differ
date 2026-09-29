@@ -280,3 +280,67 @@ func TestResolve_ATmuxEditorCmdRunsVerbatim(t *testing.T) {
 		t.Errorf("Argv = %q, want %q", plan.Argv, want)
 	}
 }
+
+func TestResolve_StrategySelection(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name     string
+		strategy string
+		inTmux   bool
+		want     Strategy
+		wantErr  string
+	}{
+		{name: "auto outside tmux is inline", want: StrategyInline},
+		{name: "explicit inline", strategy: "inline", want: StrategyInline},
+		{name: "explicit inline wins even inside tmux", strategy: "inline", inTmux: true, want: StrategyInline},
+		{name: "window inside tmux", strategy: "window", inTmux: true, want: StrategyWindow},
+		{name: "auto inside tmux with nothing to reuse falls to window", inTmux: true, want: StrategyWindow},
+		{
+			// An explicit strategy that cannot be honoured is an error, never
+			// a silent downgrade — the same choice feedback's tmux target
+			// makes.
+			name:     "window outside tmux is an actionable error",
+			strategy: "window", wantErr: "not running inside tmux",
+		},
+		{name: "reuse outside tmux is an actionable error", strategy: "reuse", wantErr: "not running inside tmux"},
+		{name: "an unknown strategy lists the valid ones", strategy: "sideways", wantErr: "editor_strategy"},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			root := repoWith(t, "src.ts")
+			ed := stubEditor(t, "myed")
+
+			plan, err := Resolve(context.Background(),
+				Config{Strategy: c.strategy},
+				Request{File: "src.ts", Repo: root, Env: Env{Editor: ed, InTmux: c.inTmux, TmuxPane: "%1"}})
+
+			if c.wantErr != "" {
+				if err == nil {
+					t.Fatalf("want an error containing %q", c.wantErr)
+				}
+				if !strings.Contains(err.Error(), c.wantErr) {
+					t.Errorf("error = %q, want it to contain %q", err, c.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Resolve: %v", err)
+			}
+			if plan.Strategy != c.want {
+				t.Errorf("Strategy = %q, want %q", plan.Strategy, c.want)
+			}
+		})
+	}
+}
+
+func TestStrategies_AreListedForTheUser(t *testing.T) {
+	t.Parallel()
+	got := strings.Join(Strategies(), " ")
+	for _, want := range []string{"auto", "reuse", "window", "inline"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("Strategies() = %q, missing %q", got, want)
+		}
+	}
+}

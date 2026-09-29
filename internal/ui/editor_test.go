@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/jansmrcka/differ/internal/editor"
 	"github.com/jansmrcka/differ/internal/testutil"
 )
 
@@ -23,6 +24,9 @@ func editorModel(t *testing.T) (Model, string) {
 		t.Fatal(err)
 	}
 	m.cfg.EditorCmd = stub + " {file}"
+	// Pin the environment: otherwise these tests would take the tmux path
+	// when the suite happens to run inside tmux, and the inline one on CI.
+	m.editorEnv = editor.Env{Editor: stub}
 	return m, stub
 }
 
@@ -94,7 +98,7 @@ func TestEditor_ReturningFromTheEditorRefreshesAndKeepsThePosition(t *testing.T)
 	m = press(t, m, "j", "j")
 	cursor, diffCursor := m.cursor, m.diffCursor
 
-	updated, cmd := m.Update(editorDoneMsg{})
+	updated, cmd := m.Update(editorDoneMsg{reload: true})
 	m = updated.(Model)
 
 	if cmd == nil {
@@ -246,5 +250,42 @@ func TestEditor_ACursorOnAHunkHeaderUsesThatHunksStart(t *testing.T) {
 	}
 	if got := m.editorLine(); got != hunk.NewStart {
 		t.Errorf("editorLine = %d, want the hunk's own start %d", got, hunk.NewStart)
+	}
+}
+
+// A detached plan opens the file elsewhere, so it runs in an ordinary tea.Cmd
+// rather than taking the terminal — and a failure there still leaves differ
+// running.
+func TestEditor_ADetachedPlanReportsItsFailureWithoutQuitting(t *testing.T) {
+	m, _ := editorModel(t)
+
+	// A window strategy outside tmux is refused by Resolve, which is the
+	// detached path's error arriving through the same message.
+	m.cfg.EditorStrategy = "window"
+	_, cmd := m.updateFileListMode(key("e"))
+	updated, next := m.Update(cmd())
+	m = updated.(Model)
+
+	if isQuit(next) {
+		t.Error("a refused strategy must not quit differ")
+	}
+	if !strings.Contains(m.statusMsg, "tmux") {
+		t.Errorf("statusMsg = %q, want it to explain the tmux requirement", m.statusMsg)
+	}
+}
+
+// Opening the file somewhere else does not mean it changed, so there is
+// nothing to reload — the two-second poll covers it if it does.
+func TestEditor_ADetachedOpenSaysWhereItWentAndDoesNotReload(t *testing.T) {
+	m, _ := editorModel(t)
+
+	updated, cmd := m.Update(editorDoneMsg{desc: "opened src.ts in nvim (differ:1.1)"})
+	m = updated.(Model)
+
+	if cmd != nil {
+		t.Error("a detached open should not force a reload")
+	}
+	if !strings.Contains(m.statusMsg, "differ:1.1") {
+		t.Errorf("statusMsg = %q, want it to name where the file went", m.statusMsg)
 	}
 }
