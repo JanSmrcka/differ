@@ -285,7 +285,7 @@ func TestRenderFileItem_ShowsStats(t *testing.T) {
 	t.Parallel()
 	m := newTestModel(t, nil)
 	item := fileItem{change: git.FileChange{Path: "main.go", Status: git.StatusModified, AddedLines: 12, DeletedLines: 3}}
-	out := m.renderFileItem(item, false)
+	out := m.renderFileItem(item, false, nil)
 	if !strings.Contains(out, "+12 -3") {
 		t.Errorf("expected stats in file item, got %q", out)
 	}

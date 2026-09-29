@@ -105,8 +105,12 @@ type Model struct {
 	// files is the changeset on show; fileKeys fingerprints each one's
 	// content as of the last refresh, which is how the next refresh can tell
 	// a rewritten file from an untouched one.
-	files      []fileItem
-	fileKeys   map[string]string
+	files    []fileItem
+	fileKeys map[string]string
+	// fileOffset is the first file on screen. The list is taller than the
+	// panel in any real agent changeset, so without it the files past the
+	// panel height were unreachable.
+	fileOffset int
 	styles     Styles
 	theme      theme.Theme
 	stagedOnly bool

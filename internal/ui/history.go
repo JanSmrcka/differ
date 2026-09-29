@@ -49,12 +49,55 @@ func (m Model) renderDelivery(d review.Delivery, width int) []string {
 		// The indent lines the paths up under the summary rather than the
 		// timestamp; the rest of the row is theirs.
 		const indent = "           "
-		room := max(width-len(indent)-2, 10)
-		short := make([]string, 0, len(d.Files))
-		for _, f := range d.Files {
-			short = append(short, truncatePath(f, room/max(len(d.Files), 1)))
-		}
-		rows = append(rows, indent+m.styles.HelpDesc.Render(strings.Join(short, ", ")))
+		rows = append(rows, indent+m.styles.HelpDesc.Render(fileSummary(d.Files, max(width-len(indent)-2, 10))))
 	}
 	return rows
+}
+
+// fileSummary lists as many names as fit and counts the rest.
+//
+// Sharing the room out between them was the obvious thing and the wrong one: a
+// delivery covering sixty files gave each a budget of zero columns, and the
+// row came out as a line of bare commas. A name is worth nothing shortened
+// past recognition, so the ones that do not fit are counted instead.
+func fileSummary(files []string, room int) string {
+	// Below this a path is shortened past recognition, so it is worth less
+	// than the count it would displace.
+	const minName = 10
+	// ", +57 more"
+	const tailRoom = 10
+
+	// How many names can have a readable share of the room? Sharing it out
+	// between all of them was the obvious thing and the wrong one: sixty files
+	// gave each a budget of zero columns, and truncatePath returns "" for
+	// that, so the row came out as a line of bare commas.
+	fit, share := len(files), 0
+	for ; fit > 1; fit-- {
+		overhead := 2 * (fit - 1)
+		if fit < len(files) {
+			overhead += tailRoom
+		}
+		if share = (room - overhead) / fit; share >= minName {
+			break
+		}
+	}
+	if fit == 1 {
+		share = room
+		if len(files) > 1 {
+			share -= tailRoom
+		}
+	}
+	if share < minName {
+		return plural(len(files), "file")
+	}
+
+	shown := make([]string, 0, fit)
+	for _, f := range files[:fit] {
+		shown = append(shown, truncatePath(f, share))
+	}
+	out := strings.Join(shown, ", ")
+	if rest := len(files) - fit; rest > 0 {
+		out += fmt.Sprintf(", +%d more", rest)
+	}
+	return out
 }

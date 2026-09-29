@@ -135,6 +135,12 @@ func (m Model) clampBranchScroll() Model {
 	} else if m.branchCursor >= m.branchOffset+h {
 		m.branchOffset = m.branchCursor - h + 1
 	}
+	// And back off the end of the list, which is the half that matters when
+	// the terminal grows: without it the window stays where it was and the
+	// branches above it are unreachable until the user scrolls up.
+	if maxOffset := max(len(m.activeBranches())-h, 0); m.branchOffset > maxOffset {
+		m.branchOffset = maxOffset
+	}
 	return m
 }
 

@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -425,5 +426,35 @@ func TestOverlays_HDoesNotOpenTheHistoryWhereItIsNotABinding(t *testing.T) {
 	m.showHistory = true
 	if updated, _ = m.routeKey(key("H")); updated.(Model).showHistory {
 		t.Error("H did not close the history")
+	}
+}
+
+// A delivery can cover more files than there are columns. Dividing the room
+// between them gave each a zero-column budget, and truncatePath returns ""
+// for that — so the row came out as a line of bare commas.
+func TestOverlays_ManyFilesInOneDeliveryStillReadAsFiles(t *testing.T) {
+	t.Parallel()
+	m := historyModel(t)
+	files := make([]string, 60)
+	for i := range files {
+		files[i] = fmt.Sprintf("internal/pkg%02d/file.go", i)
+	}
+	m.session.RecordDelivery(review.Delivery{
+		At: time.Date(2026, 9, 29, 13, 0, 0, 0, time.UTC), Target: "clipboard",
+		Comments: []string{"c1"}, Files: files,
+	})
+
+	for _, width := range []int{60, 80, 120} {
+		got := stripANSI(m.renderHistoryOverlay(width, 12))
+		if !strings.Contains(got, "file.go") {
+			t.Errorf("width %d: no file name survived:\n%s", width, got)
+		}
+		if strings.Contains(got, ", , ") {
+			t.Errorf("width %d: the names were truncated away to nothing:\n%s", width, got)
+		}
+		// The rest has to be accounted for, not silently dropped.
+		if !strings.Contains(got, "more") {
+			t.Errorf("width %d: %d files listed with no sign of the rest:\n%s", width, len(files), got)
+		}
 	}
 }
