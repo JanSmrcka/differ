@@ -1,10 +1,40 @@
 # differ
 
-Terminal UI git diff viewer built with Go and Bubble Tea. Two-panel layout: file list + syntax-highlighted diff preview.
+A terminal-native review interface for Git changes — especially changes a
+coding agent produced while you were doing something else.
+
+An agent writes a lot of code quickly. Reading it back is the slow part, and
+`git diff` is not built for the job: it has no idea which files you have
+already looked at, nowhere to put "this null check is wrong", and no way to
+hand that note back to the agent. `differ` is the part in between. You read the
+changes file by file, comment on the lines that need it, and send the comments
+back to the agent's pane in one keystroke.
+
+It does not review anything for you. There is no model reading your diff and no
+judgement in the tool — you do the reviewing, `differ` keeps the state and
+carries the result. (The one exception is an optional commit-message helper,
+which is off the review path and shells out to a command you choose.)
+
+It is also a perfectly good diff viewer: syntax highlighting, split view,
+staging, committing, branch switching and a commit log browser.
 
 <p align="center">
   <img src="./assets/preview.png" alt="differ preview" width="800" />
 </p>
+
+> **The demo recording is not in this commit.** `assets/demo.tape` and
+> `assets/demo-fixture.sh` are, and together they produce it reproducibly —
+> same files, same diff, same comment, rather than a lucky take:
+>
+> ```bash
+> brew install vhs
+> ./assets/demo-fixture.sh     # the scratch repo the tape records against
+> vhs assets/demo.tape         # writes assets/demo.gif
+> ```
+>
+> It walks the real loop: an agent's changes, into review mode, down to the
+> line that is wrong, a comment, then `S` to send it back and `H` to confirm it
+> arrived. Once recorded, `assets/demo.gif` replaces the image above.
 
 ## Install
 
@@ -43,6 +73,37 @@ mode, where you can comment line by line and send the result to an agent. Both
 take `-s` and `-r`.
 
 `--no-color` turns colour off, as does setting `NO_COLOR` to anything.
+
+## The review loop
+
+The whole point, in six keystrokes:
+
+```
+differ review        # the agent's changes, in review mode
+j / k                # move down the diff
+c                    # comment on this line — type, then ctrl+s
+n                    # next file; the one you left is marked read
+S                    # send every pending comment to the agent
+```
+
+What that buys you over `git diff`:
+
+- **It remembers where you got to.** Each file is unreviewed, read, commented
+  or changed, and the bar keeps the count. Coming back after lunch, you know
+  what is left.
+- **Comments are attached to lines, not to your memory.** They render inline
+  under the line they are about, and stay `pending` until you send them.
+- **The changeset moving under you is handled rather than ignored.** If the
+  agent rewrites a file while you are reading it, the diff is not swapped out
+  from under you — the bar says `diff moved — R to reload`, and your comments
+  are re-anchored when you ask for it. A file that changed after you read it
+  goes back to unreviewed, so the count cannot lie to you.
+- **Sending is one keystroke.** `s` for one comment, `S` for all of them. Where
+  they go is `feedback_target`: the agent's tmux pane, the clipboard, or
+  stdout. `H` shows what was sent and whether it arrived.
+
+Nothing here writes to git. Staging and committing stay explicit, separate
+actions.
 
 Exit codes are predictable enough to script against: **0** success, **1** a
 runtime problem (not a git repository, no such ref), **2** a bad command line.
@@ -329,6 +390,7 @@ Config file: `~/.config/differ/config.json`
 ```json
 {
   "theme": "mocha",
+  "tab_width": 4,
   "commit_msg_cmd": "claude -p",
   "commit_msg_prompt": "Write a concise git commit message for this diff:",
   "editor_cmd": "",
@@ -502,6 +564,21 @@ bind g display-popup -E -w 90% -h 90% "cd #{pane_current_path} && differ"
 ```
 
 Press `prefix + g` to open differ in a floating window over your current session. It closes automatically on quit.
+
+## Architecture
+
+Worth knowing if you are changing it:
+
+- `internal/git` — every git operation, via `os/exec`. No go-git.
+- `internal/review` — the review session: comments, per-file state, feedback
+  text. Never imports the UI.
+- `internal/feedback` — where a review goes: clipboard, stdout or tmux.
+- `internal/editor` — decides *and* performs "open this file in an editor".
+- `internal/theme` — colour values only, no lipgloss.
+- `internal/ui` — the Bubble Tea models, the diff parser and the renderer.
+
+`CLAUDE.md` carries the rules that are not obvious from the code, including a
+long list of things that looked right and were not.
 
 ## Features
 
