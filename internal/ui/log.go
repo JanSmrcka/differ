@@ -192,27 +192,64 @@ func (m LogModel) View() string {
 	}
 }
 
-func (m LogModel) viewList() string {
-	contentH := m.height - 4 // card borders + status + help
-	cardW := m.width - 2     // inner width (card adds 2 for borders)
+// The log browser shares the main view's frame: a header, a rule, the
+// content, a rule, then the command bar. It used to draw bordered cards and
+// its own status bar, so `differ` and `differ log` looked like two programs.
 
-	var b strings.Builder
-	for i, c := range m.commits {
-		if i >= contentH {
-			break
-		}
-		line := m.renderCommitLine(c, i == m.cursor)
-		b.WriteString(line)
-		if i < len(m.commits)-1 {
-			b.WriteByte('\n')
-		}
+// logChromeRows is the header plus the two rules — the same three the main
+// view spends, so the arithmetic matches.
+const logChromeRows = 3
+
+// contentHeight is the room left for the list or the diff.
+func (m LogModel) contentHeight() int { return max(m.height-logChromeRows-1, 0) }
+
+func (m LogModel) frame(body string) string {
+	rows := strings.Split(body, "\n")
+	h := m.contentHeight()
+	for len(rows) < h {
+		rows = append(rows, "")
+	}
+	for i := range rows {
+		rows[i] = padTo(rows[i], m.width)
+	}
+	rule := m.styles.Chrome.Render(strings.Repeat(horizontalRule, max(m.width, 0)))
+	return lipgloss.JoinVertical(lipgloss.Left,
+		m.renderHeader(),
+		rule,
+		strings.Join(rows[:h], "\n"),
+		rule,
+		m.renderLogBar(),
+	)
+}
+
+// renderHeader mirrors the main view's: identity on the left, a summary of
+// what is on show on the right.
+func (m LogModel) renderHeader() string {
+	name := m.styles.HeaderName.Render(" differ")
+	ctx := m.styles.HeaderBranch.Render("log")
+	summary := m.styles.HeaderMeta.Render(plural(len(m.commits), "commit") + " ")
+	if m.mode == logModeDiff && m.cursor < len(m.commits) {
+		c := m.commits[m.cursor]
+		summary = m.styles.HeaderMeta.Render(c.Short + "  " + c.Author + " ")
 	}
 
-	card := renderCard(m.theme, "Commits", b.String(), true, cardW, contentH)
-	status := m.styles.StatusBar.Width(m.width).Render(
-		fmt.Sprintf(" %d commits", len(m.commits)))
-	help := m.renderLogHelp(false)
-	return lipgloss.JoinVertical(lipgloss.Left, card, status, help)
+	gap := m.width - lipgloss.Width(name) - lipgloss.Width(ctx) - lipgloss.Width(summary) - 2
+	if gap < 1 {
+		return lipgloss.NewStyle().Width(m.width).MaxHeight(1).Render(name + "  " + ctx)
+	}
+	return lipgloss.NewStyle().Width(m.width).MaxHeight(1).
+		Render(name + "  " + ctx + strings.Repeat(" ", gap) + summary)
+}
+
+func (m LogModel) viewList() string {
+	var rows []string
+	for i, c := range m.commits {
+		if i >= m.contentHeight() {
+			break
+		}
+		rows = append(rows, m.renderCommitLine(c, i == m.cursor))
+	}
+	return m.frame(strings.Join(rows, "\n"))
 }
 
 func (m LogModel) renderCommitLine(c git.Commit, selected bool) string {
@@ -226,39 +263,29 @@ func (m LogModel) renderCommitLine(c git.Commit, selected bool) string {
 }
 
 func (m LogModel) viewDiff() string {
-	contentH := m.height - 4
-	cardW := m.width - 2
-
-	c := m.commits[m.cursor]
-	title := c.Short + " " + c.Subject
-	card := renderCard(m.theme, title, m.viewport.View(), true, cardW, contentH)
-	status := m.styles.StatusBar.Width(m.width).Render(
-		fmt.Sprintf(" %s  %s — %s", c.Short, c.Subject, c.Author))
-	help := m.renderLogHelp(true)
-	return lipgloss.JoinVertical(lipgloss.Left, card, status, help)
+	return m.frame(m.viewport.View())
 }
 
-func (m LogModel) renderLogHelp(inDiff bool) string {
-	var pairs []struct{ key, desc string }
-	if inDiff {
-		pairs = []struct{ key, desc string }{
-			{"j/k", "scroll"},
-			{"d/u", "½ page"},
-			{"esc", "back"},
-			{"q", "quit"},
-		}
-	} else {
-		pairs = []struct{ key, desc string }{
-			{"j/k", "navigate"},
-			{"enter", "view diff"},
-			{"q", "quit"},
+// renderLogBar is the log browser's command bar, built the same way as the
+// main view's so the two read alike.
+func (m LogModel) renderLogBar() string {
+	items := []binding{
+		{Keys: []string{"j", "down"}, Label: "j/k", Desc: "navigate"},
+		{Keys: []string{"enter"}, Desc: "view diff"},
+	}
+	if m.mode == logModeDiff {
+		items = []binding{
+			{Keys: []string{"j", "down"}, Label: "j/k", Desc: "scroll"},
+			{Keys: []string{"d"}, Label: "d/u", Desc: "½ page"},
+			{Keys: []string{"esc"}, Desc: "back"},
 		}
 	}
+	items = append(items, binding{Keys: []string{"q"}, Desc: "quit"})
+
 	var parts []string
-	for _, p := range pairs {
-		parts = append(parts,
-			m.styles.HelpKey.Render(p.key)+" "+m.styles.HelpDesc.Render(p.desc))
+	for _, b := range items {
+		parts = append(parts, m.styles.HelpKey.Render(b.label())+" "+m.styles.HelpDesc.Render(b.Desc))
 	}
-	bar := " " + strings.Join(parts, "  ·  ")
-	return lipgloss.NewStyle().Width(m.width).Render(bar)
+	return lipgloss.NewStyle().Width(m.width).MaxHeight(1).
+		Render(" " + strings.Join(parts, barSeparator))
 }

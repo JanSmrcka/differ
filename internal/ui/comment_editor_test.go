@@ -273,10 +273,12 @@ func TestCommentEditor_IsVisibleWhileOpen(t *testing.T) {
 
 func TestReviewHelpBar_MentionsCommentKeys(t *testing.T) {
 	m := reviewModel(t, "multi_hunk")
-	help := m.renderHintBar()
-	for _, want := range []string{"comment", "delete"} {
-		if !strings.Contains(help, want) {
-			t.Errorf("review help missing %q: %q", want, help)
-		}
+	if help := m.renderHintBar(); !strings.Contains(help, "comment") {
+		t.Errorf("review bar missing comment: %q", help)
+	}
+	// delete is a review command but not a common one, so it lives in the
+	// overlay rather than taking a slot in the compact bar.
+	if overlay := m.renderHelpOverlay(m.width, 40); !strings.Contains(overlay, "delete") {
+		t.Errorf("the overlay does not mention delete:\n%s", overlay)
 	}
 }

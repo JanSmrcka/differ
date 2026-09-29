@@ -140,8 +140,13 @@ type Model struct {
 	branchCreating   bool
 	branchInput      textinput.Model
 
+	// showHelp draws the full keymap over the panels. It is drawn over them
+	// rather than below, so opening it cannot change the layout's height.
+	showHelp bool
+
 	upstream     git.UpstreamInfo
 	pushConfirm  bool
+	pullConfirm  bool
 	quitConfirm  bool
 	staleConfirm bool
 
@@ -263,6 +268,19 @@ func filesEqual(a, b []fileItem) bool {
 		}
 	}
 	return true
+}
+
+// StartInReviewMode opens straight into review, for `differ review`.
+func (m *Model) StartInReviewMode() {
+	if len(m.files) == 0 {
+		// Falling back to the file list silently leaves no sign that review
+		// was asked for at all. enterReviewMode says the same thing.
+		m.statusMsg = "nothing to review"
+		return
+	}
+	m.mode = modeReview
+	m.session = review.NewSession()
+	m.session.MarkViewed(m.currentFilePath())
 }
 
 func (m *Model) StartInCommitMode() {

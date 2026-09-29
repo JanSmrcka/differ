@@ -35,18 +35,27 @@ func (m Model) View() string {
 	}
 
 	contentH := m.contentHeight()
-	left := padLines(m.leftPanel(), contentH)
-	right := padLines(m.rightPanel(), contentH)
 
-	rows := make([]string, contentH)
-	for i := range rows {
-		rows[i] = m.panelRow(left[i], right[i])
+	// The help overlay takes the panel area rather than sitting under it, so
+	// the layout's height does not change while it is open and the diff
+	// viewport is exactly where it was when it closes.
+	var body string
+	if m.showHelp {
+		body = m.renderHelpOverlay(m.width, contentH)
+	} else {
+		left := padLines(m.leftPanel(), contentH)
+		right := padLines(m.rightPanel(), contentH)
+		rows := make([]string, contentH)
+		for i := range rows {
+			rows[i] = m.panelRow(left[i], right[i])
+		}
+		body = strings.Join(rows, "\n")
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Left,
 		m.renderHeader(),
 		m.rule(),
-		strings.Join(rows, "\n"),
+		body,
 		m.rule(),
 		m.renderFooter(),
 	)
@@ -203,17 +212,15 @@ func (m Model) renderFooter() string {
 	return input
 }
 
-// renderHintBar is the key hints, with a status row beneath them when there is
-// something to say.
+// renderHintBar is the command bar, with a status row beneath it when there
+// is something to say.
 //
 // The two are deliberately never packed onto one line. Doing so made the
 // footer's height depend on the *length* of the status text, so the panels
 // resized as messages came and went — and the diff viewport would not return
 // to its previous height after an overlay closed.
 func (m Model) renderHintBar() string {
-	// Hints wrap rather than clip: losing the last key is worse than a second
-	// row, and footerHeight measures whatever this returns.
-	hints := lipgloss.NewStyle().Width(m.width).Render(m.helpContent(m.helpPairs()))
+	hints := m.renderCommandBar()
 
 	segment := m.statusSegment()
 	if segment == "" {

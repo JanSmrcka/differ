@@ -8,49 +8,9 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/jansmrcka/differ/internal/git"
 	"github.com/jansmrcka/differ/internal/review"
-	"github.com/jansmrcka/differ/internal/theme"
 )
 
 // View composition and all rendering helpers.
-
-func renderCard(t theme.Theme, title, content string, focused bool, w, h int) string {
-	borderColor := lipgloss.Color(t.BorderFg)
-	if focused {
-		borderColor = lipgloss.Color(t.AccentFg)
-	}
-	bs := lipgloss.NewStyle().Foreground(borderColor)
-	// The top border is "╭─" + title + fill + "╮", so the title has w-3 columns
-	// to live in. A longer one must be truncated: clamping the fill instead
-	// makes the border wider than the card, which ragged the whole layout.
-	titleStr := ""
-	if title != "" {
-		titleStr = " " + truncateEnd(title, max(w-3, 0)) + " "
-		if lipgloss.Width(titleStr) > w-1 {
-			titleStr = ""
-		}
-	}
-	topFill := w - lipgloss.Width(titleStr) - 1
-	if topFill < 0 {
-		topFill = 0
-	}
-	top := bs.Render("╭─" + titleStr + strings.Repeat("─", topFill) + "╮")
-	lines := strings.Split(content, "\n")
-	for len(lines) < h {
-		lines = append(lines, "")
-	}
-	cardBg := lipgloss.Color(t.CardBg)
-	var rows []string
-	for i := 0; i < h; i++ {
-		line := lines[i]
-		pad := w - lipgloss.Width(line)
-		if pad > 0 {
-			line += lipgloss.NewStyle().Background(cardBg).Render(strings.Repeat(" ", pad))
-		}
-		rows = append(rows, bs.Render("│")+line+bs.Render("│"))
-	}
-	bottom := bs.Render("╰" + strings.Repeat("─", w) + "╯")
-	return lipgloss.JoinVertical(lipgloss.Left, top, strings.Join(rows, "\n"), bottom)
-}
 
 func (m Model) branchName() string {
 	if m.repo == nil {
@@ -215,32 +175,6 @@ func (m Model) styleStatus(icon string, status git.FileStatus) string {
 // layout off screen — MaxHeight(1) keeps it to one row.
 func (m Model) renderBar(style lipgloss.Style, content string) string {
 	return style.Width(m.width).MaxHeight(1).Render(content)
-}
-
-// helpPairs is the hint list for the current mode.
-func (m Model) helpPairs() []struct{ key, desc string } {
-	var pairs []struct{ key, desc string }
-	switch m.mode {
-	case modeDiff:
-		pairs = []struct{ key, desc string }{{"j/k", "line"}, {"}/{", "hunk"}, {"d/u", "½ page"}, {"n/p", "file"}, {"e", "edit"}, {"r", "review"}, {"v", "split"}, {"tab", "stage"}, {"esc", "back"}, {"q", "quit"}}
-	case modeReview:
-		pairs = []struct{ key, desc string }{{"j/k", "line"}, {"}/{", "hunk"}, {"c", "comment"}, {"C", "hunk comment"}, {"x", "delete"}, {"s/S", "send one/all"}, {"e", "edit"}, {"n/p", "file"}, {"r", "exit review"}, {"q", "quit"}}
-	case modeBranchPicker:
-		pairs = []struct{ key, desc string }{{"type", "filter"}, {"↑/↓/^j/^k", "navigate"}, {"enter", "switch"}, {"^n", "new"}, {"esc", "clear/close"}}
-	default:
-		// Kept short enough to fit without truncation; the full keymap belongs
-		// in a help overlay.
-		pairs = []struct{ key, desc string }{{"j/k", "nav"}, {"enter", "diff"}, {"r", "review"}, {"tab", "stage"}, {"a", "all"}, {"c", "commit"}, {"b", "branch"}, {"e", "edit"}, {"P/F", "push/pull"}, {"q", "quit"}}
-	}
-	return pairs
-}
-
-func (m Model) helpContent(pairs []struct{ key, desc string }) string {
-	parts := make([]string, 0, len(pairs))
-	for _, p := range pairs {
-		parts = append(parts, m.styles.HelpKey.Render(p.key)+" "+m.styles.HelpDesc.Render(p.desc))
-	}
-	return " " + strings.Join(parts, "  ·  ")
 }
 
 func (m Model) renderCommitBar() string {

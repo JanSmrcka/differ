@@ -51,6 +51,8 @@ main.go → cmd/root.go (cobra commands)
                    ├── model.go    — Model state (5 modes: file list / diff / commit / branch / review)
                    ├── update_dispatch.go — Update dispatcher only
                    ├── mode_*.go   — per-mode key handling
+                   ├── keymap.go   — the keymap: one table, read by bar/overlay/tests
+                   ├── commandbar.go — the one-line command bar and ? overlay
                    ├── log.go      — LogModel (commit log browser)
                    ├── diff.go     — diff parser + single-line rendering
                    ├── hunk.go     — hunk model, line addressing, navigation
@@ -74,6 +76,10 @@ an argv the UI runs through `tea.ExecProcess`. Its environment arrives as an
 injected `editor.Env` rather than being read inside, so the whole decision tree
 is a pure function of its inputs and its tests need no `t.Setenv` (which would
 bar `t.Parallel`).
+
+The frame is the same on every screen, `differ log` included: a header, a
+rule, the content, a rule, one bar. There are no boxes — `renderCard` is gone,
+and a test fails if a box-drawing corner reappears anywhere.
 
 `DiffRenderer` is the only rendering path — the diff viewer, untracked files
 and the commit log browser all go through it, so tab expansion, syntax
@@ -132,8 +138,13 @@ github.com/spf13/cobra                # CLI
 
 ### Adding a new keybinding
 
-1. Add to appropriate `update*Mode` method in `model.go`
-2. Add to `renderHelp()` in the same file
+1. Add it to the table in `internal/ui/keymap.go` — that is the single source
+   of truth for the command bar, the `?` overlay and the README.
+2. Add the handler to the mode's `update*Mode` method.
+3. Run the tests. `keymap_test.go` parses the handlers out of the source and
+   fails if a key is handled but undocumented, documented but unhandled, bound
+   twice in one mode, marked `Confirm` without actually asking twice, or
+   missing from the README table.
 
 ### Adding a new git operation
 

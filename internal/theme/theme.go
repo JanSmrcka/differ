@@ -178,3 +178,18 @@ func LightTheme() Theme {
 		ChromaStyle: "catppuccin-latte",
 	}
 }
+
+// NoColorTheme is the theme for --no-color and NO_COLOR: every colour is
+// empty, which lipgloss renders as no colour at all, and syntax highlighting
+// is off.
+//
+// It is the zero Theme by design. A colour added to Theme later is then
+// colourless here automatically, rather than quietly reappearing in a mode
+// that promised none.
+func NoColorTheme() Theme {
+	return Theme{ChromaStyle: NoHighlight}
+}
+
+// NoHighlight turns syntax highlighting off. An empty style name cannot: it
+// falls back to a default, which would put the colour straight back.
+const NoHighlight = "none"

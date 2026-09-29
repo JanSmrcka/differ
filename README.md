@@ -28,15 +28,36 @@ make install  # → $GOPATH/bin/differ
 ## Usage
 
 ```bash
-differ            # all changes (staged + unstaged + untracked)
-differ -s         # staged only
-differ -r main    # compare against ref
-differ -c         # open in commit mode
-differ log        # browse recent commits
-differ commit     # review staged + commit
+differ              # all changes (staged + unstaged + untracked)
+differ -s           # staged only
+differ -r main      # compare against a branch, tag or commit
+differ -c           # open straight into the commit message
+differ review       # the same changes, straight into review mode
+differ review -s    # review the staged changes
+differ log          # browse recent commits
+differ commit       # review what is staged, then commit
 ```
 
+`differ` and `differ review` show the same changes; `review` starts in review
+mode, where you can comment line by line and send the result to an agent. Both
+take `-s` and `-r`.
+
+`--no-color` turns colour off, as does setting `NO_COLOR` to anything.
+
+Exit codes are predictable enough to script against: **0** success, **1** a
+runtime problem (not a git repository, no such ref), **2** a bad command line.
+A runtime failure prints one line and no usage block.
+
 ## Keyboard Shortcuts
+
+Press `?` for the full list of the current view's keys — anywhere except the
+branch filter and the commit message, where every character is text rather
+than a command. The bar along the bottom shows the common ones for wherever
+you are, and hides what would not do anything: `send` appears only once a
+comment is waiting, `stage` disappears under `-s` or `-r`.
+
+The tables below are checked against the code: a test fails if a key here has
+no handler, or a handler is missing from here.
 
 ### File List
 
@@ -69,7 +90,9 @@ differ commit     # review staged + commit
 | `b`         | open branch picker        |
 | `v`         | toggle split diff         |
 | `e`         | open in editor at the cursor's line |
+| `r`         | enter review mode         |
 | `esc` / `h` | back to file list         |
+| `q`         | quit                      |
 
 The diff view has a line cursor (`▌`) marking the current line. It is the
 anchor review comments attach to, and it keeps the same position when you
