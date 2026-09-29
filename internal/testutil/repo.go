@@ -245,3 +245,16 @@ func NewBareRepo(t *testing.T) string {
 	}
 	return dir
 }
+
+// GitInAllowFail runs git in dir and returns its combined output without
+// failing the test when git exits non-zero. A conflicting merge is the case
+// this exists for: it is the outcome the test wants, and git reports it as a
+// failure.
+func GitInAllowFail(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	cmd.Env = repoEnv(t.TempDir())
+	out, _ := cmd.CombinedOutput()
+	return string(out)
+}

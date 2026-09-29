@@ -207,6 +207,43 @@ way to the status bar rather than handing `describe` an error built by hand.
 - **An underline breaks a grapheme cluster's width.** Lipgloss re-styles run by run when `Underline` is set, which puts an escape between the runes of a ZWJ emoji or a flag — `lipgloss.Width` then measures it as two glyphs instead of one and the row overshoots its budget. `UnderlineSpaces(false)` does not help. Use a background for emphasis inside a line.
 - **Every row ends at the panel width.** `clipRow` is the last guard in all three row renderers, because the column budget cannot be satisfied at every width — the line-number block alone is wider than a 10-column panel. A test sweeps widths 1-120 in both views.
 - **Line-number width is per diff, not constant.** `geometry` carries it (sized from the largest number the diff mentions, never below `lineNumWidth`) along with the room the row has. Row renderers take it as one value so the next piece of layout does not add another int to five signatures.
+- **The poll asks before it acts.** `Repo.Probe` is one `git status
+  --porcelain=v2 --branch --untracked-files=all -z`, and the tick does nothing
+  else unless its fingerprint moved. It used to rebuild everything every two
+  seconds — eight git processes, whatever had happened. Two things make the
+  probe complete: `--branch` carries `branch.oid`, `branch.head` and
+  `branch.ab`, so a commit, a checkout and a fetch move it without anyone
+  asking about the upstream separately; and each named path is `lstat`ed,
+  because status reports a modified file's *index* and *HEAD* object ids and
+  never hashes the working tree — so editing an already-modified file produces
+  byte-identical output. `--untracked-files=all` is not optional either: the
+  default collapses an untracked directory to one entry, and an edit inside it
+  would move neither the output nor the directory's mtime. `-r <ref>` costs a
+  second process, because status describes the worktree against the index and
+  HEAD and says nothing about any other ref — without it the fingerprint never
+  moved when the ref did and the screen froze for the session. A submodule is
+  asked for its own HEAD, because the gitlink oids status reports are the
+  superproject's *recorded* commit and stay put however many commits land
+  inside.
+- **`--no-optional-locks`, or the probe fights the user for the index.** `git
+  status` opportunistically rewrites `.git/index` to refresh its stat cache,
+  which takes `index.lock` — measured at 8 failed `git add`s in 120 while
+  probing in a loop. None of the eight commands the probe replaced wrote the
+  index, so that contention would have been new, and it lands on exactly
+  differ's user: an agent running git in the same repository.
+- **Seeing a change and acting on it are separately paced.** The probe runs
+  every tick; the rebuild runs at most every `refreshEvery` ticks. Without the
+  second limit a sustained burst moved the fingerprint on every probe and cost
+  nine git processes a second — more churn than the two-second rebuild it
+  replaced. A fingerprint is only stored once the refresh actually happens, so
+  a change held back is delayed, never dropped.
+- **Not a filesystem watcher, and this was measured.** `git --version` costs
+  13.6 ms on this machine against `git status`'s 15.6, so ~14 of every 16 ms is
+  starting the process, not doing the work. A watcher removes the ~2 ms and
+  keeps the ~14 for every refresh that does happen, in exchange for a
+  dependency, an fd per directory under kqueue on macOS, and a walk of the
+  whole tree to install the watches. The cost is processes; the fix is fewer of
+  them.
 - **Terminal width**: always respect `tea.WindowSizeMsg`. The file list takes `m.listWidth()` — a quarter of the terminal, clamped to `[minListWidth, maxListWidth]` — and the diff gets the rest. It is a method, not a constant: below `twoPanelWidth` the layout collapses to one panel and the width belongs entirely to whichever it is. Ask the model, never assume.
 - **Colour is never the only channel.** Every distinction carries a mark or a word as well as a hue: `+`/`-`, the cursor bar, the staged dot, the status letter, the focus bar, and review state as a word. `TestResponsive_EveryDistinctionSurvivesWithoutColour` strips the colour and checks each one is still there.
 - **Viewport**: call `viewport.SetContent()` on content change, `viewport.GotoTop()` on file switch.

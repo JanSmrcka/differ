@@ -43,7 +43,11 @@ const (
 	twoPanelWidth = 72
 )
 
-const pollInterval = 2 * time.Second
+// How often the repository is probed. It used to be two seconds because each
+// tick cost eight git processes; the probe costs one, so asking twice as often
+// is still four times cheaper than what it replaced — and a change now shows up
+// in about a second rather than two.
+const pollInterval = 1 * time.Second
 
 const (
 	// The last resort. Below this there is not room for one usable panel, let
@@ -69,6 +73,15 @@ type diffLoadedMsg struct {
 // not be read — an empty file list then means "unknown", not "nothing
 // changed", which matters because review comments are staled off this.
 type filesRefreshedMsg struct {
+	// The fingerprint the repository had when this refresh was asked for, and
+	// a sequence number. The fingerprint is stored only when the refresh
+	// lands, so a failed one is retried rather than assumed; the sequence
+	// drops a refresh that is older than one already installed, which would
+	// otherwise leave the screen behind with a fingerprint claiming it was
+	// current — and no probe would ever correct it.
+	fingerprint string
+	seq         int
+
 	files []fileItem
 	// keys fingerprints each file's content, so a refresh can say which files
 	// moved rather than only that the changeset did. The file list is
@@ -107,6 +120,12 @@ type branchesLoadedMsg struct {
 type branchSwitchedMsg struct{ err error }
 
 type upstreamStatusMsg struct{ info git.UpstreamInfo }
+
+// repoProbedMsg carries the answer to "did anything move?".
+type repoProbedMsg struct {
+	fingerprint string
+	err         error
+}
 type pushDoneMsg struct{ err error }
 type pullDoneMsg struct{ err error }
 type savePrefDoneMsg struct{ err error }
@@ -125,6 +144,18 @@ type Model struct {
 	// a rewritten file from an untouched one.
 	files    []fileItem
 	fileKeys map[string]string
+	// The last probe's fingerprint. An equal one means the tick can stop
+	// without asking git anything else.
+	repoFingerprint string
+	// Whether a probe is out, and for how many ticks. tea.Tick does not wait
+	// for the previous one, and git can block rather than fail.
+	probing     bool
+	probeWaited int
+	// Ticks since the last full rebuild, so a burst coalesces.
+	ticksSinceRefresh int
+	// The last refresh asked for, and the newest one installed.
+	refreshSeq   int
+	installedSeq int
 	// fileOffset is the first file on screen. The list is taller than the
 	// panel in any real agent changeset, so without it the files past the
 	// panel height were unreachable.
@@ -259,6 +290,10 @@ func NewModel(repo *git.Repo, cfg config.Config, changes []git.FileChange, untra
 	ca.SetHeight(commentEditorHeight)
 
 	return Model{
+		// Open, so a change arriving in the first seconds refreshes at once
+		// rather than waiting for the rate limit to fill.
+		ticksSinceRefresh: refreshEvery,
+
 		repo:         repo,
 		cfg:          cfg,
 		files:        files,

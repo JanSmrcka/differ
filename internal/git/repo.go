@@ -542,3 +542,9 @@ func (r *Repo) IndexHashes() (map[string]string, error) {
 	}
 	return hashes, nil
 }
+
+// hasPath reports whether a path exists in the working tree. Tests only.
+func (r *Repo) hasPath(rel string) bool {
+	_, err := os.Stat(filepath.Join(r.dir, rel))
+	return err == nil
+}
