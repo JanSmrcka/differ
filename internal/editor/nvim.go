@@ -74,8 +74,11 @@ func socketCandidates(env Env) []string {
 }
 
 // queryNvim evaluates a vimscript expression in a running nvim.
-func queryNvim(ctx context.Context, socket, expr string) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
+func queryNvim(ctx context.Context, timeout time.Duration, socket, expr string) (string, error) {
+	if timeout <= 0 {
+		timeout = probeTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	out, err := exec.CommandContext(ctx, "nvim", "--server", socket, "--remote-expr", expr).Output()
@@ -88,10 +91,10 @@ func queryNvim(ctx context.Context, socket, expr string) (string, error) {
 }
 
 // discoverNvim asks every reachable socket which pane it lives in.
-func discoverNvim(ctx context.Context, env Env) []nvimServer {
+func discoverNvim(ctx context.Context, timeout time.Duration, env Env) []nvimServer {
 	var found []nvimServer
 	for _, sock := range socketCandidates(env) {
-		out, err := queryNvim(ctx, sock, `$TMUX_PANE . "\n" . getcwd(-1,-1)`)
+		out, err := queryNvim(ctx, timeout, sock, `$TMUX_PANE . "\n" . getcwd(-1,-1)`)
 		if err != nil {
 			continue
 		}
@@ -112,14 +115,14 @@ func discoverNvim(ctx context.Context, env Env) []nvimServer {
 // never abandons a modified buffer: with nvim's default 'hidden' the old
 // buffer simply goes hidden, and with 'nohidden' :drop opens a window instead
 // of failing. Either way nothing unsaved is lost.
-func openInNvim(ctx context.Context, socket, absPath string, line int) error {
+func openInNvim(ctx context.Context, timeout time.Duration, socket, absPath string, line int) error {
 	cmd := "drop "
 	if line > 0 {
 		cmd += "+" + strconv.Itoa(line) + " "
 	}
 	expr := fmt.Sprintf("execute('%s' . fnameescape('%s'))", cmd, vimEscape(absPath))
 
-	out, err := queryNvim(ctx, socket, expr)
+	out, err := queryNvim(ctx, timeout, socket, expr)
 	if err != nil {
 		return err
 	}
@@ -170,12 +173,12 @@ func vimEscape(s string) string { return strings.ReplaceAll(s, "'", "''") }
 // pane by the $TMUX_PANE it inherited. A socket can outlive the pane it was
 // created in, so the cross-check is what stops differ reporting that it
 // opened a file somewhere invisible.
-func reusePlan(ctx context.Context, req Request) (Plan, error) {
-	session, err := currentSession(ctx, req.Env.TmuxPane)
+func reusePlan(ctx context.Context, cfg Config, req Request) (Plan, error) {
+	session, err := currentSession(ctx, cfg.act(), req.Env.TmuxPane)
 	if err != nil {
 		return Plan{}, err
 	}
-	all, err := listPanes(ctx)
+	all, err := listPanes(ctx, cfg.act())
 	if err != nil {
 		return Plan{}, err
 	}
@@ -189,13 +192,14 @@ func reusePlan(ctx context.Context, req Request) (Plan, error) {
 		}
 	}
 
-	candidates := rankPanes(editorPanes(all, session), req.Repo, self)
+	scoped := panesInScope(all, session, cfg.Target)
+	candidates := rankPanes(editorPanes(scoped, cfg.Panes), req.Repo, self)
 	if len(candidates) == 0 {
 		return Plan{}, fmt.Errorf(
-			"no editor open in session %q — set editor_strategy to window", session)
+			"no editor open in %s — set editor_strategy to window", scopeLabel(session, cfg.Target))
 	}
 
-	servers := discoverNvim(ctx, req.Env)
+	servers := discoverNvim(ctx, cfg.probe(), req.Env)
 	for _, c := range candidates {
 		for _, s := range servers {
 			if s.Pane != c.ID {
@@ -205,19 +209,35 @@ func reusePlan(ctx context.Context, req Request) (Plan, error) {
 				continue
 			}
 			target, socket, label := c.Target(), s.Socket, c.Label()
+			// Reuse in another session has to move the client as well, or the
+			// file opens somewhere the user cannot see.
+			crossSession := c.Session != session
 			return Plan{
 				Kind:     KindDetached,
 				Strategy: StrategyReuse,
 				Desc:     "opened " + req.File + " in nvim (" + label + ")",
 				run: func(ctx context.Context) error {
-					if err := openInNvim(ctx, socket, req.abs(), req.Line); err != nil {
+					if err := openInNvim(ctx, cfg.act(), socket, req.abs(), req.Line); err != nil {
 						return err
 					}
-					return focusPane(ctx, target)
+					return focusPane(ctx, cfg.act(), target, crossSession)
 				},
 			}, nil
 		}
 	}
 	return Plan{}, fmt.Errorf(
-		"the editor in session %q does not answer on a socket — set editor_strategy to window", session)
+		"the editor in %s does not answer on a socket — set editor_strategy to window",
+		scopeLabel(session, cfg.Target))
+}
+
+// scopeLabel names where reuse looked, for an error the user can act on.
+func scopeLabel(own, target string) string {
+	switch target {
+	case "", "session":
+		return "session " + strconv.Quote(own)
+	case "any":
+		return "any session"
+	default:
+		return "session " + strconv.Quote(target)
+	}
 }

@@ -36,8 +36,11 @@ func (p pane) Target() string { return p.ID }
 // Label is how this pane is named to the user.
 func (p pane) Label() string { return p.Session + ":" + p.Window + "." + p.Index }
 
-func run(ctx context.Context, args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, actTimeout)
+func run(ctx context.Context, timeout time.Duration, args ...string) (string, error) {
+	if timeout <= 0 {
+		timeout = actTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	out, err := exec.CommandContext(ctx, "tmux", args...).Output()
 	if err != nil {
@@ -48,8 +51,8 @@ func run(ctx context.Context, args ...string) (string, error) {
 	return strings.TrimRight(string(out), "\n"), nil
 }
 
-func listPanes(ctx context.Context) ([]pane, error) {
-	out, err := run(ctx, "list-panes", "-a", "-F", paneFormat)
+func listPanes(ctx context.Context, timeout time.Duration) ([]pane, error) {
+	out, err := run(ctx, timeout, "list-panes", "-a", "-F", paneFormat)
 	if err != nil {
 		return nil, err
 	}
@@ -75,11 +78,11 @@ func parsePanes(out string) []pane {
 // tmux exits 0 and prints nothing for a target it cannot resolve, so an empty
 // result — not the exit status — is what marks an invalid pane. The same trap
 // is documented in internal/feedback/tmux.go.
-func currentSession(ctx context.Context, selfPane string) (string, error) {
+func currentSession(ctx context.Context, timeout time.Duration, selfPane string) (string, error) {
 	if selfPane == "" {
 		return "", fmt.Errorf("differ is not running inside tmux — set editor_strategy to inline")
 	}
-	out, err := run(ctx, "display-message", "-p", "-t", selfPane, "#{session_name}")
+	out, err := run(ctx, timeout, "display-message", "-p", "-t", selfPane, "#{session_name}")
 	if err != nil {
 		return "", err
 	}
@@ -94,8 +97,8 @@ func currentSession(ctx context.Context, selfPane string) (string, error) {
 // new-window takes a window as its target and refuses a pane id outright
 // ("can't specify pane here"), so the pane differ runs in has to be
 // translated first.
-func paneWindow(ctx context.Context, paneID string) (string, error) {
-	out, err := run(ctx, "display-message", "-p", "-t", paneID, "#{session_name}:#{window_index}")
+func paneWindow(ctx context.Context, timeout time.Duration, paneID string) (string, error) {
+	out, err := run(ctx, timeout, "display-message", "-p", "-t", paneID, "#{session_name}:#{window_index}")
 	if err != nil {
 		return "", err
 	}
@@ -109,29 +112,60 @@ func paneWindow(ctx context.Context, paneID string) (string, error) {
 // focusPane brings a pane to the front. Both commands are needed:
 // select-pane alone does not change the active window, and select-window
 // alone does not change the active pane within it.
-func focusPane(ctx context.Context, target string) error {
-	if _, err := run(ctx, "select-window", "-t", target); err != nil {
+func focusPane(ctx context.Context, timeout time.Duration, target string, switchClient bool) error {
+	// Reuse outside differ's own session needs the client moved too, or the
+	// file opens somewhere the user cannot see.
+	if switchClient {
+		if _, err := run(ctx, timeout, "switch-client", "-t", target); err != nil {
+			return err
+		}
+	}
+	if _, err := run(ctx, timeout, "select-window", "-t", target); err != nil {
 		return err
 	}
-	_, err := run(ctx, "select-pane", "-t", target)
+	_, err := run(ctx, timeout, "select-pane", "-t", target)
 	return err
 }
 
-// editorFamily is the set of pane commands differ will hand a file to. It is
-// deliberately small: sending :drop to something that is not an editor would
-// type it into a shell.
-var editorFamily = map[string]bool{"nvim": true, "vim": true, "vi": true, "view": true}
+// defaultEditorPanes is the set of pane commands differ will hand a file to
+// when editor_panes says nothing. It is deliberately small: sending :drop to
+// something that is not an editor would type it into a shell.
+var defaultEditorPanes = []string{"nvim", "vim", "vi", "view"}
 
-// editorPanes are the panes in differ's own session that are running an
-// editor.
+// panesInScope narrows the pane list to where reuse is allowed to look.
 //
-// The session is a requirement, not a preference. A typical layout has an
-// editor open in every session, so without it e could jump into a different
-// project entirely.
-func editorPanes(all []pane, session string) []pane {
+// The default is differ's own session, because a typical layout has an editor
+// open in every session and anything looser would jump into another project.
+// "any" lifts that, and a name picks one session.
+func panesInScope(all []pane, own, target string) []pane {
+	switch target {
+	case "", "session":
+		target = own
+	case "any":
+		return all
+	}
 	var out []pane
 	for _, p := range all {
-		if p.Session == session && editorFamily[p.Cmd] {
+		if p.Session == target {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// editorPanes keeps the panes running something allow names as an editor.
+// An empty allow means defaultEditorPanes. Scoping is panesInScope's job.
+func editorPanes(panes []pane, allow []string) []pane {
+	if len(allow) == 0 {
+		allow = defaultEditorPanes
+	}
+	ok := make(map[string]bool, len(allow))
+	for _, a := range allow {
+		ok[strings.TrimSpace(a)] = true
+	}
+	var out []pane
+	for _, p := range panes {
+		if ok[p.Cmd] {
 			out = append(out, p)
 		}
 	}
@@ -140,12 +174,22 @@ func editorPanes(all []pane, session string) []pane {
 
 // rankPanes orders candidates best first.
 //
+// differ's own session comes first. With the default scope every candidate is
+// already in it, but editor_target "any" reaches across sessions, where
+// window indexes collide and the order tmux happens to list panes in is no
+// basis for a choice.
+//
 // The repository is only a preference: :cd and autochdir move a pane's path,
 // and making it a requirement would switch reuse off with no visible reason.
 func rankPanes(panes []pane, repo string, self pane) []pane {
 	ranked := append([]pane(nil), panes...)
 	sort.SliceStable(ranked, func(i, j int) bool {
 		a, b := ranked[i], ranked[j]
+		if self.Session != "" {
+			if am, bm := a.Session == self.Session, b.Session == self.Session; am != bm {
+				return am
+			}
+		}
 		if in, jn := under(a.Path, repo), under(b.Path, repo); in != jn {
 			return in
 		}
@@ -185,7 +229,7 @@ func windowNum(s string) int {
 // new-window with multiple arguments executes them directly, without sh -c,
 // "to avoid issues with shell quoting". So a path containing spaces needs no
 // escaping. No -d, because the user pressed e and wants to be there.
-func windowPlan(argv []string, req Request) Plan {
+func windowPlan(cfg Config, argv []string, req Request) Plan {
 	return Plan{
 		Kind:     KindDetached,
 		Strategy: StrategyWindow,
@@ -195,7 +239,7 @@ func windowPlan(argv []string, req Request) Plan {
 		run: func(ctx context.Context) error {
 			args := []string{"new-window"}
 			if req.Env.TmuxPane != "" {
-				where, err := paneWindow(ctx, req.Env.TmuxPane)
+				where, err := paneWindow(ctx, cfg.act(), req.Env.TmuxPane)
 				if err != nil {
 					return err
 				}
@@ -205,7 +249,7 @@ func windowPlan(argv []string, req Request) Plan {
 			// called "tmux", which is no help in a status bar.
 			args = append(args, "-n", filepath.Base(argv[0]), "-c", req.Repo)
 			args = append(args, argv...)
-			_, err := run(ctx, args...)
+			_, err := run(ctx, cfg.act(), args...)
 			return err
 		},
 	}

@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -86,5 +87,32 @@ func TestSave_CreatesDir(t *testing.T) {
 	}
 	if _, err := os.Stat(path); err != nil {
 		t.Errorf("config file should exist: %v", err)
+	}
+}
+
+// The editor knobs have to survive a save/load round trip, and default to
+// zero so an existing config file keeps behaving as it did.
+func TestEditorSettings_RoundTripAndDefaults(t *testing.T) {
+	d := Default()
+	if d.EditorStrategy != "" || d.EditorTarget != "" || d.EditorLineArgs != "" ||
+		d.EditorPanes != nil || d.EditorTimeoutMS != 0 || d.EditorProbeTimeoutMS != 0 {
+		t.Errorf("Default() should leave the editor settings unset, got %+v", d)
+	}
+
+	path := filepath.Join(t.TempDir(), "config.json")
+	want := d
+	want.EditorStrategy = "reuse"
+	want.EditorPanes = []string{"nvim", "hx"}
+	want.EditorTarget = "any"
+	want.EditorLineArgs = "{file}:{line}"
+	want.EditorTimeoutMS = 9000
+	want.EditorProbeTimeoutMS = 2500
+
+	if err := SaveTo(want, path); err != nil {
+		t.Fatal(err)
+	}
+	got := LoadFrom(path)
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("round trip lost settings:\n got %+v\nwant %+v", got, want)
 	}
 }

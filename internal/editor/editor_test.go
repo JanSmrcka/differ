@@ -207,7 +207,7 @@ func TestBuildArgv(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			got := buildArgv(c.tmpl, Request{
+			got := buildArgv(c.tmpl, "", Request{
 				Line: c.line,
 				File: c.file, Repo: root, Env: Env{Editor: c.editor},
 			})
@@ -481,5 +481,72 @@ func TestDetach_AnImmediateFailureIsStillReported(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "no such profile") {
 		t.Errorf("error = %q, want the editor's own stderr in it", err)
+	}
+}
+
+// editor_line_args replaces the built-in family table, so an editor differ
+// has never heard of can still be opened at a line.
+func TestBuildArgv_LineArgsOverridesTheFamilyTable(t *testing.T) {
+	t.Parallel()
+	const root, abs = "/repo", "/repo/src.ts"
+
+	cases := []struct {
+		name     string
+		editor   string
+		lineArgs string
+		line     int
+		want     []string
+	}{
+		{
+			name: "helix wants file:line", editor: "hx",
+			lineArgs: "{file}:{line}", line: 9,
+			want: []string{"hx", abs + ":9"},
+		},
+		{
+			name: "emacs wants +line first", editor: "emacs",
+			lineArgs: "+{line} {file}", line: 9,
+			want: []string{"emacs", "+9", abs},
+		},
+		{
+			name: "it overrides a family differ does know", editor: "nvim",
+			lineArgs: "{file} +{line}", line: 9,
+			want: []string{"nvim", abs, "+9"},
+		},
+		{
+			// Without a line there is nothing to place, so the template is
+			// not used — the editor must not be handed "+0" or a bare colon.
+			name: "no line means the file alone", editor: "hx",
+			lineArgs: "{file}:{line}",
+			want:     []string{"hx", abs},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			got := buildArgv("", c.lineArgs, Request{
+				File: "src.ts", Repo: root, Line: c.line, Env: Env{Editor: c.editor},
+			})
+			if !reflect.DeepEqual(got, c.want) {
+				t.Errorf("buildArgv = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+// The timeouts have to be reachable, or a slow machine or an SSH hop has no
+// way out.
+func TestConfig_TimeoutsFallBackToTheDefaults(t *testing.T) {
+	t.Parallel()
+	if got := (Config{}).act(); got != actTimeout {
+		t.Errorf("act = %v, want %v", got, actTimeout)
+	}
+	if got := (Config{}).probe(); got != probeTimeout {
+		t.Errorf("probe = %v, want %v", got, probeTimeout)
+	}
+	if got := (Config{Timeout: 9 * time.Second}).act(); got != 9*time.Second {
+		t.Errorf("act = %v, want the configured 9s", got)
+	}
+	if got := (Config{ProbeTimeout: 3 * time.Second}).probe(); got != 3*time.Second {
+		t.Errorf("probe = %v, want the configured 3s", got)
 	}
 }

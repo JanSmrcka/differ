@@ -24,6 +24,22 @@ type Config struct {
 	//   "detach"    — run the editor in the background; for GUI editors that
 	//                 need no terminal and reuse their own window
 	EditorStrategy string `json:"editor_strategy"`
+	// EditorPanes are the pane commands reuse treats as an editor. Empty
+	// means nvim, vim, vi and view.
+	EditorPanes []string `json:"editor_panes"`
+	// EditorTarget scopes reuse: "" or "session" is differ's own tmux
+	// session, "any" is every session, anything else names one.
+	EditorTarget string `json:"editor_target"`
+	// EditorLineArgs replaces how the file and line reach the editor, as a
+	// whitespace-separated template over {file} and {line} — for an editor
+	// differ does not know, such as "{file}:{line}". Empty means the
+	// built-in table.
+	EditorLineArgs string `json:"editor_line_args"`
+	// EditorTimeoutMS bounds a tmux command or an editor open. 0 means 5000.
+	EditorTimeoutMS int `json:"editor_timeout_ms"`
+	// EditorProbeTimeoutMS bounds asking a running nvim a question. 0 means
+	// 1000. Raise it over a slow SSH hop.
+	EditorProbeTimeoutMS int `json:"editor_probe_timeout_ms"`
 
 	// FeedbackTarget selects where review feedback is delivered:
 	// "clipboard" (default), "stdout" or "tmux".

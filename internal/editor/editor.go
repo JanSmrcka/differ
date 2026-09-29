@@ -67,9 +67,40 @@ type Config struct {
 	Cmd string
 	// Strategy is editor_strategy; empty means auto.
 	Strategy string
+	// Panes are the pane commands reuse treats as an editor. Empty means
+	// defaultEditorPanes.
+	Panes []string
+	// Target scopes reuse: "" or "session" is differ's own session, "any" is
+	// every session, anything else names one.
+	Target string
+	// LineArgs replaces how the file and line are passed to the editor, as a
+	// whitespace-separated template over {file} and {line}. Empty means the
+	// built-in table of editor families.
+	LineArgs string
+	// Timeout bounds a tmux command or an editor open. Zero means actTimeout.
+	Timeout time.Duration
+	// ProbeTimeout bounds asking a running nvim a question. Zero means
+	// probeTimeout.
+	ProbeTimeout time.Duration
 	// Grace is how long a detached editor is watched for an immediate
 	// failure. Zero means detachGrace.
 	Grace time.Duration
+}
+
+// act is how long a tmux command or an editor open may take.
+func (c Config) act() time.Duration {
+	if c.Timeout > 0 {
+		return c.Timeout
+	}
+	return actTimeout
+}
+
+// probe is how long a running nvim gets to answer a question.
+func (c Config) probe() time.Duration {
+	if c.ProbeTimeout > 0 {
+		return c.ProbeTimeout
+	}
+	return probeTimeout
 }
 
 // Request is the situation: what to open, and where differ is running.
@@ -165,7 +196,7 @@ func Resolve(ctx context.Context, cfg Config, req Request) (Plan, error) {
 		return Plan{}, err
 	}
 
-	argv := buildArgv(cfg.Cmd, req)
+	argv := buildArgv(cfg.Cmd, cfg.LineArgs, req)
 	if _, err := exec.LookPath(argv[0]); err != nil {
 		return Plan{}, fmt.Errorf("editor %q not found on PATH — set editor_cmd or $EDITOR", argv[0])
 	}
@@ -213,7 +244,7 @@ func planFor(ctx context.Context, cfg Config, want Strategy, argv []string, req 
 	}
 
 	if want == StrategyReuse || want == StrategyAuto {
-		plan, err := reusePlan(ctx, req)
+		plan, err := reusePlan(ctx, cfg, req)
 		switch {
 		case err == nil:
 			return plan, nil
@@ -221,7 +252,7 @@ func planFor(ctx context.Context, cfg Config, want Strategy, argv []string, req 
 			return Plan{}, err
 		}
 	}
-	return windowPlan(argv, req), nil
+	return windowPlan(cfg, argv, req), nil
 }
 
 func inlinePlan(argv []string, req Request) Plan {
@@ -316,7 +347,7 @@ func stderrText(s string) string {
 // It cannot fail: an empty template falls back to $EDITOR and then to vi, so
 // there is always a first element. Whether that element is a program you can
 // actually run is Resolve's question, not this one's.
-func buildArgv(tmpl string, req Request) []string {
+func buildArgv(tmpl, lineArgs string, req Request) []string {
 	tmpl = strings.TrimSpace(tmpl)
 	if tmpl == "" {
 		tmpl = strings.TrimSpace(req.Env.Editor)
@@ -346,7 +377,7 @@ func buildArgv(tmpl string, req Request) []string {
 		argv = append(argv, expand.Replace(f))
 	}
 	if !strings.Contains(tmpl, "{file}") {
-		argv = append(argv, fileArgs(argv[0], req.abs(), req.Line)...)
+		argv = append(argv, fileArgs(argv[0], lineArgs, req)...)
 	}
 	return argv
 }
@@ -359,9 +390,21 @@ func buildArgv(tmpl string, req Request) []string {
 //
 // Only families that can be checked on a developer machine are claimed —
 // emacs, helix and sublime are left to {line} rather than guessed at.
-func fileArgs(prog, file string, line int) []string {
+func fileArgs(prog, lineArgs string, req Request) []string {
+	file, line := req.abs(), req.Line
 	if line < 1 {
 		return []string{file}
+	}
+	// An explicit template replaces the table entirely: the point of the
+	// setting is to support an editor differ has never heard of.
+	if lineArgs = strings.TrimSpace(lineArgs); lineArgs != "" {
+		expand := strings.NewReplacer(
+			"{file}", file, "{repo}", req.Repo, "{line}", strconv.Itoa(line))
+		var out []string
+		for _, f := range strings.Fields(lineArgs) {
+			out = append(out, expand.Replace(f))
+		}
+		return out
 	}
 	switch filepath.Base(prog) {
 	case "vi", "vim", "nvim", "view", "nano":
