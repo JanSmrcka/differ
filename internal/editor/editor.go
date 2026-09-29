@@ -9,6 +9,7 @@
 package editor
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -18,6 +19,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Env is the process environment the decision depends on. It is read once at
@@ -65,6 +67,9 @@ type Config struct {
 	Cmd string
 	// Strategy is editor_strategy; empty means auto.
 	Strategy string
+	// Grace is how long a detached editor is watched for an immediate
+	// failure. Zero means detachGrace.
+	Grace time.Duration
 }
 
 // Request is the situation: what to open, and where differ is running.
@@ -87,6 +92,11 @@ const (
 	StrategyReuse  Strategy = "reuse"  // an editor already open in this session
 	StrategyWindow Strategy = "window" // a new tmux window
 	StrategyInline Strategy = "inline" // take over differ's terminal
+	// StrategyDetach runs the editor in the background and returns at once.
+	// It is for editors that need no terminal and reuse their own window —
+	// VS Code, Zed, Sublime. differ does not guess which editor is which, so
+	// this is only ever chosen explicitly.
+	StrategyDetach Strategy = "detach"
 	// StrategyCustom is an editor_cmd that is itself a tmux command. It is
 	// not an editor invocation but a mechanism, so it runs as written instead
 	// of being wrapped in one of ours. It cannot be configured.
@@ -98,6 +108,7 @@ func Strategies() []string {
 	return []string{
 		string(StrategyAuto), string(StrategyReuse),
 		string(StrategyWindow), string(StrategyInline),
+		string(StrategyDetach),
 	}
 }
 
@@ -117,7 +128,8 @@ const (
 type Plan struct {
 	Kind     Kind
 	Strategy Strategy
-	// Argv and Dir are set for KindTerminal.
+	// Argv is the command, and Dir where it runs. KindTerminal plans are run
+	// from these by the caller; for KindDetached they describe what Run does.
 	Argv []string
 	Dir  string
 	// Desc is the status line for a success. Empty means say nothing.
@@ -164,14 +176,14 @@ func Resolve(ctx context.Context, cfg Config, req Request) (Plan, error) {
 	if filepath.Base(argv[0]) == "tmux" {
 		return inlinePlan(argv, req), nil
 	}
-	return planFor(ctx, want, argv, req)
+	return planFor(ctx, cfg, want, argv, req)
 }
 
 func wantedStrategy(s string) (Strategy, error) {
 	switch st := Strategy(strings.TrimSpace(s)); st {
 	case "", StrategyAuto:
 		return StrategyAuto, nil
-	case StrategyReuse, StrategyWindow, StrategyInline:
+	case StrategyReuse, StrategyWindow, StrategyInline, StrategyDetach:
 		return st, nil
 	default:
 		return "", fmt.Errorf("unknown editor_strategy %q — use one of: %s",
@@ -185,9 +197,12 @@ func wantedStrategy(s string) (Strategy, error) {
 // than a silent downgrade — the same call internal/feedback makes when its
 // tmux target is unavailable. Only auto falls back, because falling back is
 // what auto means.
-func planFor(ctx context.Context, want Strategy, argv []string, req Request) (Plan, error) {
-	if want == StrategyInline {
+func planFor(ctx context.Context, cfg Config, want Strategy, argv []string, req Request) (Plan, error) {
+	switch want {
+	case StrategyInline:
 		return inlinePlan(argv, req), nil
+	case StrategyDetach:
+		return detachPlan(argv, req, cfg.Grace), nil
 	}
 	if !req.Env.InTmux {
 		if want == StrategyAuto {
@@ -215,6 +230,81 @@ func inlinePlan(argv []string, req Request) Plan {
 		strategy = StrategyCustom
 	}
 	return Plan{Kind: KindTerminal, Strategy: strategy, Argv: argv, Dir: req.Repo}
+}
+
+// detachGrace is how long a detached editor is watched before it is declared
+// launched. Long enough to catch one that dies on the spot — a bad flag, a
+// missing profile — and short enough not to delay the status line.
+const detachGrace = 300 * time.Millisecond
+
+// detachWaitDelay bounds how long Wait lingers over pipes the launcher's
+// children inherited. code, zed and subl all exit at once on a cold start and
+// leave a GUI grandchild holding stdout, which without this makes Wait block
+// for the editor's whole lifetime.
+const detachWaitDelay = 100 * time.Millisecond
+
+// detachPlan starts the editor and leaves it running.
+//
+// It must not wait for the editor: these are editors that own their own
+// window, and the whole point is that differ carries on. Waiting had two
+// failure modes, both measured — a launcher that stays in the foreground
+// (gvim, emacs, `code --wait`, the JetBrains launcher with no instance up)
+// was killed at the timeout, and one whose grandchild held the inherited
+// pipes blocked for as long as the editor lived.
+//
+// Only stderr is collected, and only for long enough to report an editor that
+// fails immediately, so a typo in editor_cmd does not vanish in silence.
+func detachPlan(argv []string, req Request, grace time.Duration) Plan {
+	if grace <= 0 {
+		grace = detachGrace
+	}
+	return Plan{
+		Kind:     KindDetached,
+		Strategy: StrategyDetach,
+		Argv:     argv,
+		Dir:      req.Repo,
+		Desc:     "opened " + req.File,
+		run: func(ctx context.Context) error {
+			cmd := exec.Command(argv[0], argv[1:]...)
+			cmd.Dir = req.Repo
+			// Stdin and Stdout stay nil, so the child gets /dev/null and
+			// cannot hold a pipe of ours open.
+			var stderr bytes.Buffer
+			cmd.Stderr = &stderr
+			cmd.WaitDelay = detachWaitDelay
+
+			if err := cmd.Start(); err != nil {
+				return fmt.Errorf("%s: %w", filepath.Base(argv[0]), err)
+			}
+
+			done := make(chan error, 1)
+			go func() { done <- cmd.Wait() }()
+
+			select {
+			case err := <-done:
+				// ErrWaitDelay only means a child outlived the launcher and
+				// kept the pipe; the editor started fine.
+				if err != nil && !errors.Is(err, exec.ErrWaitDelay) {
+					return fmt.Errorf("%s: %w%s", filepath.Base(argv[0]), err,
+						stderrText(stderr.String()))
+				}
+				return nil
+			case <-time.After(grace):
+				// Still running, which for a detached editor is success.
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		},
+	}
+}
+
+// stderrText renders collected stderr ready to append to an error.
+func stderrText(s string) string {
+	if s = strings.TrimSpace(s); s != "" {
+		return ": " + strings.ReplaceAll(s, "\n", " ")
+	}
+	return ""
 }
 
 // buildArgv expands the placeholders in tmpl and splits it into an argv.

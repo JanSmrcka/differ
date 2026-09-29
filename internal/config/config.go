@@ -21,6 +21,8 @@ type Config struct {
 	//                 reuse
 	//   "window"    — always a new tmux window
 	//   "inline"    — always take over differ's terminal and resume after
+	//   "detach"    — run the editor in the background; for GUI editors that
+	//                 need no terminal and reuse their own window
 	EditorStrategy string `json:"editor_strategy"`
 
 	// FeedbackTarget selects where review feedback is delivered:

@@ -189,6 +189,8 @@ func windowPlan(argv []string, req Request) Plan {
 	return Plan{
 		Kind:     KindDetached,
 		Strategy: StrategyWindow,
+		Argv:     argv,
+		Dir:      req.Repo,
 		Desc:     "opened " + req.File + " in a new window",
 		run: func(ctx context.Context) error {
 			args := []string{"new-window"}
