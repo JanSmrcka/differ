@@ -54,6 +54,7 @@ main.go → cmd/root.go (cobra commands)
                    ├── keymap.go   — the keymap: one table, read by bar/overlay/tests
                    ├── commandbar.go — the one-line command bar and ? overlay
                    ├── history.go  — the H overlay: what was sent, where, and whether it arrived
+                   ├── intraline.go — what differs *within* a pair of split-view lines
                    ├── progress.go — review progress: which files moved under the reviewer
                    ├── log.go      — LogModel (commit log browser)
                    ├── diff.go     — diff parser + single-line rendering
@@ -164,7 +165,9 @@ github.com/spf13/cobra                # CLI
 - **Chroma + lipgloss**: apply Chroma foreground colors token-by-token, keep diff background from line type. Chroma must not override background.
 - **Cut a line before highlighting it**, never after: the highlighted string is full of ANSI escapes and slicing it cuts one in half. `renderCode` is the one place a code line is cut, highlighted and marked, and both unified and split go through it — as they do through `stylesFor`, so the two views cannot drift apart again.
 - **Cut with `lipgloss`, not with a rune slice.** `clipCode` and `clipRow` use `MaxWidth`, which understands escapes and is linear. The first version dropped one rune at a time and re-measured the whole prefix: 8.8 s for an 80,000-column line, inside `Update`. Slicing runes off an already-styled row also drops the reset and bleeds colour down the screen — the same trap `fitOverlay` hit.
-- **Never hand trailing whitespace to Chroma.** It lexes the run as a token with a synthetic `\n` appended, `highlightLine` writes token values verbatim, and the row comes back as *two* rows — so `DisplayRows` disagrees with `Content`, and every row index below it, which is what `RowFor` and the cursor are addressed by, is off by one. `renderCode` always splits it off; whether it is *marked* is a separate decision.
+- **Chroma appends a newline to its input** and coalesces it into the last token, so any token running to end of line carries one: the tail of an open block comment, an unterminated string, a CRLF line ending, a non-breaking space. Written out verbatim it turns one row of output into two — `DisplayRows` then disagrees with `Content`, and every row index below it, which is what `RowFor` and the cursor are addressed by, is off by one. `highlightSpan` strips them, which is the only place token values are written.
+- **Split a token's value, never the line before lexing.** `highlightSpan` lexes the whole line once and cuts the token *values* at the emphasis boundaries. Splitting the text first changes how it tokenises, so a span starting mid-string would recolour the rest of the line.
+- **Lipgloss emits nothing under `go test`** — no TTY means no colour and not even an underline, so how something is *painted* cannot be asserted end to end. Test the decision (which span was chosen), and build a styled string by hand where the escapes themselves are the point.
 - **Every row ends at the panel width.** `clipRow` is the last guard in all three row renderers, because the column budget cannot be satisfied at every width — the line-number block alone is wider than a 10-column panel. A test sweeps widths 1-120 in both views.
 - **Line-number width is per diff, not constant.** `geometry` carries it (sized from the largest number the diff mentions, never below `lineNumWidth`) along with the room the row has. Row renderers take it as one value so the next piece of layout does not add another int to five signatures.
 - **Terminal width**: always respect `tea.WindowSizeMsg`. File list panel fixed ~35 chars (`fileListWidth`), diff gets the rest.

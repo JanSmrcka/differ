@@ -113,6 +113,12 @@ At the end of the code itself:
 | `›`  | the line was longer than the panel and is cut — `e` opens it in your editor |
 | `·`  | trailing whitespace on an added or removed line              |
 
+In split view the part of a line that actually differs from the line it is
+paired with is shaded and underlined, so a one-character change does not look
+like a rewritten line. A pair with nothing in common is left alone — pointing
+at the whole line says no more than the `+`/`-` already does. The underline is
+what carries it under `--no-color`.
+
 Line-number columns widen to fit the file, so a 5-digit diff stays aligned.
 Tabs are expanded to `tab_width`. Hunks are separated by a rule carrying the
 enclosing function, and split view falls back to unified when the panel is too

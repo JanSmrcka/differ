@@ -13,6 +13,14 @@ type Theme struct {
 	RemovedBg string
 	HunkFg    string
 
+	// AddedEmphBg and RemovedEmphBg paint the part of a line that actually
+	// differs from the line it is paired with in split view. They sit a step
+	// away from AddedBg/RemovedBg — far enough to see, close enough that the
+	// span still reads as part of the same line rather than a different kind
+	// of line.
+	AddedEmphBg   string
+	RemovedEmphBg string
+
 	// MarkFg draws the marks differ adds inside the code column: the stand-in
 	// for trailing whitespace, and the sign that a line was cut to fit. It is
 	// deliberately neutral — these are notes about the line, not part of the
@@ -90,6 +98,9 @@ func DarkTheme() Theme {
 		RemovedBg: "#3b1d2e",
 		HunkFg:    "#6c5ce7",
 
+		AddedEmphBg:   "#2f5d43",
+		RemovedEmphBg: "#5e2b3d",
+
 		MarkFg: "#9399b2",
 
 		LineNumFg:        "#585b70",
@@ -145,6 +156,9 @@ func LightTheme() Theme {
 		RemovedFg: "#d20f39",
 		RemovedBg: "#fde4e8",
 		HunkFg:    "#1e66f5",
+
+		AddedEmphBg:   "#c3e8bd",
+		RemovedEmphBg: "#f7c6d0",
 
 		MarkFg: "#6c6f85",
 

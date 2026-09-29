@@ -30,6 +30,9 @@ type DiffRenderer struct {
 	width    int
 
 	split bool
+	// intraLine emphasises the part of a paired split row that actually
+	// differs. On by default; a caller can turn it off.
+	intraLine bool
 	// geom is the column arithmetic for this diff, sized once from its
 	// largest line number.
 	geom     geometry
@@ -68,7 +71,7 @@ func NewDiffRenderer(parsed ParsedDiff, filename string, styles Styles, t theme.
 	r := &DiffRenderer{
 		parsed: parsed, filename: filename, styles: styles,
 		theme: t, width: width, tabWidth: defaultTabWidth,
-		geom: diffGeometry(parsed, width),
+		geom: diffGeometry(parsed, width), intraLine: true,
 	}
 	r.render()
 	return r
@@ -97,6 +100,15 @@ func (r *DiffRenderer) ensure() {
 func (r *DiffRenderer) displayLine(dl DiffLine) DiffLine {
 	dl.Content = expandTabs(dl.Content, r.tabWidth)
 	return dl
+}
+
+// SetIntraLine turns the within-line emphasis in split view on or off.
+func (r *DiffRenderer) SetIntraLine(on bool) {
+	if r.intraLine == on {
+		return
+	}
+	r.intraLine = on
+	r.dirty = true
 }
 
 // SetSplit switches between unified and side-by-side rendering.
@@ -276,8 +288,10 @@ func (r *DiffRenderer) renderRow(row splitRow, leftGutter, rightGutter string) s
 		span := geometry{numW: r.geom.numW, width: r.width, split: true}
 		return renderHunkLine(r.displayLine(*row.left), r.styles, span, leftGutter)
 	}
-	left := renderSplitSide(r.displaySide(row.left), r.filename, r.styles, r.theme, leftG, true)
-	right := renderSplitSide(r.displaySide(row.right), r.filename, r.styles, r.theme, rightG, false)
+	l, rr := r.displaySide(row.left), r.displaySide(row.right)
+	oldSpan, newSpan := r.changedSpans(l, rr)
+	left := renderSplitSide(l, r.filename, r.styles, r.theme, leftG, true, oldSpan)
+	right := renderSplitSide(rr, r.filename, r.styles, r.theme, rightG, false, newSpan)
 	sep := lipgloss.NewStyle().Foreground(lipgloss.Color(r.theme.BorderFg)).Render(verticalDivider)
 	return clipRow(leftGutter+left+sep+rightGutter+right, r.width)
 }
@@ -341,3 +355,26 @@ func (r *DiffRenderer) RowFor(cursor int) (int, bool) { return r.rowFor(cursor) 
 
 // Parsed exposes the diff the renderer was built from.
 func (r *DiffRenderer) Parsed() ParsedDiff { return r.parsed }
+
+// changedSpans works out which part of a paired removed/added row actually
+// differs, so each side can emphasise it.
+//
+// Only a replacement gets one: a row with one side empty is a plain insertion
+// or deletion, and the +/- already says so. A pair with nothing in common is a
+// rewritten line, where emphasising everything would be a wall of colour
+// saying no more than the line type does.
+func (r *DiffRenderer) changedSpans(left, right *DiffLine) (oldSpan, newSpan span) {
+	if !r.intraLine || left == nil || right == nil {
+		return span{}, span{}
+	}
+	if left.Type != LineRemoved || right.Type != LineAdded {
+		return span{}, span{}
+	}
+
+	start, endOld, endNew := changedRange(left.Content, right.Content)
+	oldRunes, newRunes := len([]rune(left.Content)), len([]rune(right.Content))
+	if start == 0 && endOld == oldRunes && endNew == newRunes {
+		return span{}, span{}
+	}
+	return span{from: start, to: endOld}, span{from: start, to: endNew}
+}

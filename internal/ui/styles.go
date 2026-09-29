@@ -20,10 +20,15 @@ type Styles struct {
 	StatusUntracked lipgloss.Style
 
 	// Diff
-	DiffAdded          lipgloss.Style
-	DiffRemoved        lipgloss.Style
-	DiffAddedBg        lipgloss.Style // bg-only, for padding highlighted lines
-	DiffRemovedBg      lipgloss.Style // bg-only, for padding highlighted lines
+	DiffAdded     lipgloss.Style
+	DiffRemoved   lipgloss.Style
+	DiffAddedBg   lipgloss.Style // bg-only, for padding highlighted lines
+	DiffRemovedBg lipgloss.Style // bg-only, for padding highlighted lines
+	// The part of a split-view line that differs from its pair. Underlined as
+	// well as shaded, because under --no-color the shade is all there is and
+	// a within-line distinction has no other channel.
+	DiffAddedEmph      lipgloss.Style
+	DiffRemovedEmph    lipgloss.Style
 	DiffContext        lipgloss.Style
 	DiffHunkHeader     lipgloss.Style
 	DiffLineNum        lipgloss.Style
@@ -99,6 +104,12 @@ func NewStyles(t theme.Theme) Styles {
 			Background(lipgloss.Color(t.AddedBg)),
 		DiffRemovedBg: lipgloss.NewStyle().
 			Background(lipgloss.Color(t.RemovedBg)),
+		DiffAddedEmph: lipgloss.NewStyle().
+			Background(lipgloss.Color(t.AddedEmphBg)).
+			Underline(true),
+		DiffRemovedEmph: lipgloss.NewStyle().
+			Background(lipgloss.Color(t.RemovedEmphBg)).
+			Underline(true),
 		DiffContext: lipgloss.NewStyle().
 			Foreground(lipgloss.Color(t.Fg)),
 		DiffHunkHeader: lipgloss.NewStyle().
