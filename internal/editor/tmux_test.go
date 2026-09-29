@@ -299,3 +299,76 @@ func waitForPaneCommand(t *testing.T, paneID, want string) {
 	}
 	t.Skipf("pane %s never started running %s", paneID, want)
 }
+
+// new-window without a target lands in whichever session tmux considers
+// current, which with several sessions open is not necessarily differ's. The
+// window has to appear next to differ.
+func TestWindowPlan_CreatesTheWindowInDiffersOwnSession(t *testing.T) {
+	skipWithoutTmux(t)
+	repo, err := os.MkdirTemp("/tmp", "dtw")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(repo) })
+
+	// Two sessions, so "the current one" is ambiguous. differ lives in the
+	// first; the second is created later and is therefore the more recently
+	// active, which is what an untargeted new-window would pick.
+	mine, other := "differ-editor-win-mine", "differ-editor-win-other"
+	for _, s := range []string{mine, other} {
+		_ = exec.Command("tmux", "kill-session", "-t", s).Run()
+		if err := exec.Command("tmux", "new-session", "-d", "-s", s, "-n", "w", "sleep 60").Run(); err != nil {
+			t.Skipf("cannot start tmux: %v", err)
+		}
+		name := s
+		t.Cleanup(func() { _ = exec.Command("tmux", "kill-session", "-t", name).Run() })
+	}
+	selfPane := tmuxQuery(t, "display-message", "-p", "-t", mine+":w", "#{pane_id}")
+
+	plan := windowPlan([]string{"sleep", "30"}, Request{
+		File: "src.ts", Repo: repo, Env: Env{InTmux: true, TmuxPane: selfPane},
+	})
+	if err := plan.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if got := tmuxQuery(t, "list-windows", "-t", other, "-F", "x"); strings.Count(got, "x") != 1 {
+		t.Errorf("the other session gained a window:\n%s",
+			tmuxQuery(t, "list-windows", "-t", other, "-F", "#{window_index} #{pane_current_command}"))
+	}
+	if got := tmuxQuery(t, "list-windows", "-t", mine, "-F", "x"); strings.Count(got, "x") != 2 {
+		t.Errorf("differ's session should have gained a window, has:\n%s",
+			tmuxQuery(t, "list-windows", "-t", mine, "-F", "#{window_index} #{pane_current_command}"))
+	}
+}
+
+// Left to tmux the window comes out named "tmux", which says nothing in a
+// status bar.
+func TestWindowPlan_NamesTheWindowAfterTheEditor(t *testing.T) {
+	skipWithoutTmux(t)
+	name := "differ-editor-winname"
+	_ = exec.Command("tmux", "kill-session", "-t", name).Run()
+	if err := exec.Command("tmux", "new-session", "-d", "-s", name, "-n", "w", "sleep 60").Run(); err != nil {
+		t.Skipf("cannot start tmux: %v", err)
+	}
+	t.Cleanup(func() { _ = exec.Command("tmux", "kill-session", "-t", name).Run() })
+	selfPane := tmuxQuery(t, "display-message", "-p", "-t", name+":w", "#{pane_id}")
+
+	repo, err := os.MkdirTemp("/tmp", "dtn")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(repo) })
+
+	plan := windowPlan([]string{"/bin/sleep", "30"}, Request{
+		File: "src.ts", Repo: repo, Env: Env{InTmux: true, TmuxPane: selfPane},
+	})
+	if err := plan.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	names := tmuxQuery(t, "list-windows", "-t", name, "-F", "#{window_name}")
+	if !strings.Contains(names, "sleep") {
+		t.Errorf("window names = %q, want one named after the command", names)
+	}
+}

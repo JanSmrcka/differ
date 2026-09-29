@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -86,6 +87,23 @@ func currentSession(ctx context.Context, selfPane string) (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
+// paneWindow is the "session:index" of the window holding a pane.
+//
+// new-window takes a window as its target and refuses a pane id outright
+// ("can't specify pane here"), so the pane differ runs in has to be
+// translated first.
+func paneWindow(ctx context.Context, paneID string) (string, error) {
+	out, err := run(ctx, "display-message", "-p", "-t", paneID, "#{session_name}:#{window_index}")
+	if err != nil {
+		return "", err
+	}
+	// tmux prints nothing and exits 0 for a target it cannot resolve.
+	if strings.TrimSpace(out) == "" {
+		return "", fmt.Errorf("tmux does not know pane %s", paneID)
+	}
+	return strings.TrimSpace(out), nil
+}
+
 // focusPane brings a pane to the front. Both commands are needed:
 // select-pane alone does not change the active window, and select-window
 // alone does not change the active pane within it.
@@ -156,17 +174,33 @@ func windowNum(s string) int {
 
 // windowPlan opens the editor in a new tmux window.
 //
+// -a -t pins the window to differ's own session, immediately after differ's
+// window. Without a target tmux picks whichever session it considers current,
+// which with more than one session open is not necessarily differ's — the
+// window would then appear in another project entirely.
+//
 // argv goes as separate arguments, not one string: tmux documents that
 // new-window with multiple arguments executes them directly, without sh -c,
 // "to avoid issues with shell quoting". So a path containing spaces needs no
 // escaping. No -d, because the user pressed e and wants to be there.
 func windowPlan(argv []string, req Request) Plan {
-	args := append([]string{"new-window", "-c", req.Repo}, argv...)
 	return Plan{
 		Kind:     KindDetached,
 		Strategy: StrategyWindow,
 		Desc:     "opened " + req.File + " in a new window",
 		run: func(ctx context.Context) error {
+			args := []string{"new-window"}
+			if req.Env.TmuxPane != "" {
+				where, err := paneWindow(ctx, req.Env.TmuxPane)
+				if err != nil {
+					return err
+				}
+				args = append(args, "-a", "-t", where)
+			}
+			// Name the window after the editor. Left to tmux it comes out
+			// called "tmux", which is no help in a status bar.
+			args = append(args, "-n", filepath.Base(argv[0]), "-c", req.Repo)
+			args = append(args, argv...)
 			_, err := run(ctx, args...)
 			return err
 		},
