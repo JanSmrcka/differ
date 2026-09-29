@@ -93,13 +93,17 @@ type Theme struct {
 // the syntax highlighting agree. "dark" and "light" are the names differ
 // shipped with and stay as aliases, so nobody's config breaks.
 //
-// Gruvbox, Tokyo Night and GitHub Dark are taken value-for-value from their
-// upstream palettes, with the token names in comments so they can be checked
-// again later. Mocha and Latte are *derived* from Catppuccin rather than equal
-// to it — they are differ's original two themes, and a fair number of their
-// values (the purple, the staged green, the surfaces) come from elsewhere or
-// from nowhere. Renaming them did not change them, and this comment says so
-// rather than claiming a provenance they do not have.
+// In Gruvbox, Tokyo Night and GitHub Dark every *palette* colour is its
+// upstream value, with the token name in a comment so it can be checked again
+// later. The diff surfaces are not: AddedBg, RemovedBg and the two emphasis
+// backgrounds are differ's own in all five themes, because no upstream palette
+// has a concept of them. Each says so where it differs.
+//
+// Mocha and Latte are only *derived* from Catppuccin. They are differ's
+// original two themes, and a fair number of their values — the purple is One
+// Dark's, the staged green is Dracula's, several surfaces come from nowhere —
+// are not Catppuccin at all. Renaming them did not change them, and this says
+// so rather than claiming a provenance they do not have.
 var Themes = map[string]Theme{
 	"mocha":      MochaTheme(),
 	"latte":      LatteTheme(),
@@ -233,13 +237,13 @@ func LatteTheme() Theme {
 		PanelLabelFg:   "#8c8fa1",
 		HeaderNameFg:   "#8839ef",
 		HeaderBranchFg: "#5c5f77",
-		HeaderMetaFg:   "#8c8fa1",
+		HeaderMetaFg:   "#6c6f85", // subtext0
 
 		BorderFg:    "#8839ef",
 		StatusBarBg: "#e6e9ef",
 		StatusBarFg: "#6c6f85",
 		HelpKeyFg:   "#8839ef",
-		HelpDescFg:  "#8c8fa1",
+		HelpDescFg:  "#6c6f85", // subtext0
 
 		// Catppuccin Latte's own yellow (#df8e1d), green (#40a02b) and peach
 		// (#fe640b) are 2.3, 3.0 and 2.6 against its base — fine as an accent,
@@ -248,7 +252,7 @@ func LatteTheme() Theme {
 		// alternative to darken towards, which is why they are derived rather
 		// than picked from it.
 		CommentFg:     "#8a5a00",
-		CommentMetaFg: "#8c8fa1",
+		CommentMetaFg: "#6c6f85", // subtext0
 		StaleFg:       "#a64100",
 
 		SuccessFg: "#2d7a1f",
@@ -290,6 +294,7 @@ func GruvboxTheme() Theme {
 		RemovedBg: "#3c1f1e",
 		HunkFg:    "#83a598", // bright blue
 
+		// differ's own: hue-matched to the brights, no upstream equivalent.
 		AddedEmphBg:   "#4a4a1e",
 		RemovedEmphBg: "#5a2f2a",
 
@@ -354,6 +359,7 @@ func TokyoNightTheme() Theme {
 		RemovedBg: "#37222c",
 		HunkFg:    "#7aa2f7",
 
+		// differ's own, as are AddedBg/RemovedBg above.
 		AddedEmphBg:   "#2c4a3e",
 		RemovedEmphBg: "#4c2b38",
 
@@ -384,19 +390,19 @@ func TokyoNightTheme() Theme {
 		UntrackedFg: "#565f89",
 
 		ChromeFg:       "#3b4261",
-		PanelLabelFg:   "#565f89",
-		HeaderNameFg:   "#bb9af7",
-		HeaderBranchFg: "#a9b1d6",
-		HeaderMetaFg:   "#565f89",
+		PanelLabelFg:   "#565f89", // comment
+		HeaderNameFg:   "#bb9af7", // magenta
+		HeaderBranchFg: "#a9b1d6", // fg_dark
+		HeaderMetaFg:   "#737aa2", // dark5
 
 		BorderFg:    "#3b4261",
 		StatusBarBg: "#16161e",
 		StatusBarFg: "#a9b1d6",
 		HelpKeyFg:   "#7dcfff",
-		HelpDescFg:  "#565f89",
+		HelpDescFg:  "#737aa2", // dark5
 
 		CommentFg:     "#e0af68",
-		CommentMetaFg: "#565f89",
+		CommentMetaFg: "#737aa2", // dark5
 		StaleFg:       "#ff9e64",
 
 		SuccessFg: "#9ece6a",
@@ -423,6 +429,7 @@ func GitHubDarkTheme() Theme {
 		RemovedBg: "#25171c",
 		HunkFg:    "#58a6ff",
 
+		// differ's own; AddedBg/RemovedBg reproduce Primer's own overlays.
 		AddedEmphBg:   "#1b4721",
 		RemovedEmphBg: "#542426",
 

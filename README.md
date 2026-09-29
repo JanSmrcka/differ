@@ -240,18 +240,20 @@ Requires [Claude CLI](https://docs.anthropic.com/en/docs/claude-code) installed.
 differ --theme gruvbox
 ```
 
-| Name         | Palette                                                  |
-| ------------ | -------------------------------------------------------- |
-| `mocha`      | Catppuccin Mocha — the default, also reachable as `dark`  |
-| `latte`      | Catppuccin Latte — light, also reachable as `light`       |
-| `gruvbox`    | Gruvbox Dark (medium)                                    |
-| `tokyonight` | Tokyo Night (night)                                      |
-| `github`     | GitHub Dark                                              |
+| Name         | Palette                                                      |
+| ------------ | ------------------------------------------------------------ |
+| `mocha`      | Catppuccin-derived — the default, also reachable as `dark`    |
+| `latte`      | Catppuccin-derived, light — also reachable as `light`         |
+| `gruvbox`    | Gruvbox Dark (medium)                                        |
+| `tokyonight` | Tokyo Night (night)                                          |
+| `github`     | GitHub Dark                                                  |
 
 Each is paired with the Chroma style of the same family, so the chrome and the
-syntax highlighting agree. Gruvbox, Tokyo Night and GitHub Dark are taken
-value-for-value from their upstream palettes; `mocha` and `latte` are differ's
-original two themes, *derived* from Catppuccin rather than equal to it.
+syntax highlighting agree. In Gruvbox, Tokyo Night and GitHub Dark every
+palette colour is its upstream value; the diff backgrounds are differ's own in
+all five, because no upstream palette has a concept of them. `mocha` and
+`latte` are differ's original two themes and only *derived* from Catppuccin —
+their purple is One Dark's and their staged green is Dracula's.
 
 Every theme is held to the same contrast floor by a test — the diff colours,
 the marks differ draws inside the diff, and review comment text, which is the

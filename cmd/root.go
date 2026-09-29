@@ -190,8 +190,8 @@ func resolveTheme(cfg config.Config) (theme.Theme, error) {
 			flagTheme, strings.Join(theme.ThemeNames(), ", "))
 	}
 
-	// NO_COLOR is a convention worth honouring: its presence, at any value,
-	// means no colour. https://no-color.org
+	// NO_COLOR is a convention worth honouring: set and not empty means no
+	// colour. https://no-color.org — "present and not an empty string".
 	if flagNoColor || os.Getenv("NO_COLOR") != "" {
 		return theme.NoColorTheme(), nil
 	}
