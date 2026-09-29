@@ -92,6 +92,7 @@ func (m Model) updateFileListMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.enterBranchMode()
 	case "v":
 		m.splitDiff = !m.splitDiff
+		m.cfg.SplitDiff = m.splitDiff
 		m.prevCurs = -1
 		m.lastDiffContent = ""
 		return m, tea.Batch(m.loadDiffCmd(true), m.saveSplitPrefCmd())

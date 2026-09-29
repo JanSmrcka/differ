@@ -79,6 +79,13 @@ func (m Model) routeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// mode underneath an overlay — the branch list arriving is enough — and
 	// inside the guard every key then went into that mode's text input, which
 	// left the overlay with no way to close.
+	// The theme picker owns its keys entirely, including j/k and enter, so it
+	// is answered before the overlays that only close.
+	if m.showThemes {
+		mm, cmd, _ := m.themePickerKey(msg.String())
+		return mm, cmd
+	}
+
 	if m.showHelp || m.showHistory || m.showProblem {
 		switch msg.String() {
 		case "?":
@@ -87,6 +94,8 @@ func (m Model) routeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "!":
 			m.showProblem, m.showHelp, m.showHistory = !m.showProblem, false, false
 			return m, nil
+		case "t":
+			return m.openThemePicker()
 		case "H":
 			// H closes the history, but does not open one from the help
 			// overlay: unlike ?, it is not a global — it exists only in
@@ -114,6 +123,8 @@ func (m Model) routeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// mode that has since been left.
 			m.showProblem = true
 			return m, nil
+		case "t":
+			return m.openThemePicker()
 		}
 	}
 
@@ -149,6 +160,12 @@ func (m Model) handleResize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) handleDiffLoaded(msg diffLoadedMsg) (tea.Model, tea.Cmd) {
 	if msg.index != m.cursor {
+		return m, nil
+	}
+	// Built under a theme that is no longer in use. Two git diffs can be in
+	// flight — a preview and the reload that cancelled it — and they do not
+	// finish in the order they started.
+	if msg.themeGen != m.themeGen {
 		return m, nil
 	}
 	if msg.renderer == nil {
@@ -266,6 +283,14 @@ func (m Model) handleBranchesLoaded(msg branchesLoadedMsg) (tea.Model, tea.Cmd) 
 	// An overlay belongs to the view it was opened over, and this is a
 	// different view arriving in the background.
 	m.showHelp, m.showHistory, m.showProblem = false, false, false
+	// The theme picker is closed through cancelTheme rather than by clearing
+	// the flag: it is the only overlay that changes the session as you move
+	// through it, so dropping it without restoring left the user in a theme
+	// they never confirmed, with esc no longer able to undo it.
+	var restore tea.Cmd
+	if m.showThemes {
+		m, restore = m.cancelTheme()
+	}
 	m.mode = modeBranchPicker
 	m.branches = msg.branches
 	m.currentBranch = msg.current
@@ -284,7 +309,7 @@ func (m Model) handleBranchesLoaded(msg branchesLoadedMsg) (tea.Model, tea.Cmd) 
 	// so anything past the twenty-somethingth — and the picker then opened
 	// with no visible selection at all.
 	m = m.clampBranchScroll()
-	return m, textinput.Blink
+	return m, tea.Batch(restore, textinput.Blink)
 }
 
 func (m Model) handleBranchSwitched(msg branchSwitchedMsg) (tea.Model, tea.Cmd) {
