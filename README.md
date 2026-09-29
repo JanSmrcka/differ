@@ -153,6 +153,11 @@ Config file: `~/.config/differ/config.json`
   "commit_msg_prompt": "Write a concise git commit message for this diff:",
   "editor_cmd": "",
   "editor_strategy": "auto",
+  "editor_panes": [],
+  "editor_target": "session",
+  "editor_line_args": "",
+  "editor_timeout_ms": 0,
+  "editor_probe_timeout_ms": 0,
   "split_diff": false,
   "feedback_target": "clipboard",
   "tmux_target": ""
@@ -211,8 +216,16 @@ argument, so a path containing spaces needs no quoting.
 
 Without an explicit `{file}` in `editor_cmd`, differ adds the line itself for
 editors it can check: `+<line>` for `vi`/`vim`/`nvim`/`view`/`nano`, and
-`--goto <file>:<line>` for `code`. Any other editor gets the file alone — put
-`{line}` where it belongs yourself, as in `"editor_cmd": "subl {file}:{line}"`.
+`--goto <file>:<line>` for `code`. Any other editor gets the file alone.
+
+`editor_line_args` replaces that table for an editor differ does not know. It
+is a whitespace-separated template over `{file}` and `{line}`, used only when
+a line is known:
+
+```json
+{ "editor_line_args": "{file}:{line}" }     // helix, sublime
+{ "editor_line_args": "+{line} {file}" }    // emacs, micro
+```
 
 **Where it opens** — `editor_strategy`:
 
@@ -227,12 +240,28 @@ editors it can check: `+<line>` for `vi`/`vim`/`nvim`/`view`/`nano`, and
 Outside tmux `reuse` and `window` are refused with a message rather than
 silently downgraded, so a setting that cannot work never looks like it did.
 
-**Reuse** finds a pane in differ's *own* tmux session that is running
+**Reuse** finds a pane in differ's own tmux session that is running
 `nvim`/`vim`/`vi`, hands it the file over nvim's RPC socket, and focuses that
-pane. The session is a requirement — with an editor open in every session,
-anything looser would jump into a different project. Among several
-candidates, one sitting in this repository wins, then differ's own window,
-then the lowest window index.
+pane. Among several candidates, one in differ's own session wins, then one
+sitting in this repository, then differ's own window, then the lowest window
+index.
+
+Two settings adjust what reuse looks for:
+
+| setting | default | what it does |
+|---|---|---|
+| `editor_panes` | `["nvim","vim","vi","view"]` | which pane commands count as an editor. Name your own if you run something else in a pane. |
+| `editor_target` | `session` | how far reuse reaches: `session` is differ's own, `any` is every session on the machine, or give one session's name. |
+
+`editor_target` defaults to differ's own session on purpose: with an editor
+open in every session, anything looser can jump into a different project.
+`any` also moves your tmux client to the editor's session, since focusing a
+pane in a session you are not attached to would open the file out of sight.
+
+Note that `editor_panes` only decides *which pane* is offered the file —
+delivering it still needs nvim's RPC socket, so naming an editor that has no
+such socket means reuse finds the pane, cannot reach it, and falls back to a
+new window.
 
 Nothing unsaved is ever at risk: differ sends `:drop`, which reuses a window
 already showing the file and, when the current buffer is modified, hides it
@@ -263,6 +292,12 @@ differ does not try to guess which editor is which, so tell it:
 { "editor_cmd": "subl {file}:{line}", "editor_strategy": "detach" }
 { "editor_cmd": "idea --line {line} {file}", "editor_strategy": "detach" }
 ```
+
+**Timeouts.** `editor_timeout_ms` (default 5000) bounds a tmux command or an
+editor open; `editor_probe_timeout_ms` (default 1000) bounds asking a running
+nvim which pane it lives in. Raise the second over a slow SSH hop — an nvim
+that does not answer in time is simply passed over, and reuse falls back to a
+new window.
 
 `detach` starts the editor and leaves it running — it never waits for it, so
 a launcher that stays in the foreground (`gvim`, `emacs`, `code --wait`, the

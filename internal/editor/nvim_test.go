@@ -68,7 +68,7 @@ func TestQueryNvim_ReportsThePaneItRunsIn(t *testing.T) {
 	t.Parallel()
 	sock := headlessNvim(t, []string{"TMUX_PANE=%42"})
 
-	got, err := queryNvim(context.Background(), sock, "$TMUX_PANE")
+	got, err := queryNvim(context.Background(), 0, sock, "$TMUX_PANE")
 	if err != nil {
 		t.Fatalf("queryNvim: %v", err)
 	}
@@ -88,7 +88,7 @@ func TestQueryNvim_ADeadSocketIsAnError(t *testing.T) {
 	// does not: it prints "Editing locally" and starts a real nvim in the
 	// foreground, which from a background goroutine would fight differ for
 	// the terminal. That is why openInNvim uses --remote-expr.
-	if _, err := queryNvim(context.Background(), sock, "1"); err == nil {
+	if _, err := queryNvim(context.Background(), 0, sock, "1"); err == nil {
 		t.Error("want an error for a socket nothing is listening on")
 	}
 }
@@ -117,7 +117,7 @@ func TestQueryNvim_ASilentServerTimesOut(t *testing.T) {
 	}()
 
 	start := time.Now()
-	if _, err := queryNvim(context.Background(), sock, "1"); err == nil {
+	if _, err := queryNvim(context.Background(), 0, sock, "1"); err == nil {
 		t.Error("want an error from a server that never answers")
 	}
 	if elapsed := time.Since(start); elapsed > 3*time.Second {
@@ -134,18 +134,18 @@ func TestOpenInNvim_OpensTheFileAtTheLine(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := openInNvim(context.Background(), sock, target, 3); err != nil {
+	if err := openInNvim(context.Background(), 0, sock, target, 3); err != nil {
 		t.Fatalf("openInNvim: %v", err)
 	}
 
-	name, err := queryNvim(context.Background(), sock, `expand("%:p")`)
+	name, err := queryNvim(context.Background(), 0, sock, `expand("%:p")`)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if name != target {
 		t.Errorf("open buffer = %q, want %q", name, target)
 	}
-	line, err := queryNvim(context.Background(), sock, `line(".")`)
+	line, err := queryNvim(context.Background(), 0, sock, `line(".")`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,23 +170,23 @@ func TestOpenInNvim_AModifiedBufferIsNeverDiscarded(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := openInNvim(context.Background(), sock, edited, 1); err != nil {
+	if err := openInNvim(context.Background(), 0, sock, edited, 1); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := queryNvim(context.Background(), sock, `execute("normal! ggIUNSAVED")`); err != nil {
+	if _, err := queryNvim(context.Background(), 0, sock, `execute("normal! ggIUNSAVED")`); err != nil {
 		t.Fatal(err)
 	}
 
-	windowsBefore, err := queryNvim(context.Background(), sock, `winnr("$")`)
+	windowsBefore, err := queryNvim(context.Background(), 0, sock, `winnr("$")`)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if err := openInNvim(context.Background(), sock, other, 1); err != nil {
+	if err := openInNvim(context.Background(), 0, sock, other, 1); err != nil {
 		t.Fatalf("openInNvim: %v", err)
 	}
 
-	state, err := queryNvim(context.Background(), sock,
+	state, err := queryNvim(context.Background(), 0, sock,
 		`getbufvar(bufnr(fnameescape('`+edited+`')), "&modified") . "|" .`+
 			`get(getbufline(bufnr(fnameescape('`+edited+`')), 1), 0, "<gone>")`)
 	if err != nil {
@@ -197,7 +197,7 @@ func TestOpenInNvim_AModifiedBufferIsNeverDiscarded(t *testing.T) {
 	}
 
 	// With nvim's default hidden=1 the reuse must not pile up windows either.
-	windowsAfter, err := queryNvim(context.Background(), sock, `winnr("$")`)
+	windowsAfter, err := queryNvim(context.Background(), 0, sock, `winnr("$")`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -217,21 +217,21 @@ func TestOpenInNvim_IsIdempotent(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	if err := openInNvim(ctx, sock, target, 2); err != nil {
+	if err := openInNvim(ctx, 0, sock, target, 2); err != nil {
 		t.Fatal(err)
 	}
-	if err := openInNvim(ctx, sock, target, 5); err != nil {
+	if err := openInNvim(ctx, 0, sock, target, 5); err != nil {
 		t.Fatal(err)
 	}
 
-	windows, err := queryNvim(ctx, sock, `winnr("$")`)
+	windows, err := queryNvim(ctx, 0, sock, `winnr("$")`)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if windows != "1" {
 		t.Errorf("window count = %s, want 1", windows)
 	}
-	line, err := queryNvim(ctx, sock, `line(".")`)
+	line, err := queryNvim(ctx, 0, sock, `line(".")`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -249,10 +249,10 @@ func TestOpenInNvim_HandlesAwkwardPaths(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := openInNvim(context.Background(), sock, target, 1); err != nil {
+	if err := openInNvim(context.Background(), 0, sock, target, 1); err != nil {
 		t.Fatalf("openInNvim: %v", err)
 	}
-	name, err := queryNvim(context.Background(), sock, `expand("%:p")`)
+	name, err := queryNvim(context.Background(), 0, sock, `expand("%:p")`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -274,10 +274,10 @@ func TestOpenInNvim_AChattyEditorIsNotAFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := openInNvim(context.Background(), sock, target, 2); err != nil {
+	if err := openInNvim(context.Background(), 0, sock, target, 2); err != nil {
 		t.Fatalf("a successful open was reported as a failure: %v", err)
 	}
-	name, err := queryNvim(context.Background(), sock, `expand("%:p")`)
+	name, err := queryNvim(context.Background(), 0, sock, `expand("%:p")`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -314,7 +314,7 @@ func TestQueryNvim_TheErrorCarriesNvimsOwnWords(t *testing.T) {
 	if _, err := exec.LookPath("nvim"); err != nil {
 		t.Skip("nvim not installed")
 	}
-	_, err := queryNvim(context.Background(), filepath.Join(shortDir(t), "nope"), "1")
+	_, err := queryNvim(context.Background(), 0, filepath.Join(shortDir(t), "nope"), "1")
 	if err == nil {
 		t.Fatal("want an error")
 	}

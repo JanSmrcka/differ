@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"os/exec"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/jansmrcka/differ/internal/editor"
@@ -44,7 +45,15 @@ func (m Model) openFileInEditor() (tea.Model, tea.Cmd) {
 		Line: m.editorLine(),
 		Env:  m.editorEnv,
 	}
-	cfg := editor.Config{Cmd: m.cfg.EditorCmd, Strategy: m.cfg.EditorStrategy}
+	cfg := editor.Config{
+		Cmd:          m.cfg.EditorCmd,
+		Strategy:     m.cfg.EditorStrategy,
+		Panes:        m.cfg.EditorPanes,
+		Target:       m.cfg.EditorTarget,
+		LineArgs:     m.cfg.EditorLineArgs,
+		Timeout:      time.Duration(m.cfg.EditorTimeoutMS) * time.Millisecond,
+		ProbeTimeout: time.Duration(m.cfg.EditorProbeTimeoutMS) * time.Millisecond,
+	}
 	return m, func() tea.Msg {
 		plan, err := editor.Resolve(context.Background(), cfg, req)
 		return editorPlanMsg{plan: plan, err: err}
