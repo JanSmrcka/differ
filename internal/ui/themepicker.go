@@ -2,6 +2,7 @@ package ui
 
 import (
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/jansmrcka/differ/internal/config"
 	"github.com/jansmrcka/differ/internal/theme"
 )
@@ -43,20 +44,30 @@ func (m Model) moveThemeCursor(delta int) (Model, tea.Cmd) {
 func (m Model) applyTheme(t theme.Theme) (Model, tea.Cmd) {
 	m.theme = t
 	m.styles = NewStyles(t)
-	initChromaStyle(t.ChromaStyle)
 	m.lastDiffContent = ""
+	// Every in-flight diff was built with the old palette. The counter lets
+	// their results be dropped rather than installed after this one.
+	m.themeGen++
 	return m, m.loadDiffCmd(false)
 }
 
 // confirmTheme keeps the previewed theme and remembers it for next time.
+//
+// It applies the selection as well as writing it. Writing without applying
+// meant enter with no movement at all persisted whatever the cursor had landed
+// on — and the cursor falls back to the first theme when the one in use is not
+// in the registry, which is exactly the case under --no-color.
 func (m Model) confirmTheme() (Model, tea.Cmd) {
 	m.showThemes = false
 	name := theme.ThemeNames()[m.themeCursor]
+
+	m, cmd := m.applyTheme(theme.Themes[name])
 	m.cfg.Theme = name
 	m.statusMsg = "theme: " + name
 
 	cfg := m.cfg
-	return m, func() tea.Msg { return savePrefDoneMsg{err: config.Save(cfg)} }
+	save := func() tea.Msg { return savePrefDoneMsg{err: config.Save(cfg)} }
+	return m, tea.Batch(cmd, save)
 }
 
 // cancelTheme puts back what was in use and writes nothing.
@@ -69,6 +80,12 @@ func (m Model) cancelTheme() (Model, tea.Cmd) {
 }
 
 // renderThemeOverlay lists the themes with the selection marked.
+//
+// It takes the file list's panel rather than the whole content area, because
+// the point of the picker is to see the diff in the theme it is offering. Over
+// everything it was previewing the chrome and the swatches and nothing else,
+// which the issue asks for by name: "moving the selection re-renders the
+// current screen in that theme".
 func (m Model) renderThemeOverlay(width, height int) string {
 	names := theme.ThemeNames()
 	rows := make([]string, 0, len(names))
@@ -77,20 +94,25 @@ func (m Model) renderThemeOverlay(width, height int) string {
 		if i == m.themeCursor {
 			label = m.styles.Accent.Render(focusBar) + m.styles.PanelLabelFocus.Render(" "+name)
 		}
-		if name == m.cfg.Theme {
-			label += m.styles.HelpDesc.Render("   in use")
+		// By palette, not by name: the config can say "dark", which is an
+		// alias and not in ThemeNames, and --theme overrides the config
+		// entirely — so a name comparison marked nothing at all on a default
+		// config, and the wrong row under --theme.
+		if theme.Themes[name] == m.themeBefore {
+			label += m.styles.HelpDesc.Render("  ·  in use")
 		}
-		rows = append(rows, label+"  "+m.themeSwatch(theme.Themes[name]))
+		rows = append(rows, label+" "+m.themeSwatch(theme.Themes[name], width-lipgloss.Width(label)-2))
 	}
-	return m.fitOverlay(" theme", rows, "j/k to try · enter to keep · esc to cancel", width, height)
+	return m.fitOverlay(" theme", rows, "j/k · enter keeps · esc cancels", width, height)
 }
 
-// themeSwatch shows a theme's diff colours, which is what the eye is actually
-// choosing between.
-func (m Model) themeSwatch(t theme.Theme) string {
+// themeSwatch shows a theme's diff colours, in whatever room is left.
+func (m Model) themeSwatch(t theme.Theme, room int) string {
 	s := NewStyles(t)
-	return s.DiffAdded.Render(" + added ") + s.DiffRemoved.Render(" - removed ") +
-		s.DiffContext.Render(" context ")
+	if room < 9 {
+		return ""
+	}
+	return s.DiffAdded.Render(" + ") + s.DiffRemoved.Render(" - ") + s.DiffContext.Render(" ctx ")
 }
 
 // themePickerKey handles the picker's keys while it is open.

@@ -94,6 +94,8 @@ func (m Model) routeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "!":
 			m.showProblem, m.showHelp, m.showHistory = !m.showProblem, false, false
 			return m, nil
+		case "t":
+			return m.openThemePicker()
 		case "H":
 			// H closes the history, but does not open one from the help
 			// overlay: unlike ?, it is not a global — it exists only in
@@ -158,6 +160,12 @@ func (m Model) handleResize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) handleDiffLoaded(msg diffLoadedMsg) (tea.Model, tea.Cmd) {
 	if msg.index != m.cursor {
+		return m, nil
+	}
+	// Built under a theme that is no longer in use. Two git diffs can be in
+	// flight — a preview and the reload that cancelled it — and they do not
+	// finish in the order they started.
+	if msg.themeGen != m.themeGen {
 		return m, nil
 	}
 	if msg.renderer == nil {

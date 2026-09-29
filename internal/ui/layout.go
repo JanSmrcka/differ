@@ -47,10 +47,14 @@ func (m Model) View() string {
 		body = m.renderHistoryOverlay(m.width, contentH)
 	case m.showProblem:
 		body = m.renderProblemOverlay(m.width, contentH)
-	case m.showThemes:
-		body = m.renderThemeOverlay(m.width, contentH)
 	default:
 		left := padLines(m.leftPanel(), contentH)
+		if m.showThemes {
+			// The picker takes the file list's panel rather than the whole
+			// area, so the diff beside it stays on screen — repainted in the
+			// theme under the cursor, which is the point of a picker.
+			left = padLines(strings.Split(m.renderThemeOverlay(fileListWidth, contentH), "\n"), contentH)
+		}
 		right := padLines(m.rightPanel(), contentH)
 		rows := make([]string, contentH)
 		for i := range rows {

@@ -14,60 +14,36 @@ import (
 
 var (
 	lexerCache sync.Map // ext -> chroma.Lexer
-
-	// chromaStyle is the style the diff is highlighted with, guarded because
-	// renderers are built inside tea.Cmd goroutines.
-	//
-	// It was a sync.Once, which meant the first theme of the session was the
-	// only one that ever took effect: switching theme at runtime changed
-	// every colour except the syntax highlighting.
-	chromaMu    sync.RWMutex
-	chromaStyle *chroma.Style
-	chromaName  string
+	styleCache sync.Map // chroma style name -> *chroma.Style
 )
 
-// initChromaStyle selects the Chroma style for a theme, and is safe to call
-// again when the theme changes.
-func initChromaStyle(styleName string) {
-	chromaMu.Lock()
-	defer chromaMu.Unlock()
-	if styleName == chromaName {
-		return
+// chromaStyleFor resolves a theme's Chroma style, once per name.
+//
+// This used to be a package-level *chroma.Style behind a sync.Once, then
+// behind an RWMutex, and both were wrong in the same way: one global palette
+// while the styles are per renderer. A renderer built in a tea.Cmd goroutine
+// resolved the style and then rendered, non-atomically, so a theme switch
+// between the two produced a diff painted with one theme's backgrounds and
+// another's syntax colours. It also made two parallel tests fight over the
+// same variable.
+//
+// Nil means no highlighting, which is what --no-color asks for.
+func chromaStyleFor(name string) *chroma.Style {
+	if name == theme.NoHighlight {
+		return nil
 	}
-	chromaName = styleName
-
-	func() {
-		// theme.NoHighlight means the user asked for no colour, so leave the
-		// style nil and highlightLine returns the text untouched. An empty
-		// name is different: that is "unset", and falls back to a default.
-		if styleName == theme.NoHighlight {
-			chromaStyle = nil
-			return
-		}
-		// A registry lookup, because styles.Get never returns nil: it hands
-		// back Chroma's own Fallback — "swapoff", which paints almost
-		// nothing — for a name it does not know. The nil check that used to
-		// be here could not fire, so a typo'd style name silently produced a
-		// colourless diff instead of the monokai it claimed to fall back to.
-		if _, ok := styles.Registry[styleName]; !ok {
-			styleName = "monokai"
-		}
-		chromaStyle = styles.Get(styleName)
-	}()
-}
-
-// currentChromaStyleName is the style in force, for tests.
-func currentChromaStyleName() string {
-	chromaMu.RLock()
-	defer chromaMu.RUnlock()
-	return chromaName
-}
-
-// currentChromaStyle reads the style under the lock.
-func currentChromaStyle() *chroma.Style {
-	chromaMu.RLock()
-	defer chromaMu.RUnlock()
-	return chromaStyle
+	if cached, ok := styleCache.Load(name); ok {
+		return cached.(*chroma.Style)
+	}
+	// styles.Get never returns nil — it hands back Chroma's own Fallback for a
+	// name it does not know, which paints almost nothing. A registry lookup is
+	// what makes the monokai fallback real.
+	if _, ok := styles.Registry[name]; !ok {
+		name = "monokai"
+	}
+	style := styles.Get(name)
+	styleCache.Store(name, style)
+	return style
 }
 
 // getLexer returns a cached Chroma lexer for the given filename.
@@ -92,8 +68,8 @@ func getLexer(filename string) chroma.Lexer {
 
 // highlightLine applies syntax highlighting to a code line.
 // It applies Chroma foreground colors but preserves the background from bgColor.
-func highlightLine(content, filename, bgColor string) string {
-	return highlightSpan(content, filename, bgColor, lipgloss.Style{}, span{})
+func highlightLine(style *chroma.Style, content, filename, bgColor string) string {
+	return highlightSpan(style, content, filename, bgColor, lipgloss.Style{}, span{})
 }
 
 // highlightSpan is highlightLine with one range of runes painted differently —
@@ -103,11 +79,10 @@ func highlightLine(content, filename, bgColor string) string {
 // boundaries, never the line before lexing: splitting first would change how
 // the text tokenises, so a span that happened to start mid-string would
 // recolour the rest of the line.
-func highlightSpan(content, filename, bgColor string, emph lipgloss.Style, s span) string {
+func highlightSpan(style *chroma.Style, content, filename, bgColor string, emph lipgloss.Style, s span) string {
 	if content == "" {
 		return content
 	}
-	style := currentChromaStyle()
 	if style == nil {
 		// Highlighting is off, which is also the only situation where the
 		// emphasis has no background to use. There is nothing to paint with,
