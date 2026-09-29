@@ -56,7 +56,7 @@ func (m Model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handlePullDone(msg)
 	case savePrefDoneMsg:
 		if msg.err != nil {
-			m.statusMsg = "config save failed"
+			m = m.fail("saving the config", msg.err)
 		}
 		return m, nil
 	case tea.KeyMsg:
@@ -79,10 +79,13 @@ func (m Model) routeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// mode underneath an overlay — the branch list arriving is enough — and
 	// inside the guard every key then went into that mode's text input, which
 	// left the overlay with no way to close.
-	if m.showHelp || m.showHistory {
+	if m.showHelp || m.showHistory || m.showProblem {
 		switch msg.String() {
 		case "?":
-			m.showHelp, m.showHistory = !m.showHelp, false
+			m.showHelp, m.showHistory, m.showProblem = !m.showHelp, false, false
+			return m, nil
+		case "!":
+			m.showProblem, m.showHelp, m.showHistory = !m.showProblem, false, false
 			return m, nil
 		case "H":
 			// H closes the history, but does not open one from the help
@@ -93,7 +96,7 @@ func (m Model) routeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		case "esc", "q":
-			m.showHelp, m.showHistory = false, false
+			m.showHelp, m.showHistory, m.showProblem = false, false, false
 			return m, nil
 		}
 		// Everything else is swallowed, so a stray j does not scroll a diff
@@ -101,9 +104,17 @@ func (m Model) routeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	if !m.typing() && msg.String() == "?" {
-		m.showHelp = true
-		return m, nil
+	if !m.typing() {
+		switch msg.String() {
+		case "?":
+			m.showHelp = true
+			return m, nil
+		case "!":
+			// Global, because a failure can come from anything — including a
+			// mode that has since been left.
+			m.showProblem = true
+			return m, nil
+		}
 	}
 
 	switch m.mode {
@@ -182,8 +193,7 @@ func (m Model) handleFilesRefreshed(msg filesRefreshedMsg) (tea.Model, tea.Cmd) 
 		// "everything was committed", so nothing may be staled off it — a held
 		// index.lock while the agent stages files would otherwise demote the
 		// whole review with no way back.
-		m.statusMsg = "refresh failed: " + msg.err.Error()
-		return m, nil
+		return m.fail("refresh", msg.err), nil
 	}
 	m = m.noteChangedFiles(msg.keys)
 	if filesEqual(m.files, msg.files) {
@@ -228,8 +238,7 @@ func (m Model) handleReanchor(msg reanchorMsg) (tea.Model, tea.Cmd) {
 func (m Model) handleCommitDone(msg commitDoneMsg) (tea.Model, tea.Cmd) {
 	m.mode = modeFileList
 	if msg.err != nil {
-		m.statusMsg = "commit failed: " + msg.err.Error()
-		return m, nil
+		return m.fail("commit", msg.err), nil
 	}
 	m.statusMsg = "committed!"
 	m.commitInput.Reset()
@@ -239,8 +248,7 @@ func (m Model) handleCommitDone(msg commitDoneMsg) (tea.Model, tea.Cmd) {
 func (m Model) handleCommitMsgGenerated(msg commitMsgGeneratedMsg) (tea.Model, tea.Cmd) {
 	m.generatingMsg = false
 	if msg.err != nil {
-		m.statusMsg = "ai msg failed: " + msg.err.Error()
-		return m, nil
+		return m.fail("generating a commit message", msg.err), nil
 	}
 	m.commitInput.SetValue(msg.message)
 	m.commitInput.CursorEnd()
@@ -249,8 +257,7 @@ func (m Model) handleCommitMsgGenerated(msg commitMsgGeneratedMsg) (tea.Model, t
 
 func (m Model) handleBranchesLoaded(msg branchesLoadedMsg) (tea.Model, tea.Cmd) {
 	if msg.err != nil {
-		m.statusMsg = "branch list failed: " + msg.err.Error()
-		return m, nil
+		return m.fail("listing branches", msg.err), nil
 	}
 	if len(msg.branches) == 0 {
 		m.statusMsg = "no branches"
@@ -258,7 +265,7 @@ func (m Model) handleBranchesLoaded(msg branchesLoadedMsg) (tea.Model, tea.Cmd) 
 	}
 	// An overlay belongs to the view it was opened over, and this is a
 	// different view arriving in the background.
-	m.showHelp, m.showHistory = false, false
+	m.showHelp, m.showHistory, m.showProblem = false, false, false
 	m.mode = modeBranchPicker
 	m.branches = msg.branches
 	m.currentBranch = msg.current
@@ -286,8 +293,7 @@ func (m Model) handleBranchSwitched(msg branchSwitchedMsg) (tea.Model, tea.Cmd) 
 	m.branchFilter.Reset()
 	m.branchFilter.Blur()
 	if msg.err != nil {
-		m.statusMsg = "switch failed: " + msg.err.Error()
-		return m, nil
+		return m.fail("switch", msg.err), nil
 	}
 	m.statusMsg = "switched to " + m.repo.BranchName()
 	m.prevCurs = -1
@@ -300,8 +306,7 @@ func (m Model) handleBranchCreated(msg branchCreatedMsg) (tea.Model, tea.Cmd) {
 	m.branchCreating = false
 	m.branchInput.Reset()
 	if msg.err != nil {
-		m.statusMsg = "create failed: " + msg.err.Error()
-		return m, nil
+		return m.fail("creating the branch", msg.err), nil
 	}
 	m.mode = modeFileList
 	m.statusMsg = "created & switched to " + msg.name

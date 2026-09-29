@@ -54,6 +54,7 @@ main.go → cmd/root.go (cobra commands)
                    ├── keymap.go   — the keymap: one table, read by bar/overlay/tests
                    ├── commandbar.go — the one-line command bar and ? overlay
                    ├── history.go  — the H overlay: what was sent, where, and whether it arrived
+                   ├── problem.go  — how a failure is presented, and the empty states
                    ├── filelist.go — path disambiguation and the file list's own arithmetic
                    ├── progress.go — review progress: which files moved under the reviewer
                    ├── log.go      — LogModel (commit log browser)
@@ -159,6 +160,19 @@ github.com/spf13/cobra                # CLI
 
 1. Define color values in `internal/theme/theme.go`, add to `Themes` map
 2. `styles.go` picks it up automatically
+
+### Failures
+
+Nothing puts a tool's own output in the status bar. `Model.fail(action, err)`
+is the one way a failure reaches the user: `describe` turns it into a summary,
+a hint and the original text, the bar gets the one-line form, and `!` shows the
+rest. The hints are matched on fragments of git's wording because git has no
+error codes — an unmatched failure still gets presented, so a reworded git
+message degrades to "no hint" rather than to something wrong.
+
+`fail` touches nothing but the status bar and the stored problem. A failure
+must never cost the user their place in the diff or a comment they have
+written.
 
 ## Gotchas
 

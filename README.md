@@ -221,6 +221,31 @@ stale because its file left the diff.
 | `ctrl+n`        | create new branch    |
 | `esc`           | clear filter / close |
 
+## When something fails
+
+Failures get one line in differ's own voice, with what to do about it:
+
+```
+push failed — check your access to the remote  ·  ! for details
+```
+
+`!` shows the failure in full, including what git (or tmux, or the clipboard
+helper) actually said. That text is never put in the status bar, and it is
+never thrown away either — for the failures nobody anticipated it is the only
+useful thing there is.
+
+A failure changes nothing else: not your place in the diff, not the comments
+you have written. Reading the line and trying again is the whole recovery.
+
+An empty changeset says so rather than showing a blank panel, and says what
+would change it:
+
+```
+ No changes
+
+ Your working tree is clean.
+```
+
 ## AI Commit Messages
 
 When pressing `c`, differ uses `claude -p` (Claude CLI) to generate a commit message from the staged diff. The message is pre-filled in the input — edit or confirm with Enter.

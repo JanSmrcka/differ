@@ -159,6 +159,11 @@ type Model struct {
 	// showHistory draws the session's delivery history over the panels, the
 	// same way.
 	showHistory bool
+	// showProblem draws the last failure in full, and problem is that
+	// failure — kept so the tool's own words are reachable without being in
+	// the status bar.
+	showProblem bool
+	problem     *problem
 
 	upstream     git.UpstreamInfo
 	pushConfirm  bool

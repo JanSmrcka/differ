@@ -119,8 +119,7 @@ func (m Model) handleTick() (tea.Model, tea.Cmd) {
 
 func (m Model) handlePushDone(msg pushDoneMsg) (tea.Model, tea.Cmd) {
 	if msg.err != nil {
-		m.statusMsg = "push failed: " + msg.err.Error()
-		return m, nil
+		return m.fail("push", msg.err), nil
 	}
 	m.statusMsg = "pushed!"
 	return m, m.fetchUpstreamStatusCmd()
@@ -128,8 +127,7 @@ func (m Model) handlePushDone(msg pushDoneMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) handlePullDone(msg pullDoneMsg) (tea.Model, tea.Cmd) {
 	if msg.err != nil {
-		m.statusMsg = "pull failed: " + msg.err.Error()
-		return m, nil
+		return m.fail("pull", msg.err), nil
 	}
 	m.statusMsg = "pulled!"
 	return m, tea.Batch(m.refreshFilesCmd(), m.fetchUpstreamStatusCmd())

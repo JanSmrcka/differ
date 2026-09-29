@@ -325,17 +325,23 @@ func TestUpdateBranchMode_Esc(t *testing.T) {
 	}
 }
 
+// This reverses what the test used to assert. It required the tool's own words
+// in the status bar; putting them there is the thing #55 set out to stop. The
+// bar gets differ's sentence, and the original text is reachable with !.
 func TestHandleBranchesLoaded_Error(t *testing.T) {
 	t.Parallel()
 	m := newTestModel(t, nil)
-	msg := branchesLoadedMsg{err: fmt.Errorf("permission denied")}
+	msg := branchesLoadedMsg{err: fmt.Errorf("fatal: some git complaint")}
 	result, _ := m.handleBranchesLoaded(msg)
 	rm := result.(Model)
 	if rm.mode != modeFileList {
 		t.Error("should stay in file list mode on error")
 	}
-	if !strings.Contains(rm.statusMsg, "permission denied") {
-		t.Errorf("statusMsg=%q, want error message", rm.statusMsg)
+	if !strings.Contains(rm.statusMsg, "listing branches failed") {
+		t.Errorf("statusMsg=%q, want it to say what failed", rm.statusMsg)
+	}
+	if rm.problem == nil || !strings.Contains(rm.problem.detail, "some git complaint") {
+		t.Error("the original text was not kept for the details view")
 	}
 }
 

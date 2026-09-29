@@ -52,6 +52,7 @@ func (b binding) help() string {
 func globalBindings() []binding {
 	return []binding{
 		{Keys: []string{"?"}, Desc: "help", Help: "show every key for this view", Bar: true},
+		{Keys: []string{"!"}, Desc: "problem", Help: "show the last failure in full, including what the tool said"},
 		{Keys: []string{"ctrl+c"}, Desc: "quit", Help: "quit immediately"},
 	}
 }
