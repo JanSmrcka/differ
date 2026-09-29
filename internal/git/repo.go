@@ -312,7 +312,13 @@ func (r *Repo) CommitDiffFiles(hash string) ([]FileChange, error) {
 
 // run executes a git command and returns stdout.
 func (r *Repo) run(args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
+	// core.quotepath=false keeps a non-ASCII path readable. By default git
+	// escapes those bytes — žluťoučký.ts arrives as "\305\276lu..." — and
+	// every path differ reads is then wrong: the file list shows the escaped
+	// form, and asking git for that file's diff matches nothing. Paths that
+	// genuinely need quoting (a quote or a newline in the name) are still
+	// quoted, so the parsers are no worse off than before.
+	cmd := exec.Command("git", append([]string{"-c", "core.quotepath=false"}, args...)...)
 	cmd.Dir = r.dir
 	out, err := cmd.Output()
 	if err != nil {
@@ -492,4 +498,32 @@ func parseLog(out string) []Commit {
 		})
 	}
 	return commits
+}
+
+// IndexHashes maps each path in the index to the object id of its staged
+// content, in one call.
+//
+// It is how "has what is staged changed?" is answered exactly. The line counts
+// from a numstat cannot answer it: staging moves lines between the staged and
+// unstaged halves of the same file without changing their total.
+func (r *Repo) IndexHashes() (map[string]string, error) {
+	out, err := r.run("ls-files", "--stage", "-z")
+	if err != nil {
+		return nil, err
+	}
+	hashes := map[string]string{}
+	for _, record := range strings.Split(out, "\x00") {
+		// "<mode> <oid> <stage>\t<path>", NUL-terminated so a path with a
+		// newline in it cannot split a record.
+		tab := strings.IndexByte(record, '\t')
+		if tab < 0 {
+			continue
+		}
+		fields := strings.Fields(record[:tab])
+		if len(fields) < 2 {
+			continue
+		}
+		hashes[record[tab+1:]] = fields[1]
+	}
+	return hashes, nil
 }

@@ -60,6 +60,14 @@ func (m Model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case tea.KeyMsg:
+		// ctrl+c is documented as quitting immediately, so it is answered
+		// before anything else can claim it. In the commit input and the
+		// branch-name input the key reached the text field, which swallowed
+		// it — bubbletea does not quit on ctrl+c by itself — and esc was the
+		// only way out of either.
+		if msg.String() == "ctrl+c" {
+			return m, tea.Quit
+		}
 		return m.routeKey(msg)
 	}
 	return m, nil
@@ -73,14 +81,17 @@ func (m Model) routeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// left the overlay with no way to close.
 	if m.showHelp || m.showHistory {
 		switch msg.String() {
-		case "ctrl+c":
-			return m, tea.Quit
 		case "?":
 			m.showHelp, m.showHistory = !m.showHelp, false
 			return m, nil
 		case "H":
-			m.showHistory, m.showHelp = !m.showHistory, false
-			return m, nil
+			// H closes the history, but does not open one from the help
+			// overlay: unlike ?, it is not a global — it exists only in
+			// review mode, and the file list's help does not list it.
+			if m.showHistory {
+				m.showHistory = false
+				return m, nil
+			}
 		case "esc", "q":
 			m.showHelp, m.showHistory = false, false
 			return m, nil
@@ -90,16 +101,9 @@ func (m Model) routeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	if !m.typing() {
-		switch msg.String() {
-		case "ctrl+c":
-			// Listed in the overlay as "quit immediately", so it has to work
-			// there too.
-			return m, tea.Quit
-		case "?":
-			m.showHelp = true
-			return m, nil
-		}
+	if !m.typing() && msg.String() == "?" {
+		m.showHelp = true
+		return m, nil
 	}
 
 	switch m.mode {

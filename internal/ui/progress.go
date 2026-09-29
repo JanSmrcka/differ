@@ -2,6 +2,8 @@ package ui
 
 import (
 	"fmt"
+	"hash/fnv"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -10,56 +12,78 @@ import (
 
 // Noticing that a file moved under the reviewer.
 //
-// The signal has to be cheap — it runs on every refresh — and it has to be
-// quiet: a false "changed" un-reviews a file the user did read, and the ratio
-// in the status bar goes backwards for no reason they can see.
+// The signal has to be quiet above all: a false "changed" un-reviews a file
+// the user did read, and the ratio in the status bar goes backwards for no
+// reason they can see. That rules out anything that fires on a write rather
+// than on an edit.
 
 // fileKeysOf fingerprints each changed file, one key per path.
 //
-// The only cost on top of the git status a refresh already runs is a stat per
-// changed file, and that is skipped entirely under -s.
+// The key is the *content differ is showing*, which is what "changed under the
+// reviewer" has to mean:
 //
-// Three things are deliberately *not* in the key:
+//   - Normally, and under -r, the diff runs to the working tree, so the key is
+//     a hash of the worktree file. Staging does not touch it, so `git add` —
+//     or the user pressing `a` — cannot flag a file, and a reformat that
+//     writes the same bytes back is not a change either. mtime and size were
+//     tried first and got both of those wrong: `gofmt -w`, `prettier --write`
+//     and `git checkout -- .` all rewrite identical bytes and flagged every
+//     file the reviewer had read.
+//   - Under -s the diff runs to the index, so the key is git's own object id
+//     for the staged content. The line counts cannot answer that question:
+//     staging moves lines between the staged and unstaged halves of a file
+//     without changing their total.
 //
-//   - The staged flag. Staging changes nothing about a file's content, and
-//     including it meant `git add` — or the user pressing `a` — marked every
-//     file they had read as rewritten.
-//   - Per-entry line counts. git reports a file with both staged and unstaged
-//     changes twice, and staging moves lines from one half to the other; the
-//     halves are summed so the total is what moves, not the split.
-//   - The worktree file under -s. There the reviewer is looking at the index,
-//     so an unstaged write is not a change to what is on screen.
-//
-// Under -s the key is therefore the line counts alone, which misses a staged
-// edit that happens to keep them identical. That is a known gap, and the
-// honest one: the alternative is hashing the staged blob on every refresh.
+// Reading the changed files is not new cost of a kind this program does not
+// already pay — buildFileItems reads every untracked file in full on the same
+// refresh.
 func fileKeysOf(repo *git.Repo, files []fileItem, stagedOnly bool) map[string]string {
-	type totals struct{ added, deleted int }
-	sums := map[string]totals{}
-	order := make([]string, 0, len(files))
-	for _, f := range files {
-		c := f.change
-		if _, seen := sums[c.Path]; !seen {
-			order = append(order, c.Path)
-		}
-		t := sums[c.Path]
-		t.added += c.AddedLines
-		t.deleted += c.DeletedLines
-		sums[c.Path] = t
+	var staged map[string]string
+	if stagedOnly && repo != nil {
+		// One call for the whole index, not one per file.
+		staged, _ = repo.IndexHashes()
 	}
 
-	keys := make(map[string]string, len(order))
-	for _, path := range order {
-		t := sums[path]
-		key := fmt.Sprintf("%d|%d", t.added, t.deleted)
-		if !stagedOnly && repo != nil {
-			if st, err := os.Stat(filepath.Join(repo.Dir(), path)); err == nil {
-				key += fmt.Sprintf("|%d|%d", st.Size(), st.ModTime().UnixNano())
-			}
+	keys := make(map[string]string, len(files))
+	for _, f := range files {
+		path := f.change.Path
+		if _, done := keys[path]; done {
+			// git reports a file with both staged and unstaged changes twice.
+			// One content fingerprint covers both halves.
+			continue
 		}
-		keys[path] = key
+		if stagedOnly {
+			keys[path] = "index:" + staged[path]
+			continue
+		}
+		keys[path] = worktreeKey(repo, path)
 	}
 	return keys
+}
+
+// worktreeKey fingerprints a file's content on disk.
+//
+// A file that is gone — deleted in the working tree — has no content to hash,
+// and says so rather than falling back to something that looks like a hash.
+func worktreeKey(repo *git.Repo, path string) string {
+	if repo == nil {
+		return "unknown"
+	}
+	file, err := os.Open(filepath.Join(repo.Dir(), path))
+	if err != nil {
+		return "gone"
+	}
+	// Read-only, so there is nothing a close error could tell us.
+	defer func() { _ = file.Close() }()
+
+	h := fnv.New64a()
+	size, err := io.Copy(h, file)
+	if err != nil {
+		return "unreadable"
+	}
+	// The size is in the key as well, so a hash collision would have to be a
+	// collision between two files of exactly the same length.
+	return fmt.Sprintf("%d:%x", size, h.Sum64())
 }
 
 // noteChangedFiles tells the session which files moved since the last refresh.
@@ -77,6 +101,12 @@ func fileKeysOf(repo *git.Repo, files []fileItem, stagedOnly bool) map[string]st
 // The result is read by the status bar's progress readout. The per-file badge
 // in the changed-file list is #52.
 func (m Model) noteChangedFiles(keys map[string]string) Model {
+	if keys == nil {
+		// Nothing was fingerprinted, so nothing is known about what moved.
+		// Adopting an empty map would make every file look new on the next
+		// refresh and quietly switch detection off for the rest of the run.
+		return m
+	}
 	if m.session != nil && m.fileKeys != nil {
 		current := m.currentFilePath()
 		for path, key := range keys {

@@ -60,8 +60,6 @@ func (m Model) updateReviewMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.sendCommentAtCursor()
 	case "S":
 		return m.sendAllPending()
-	case "ctrl+c":
-		return m, tea.Quit
 	case "esc":
 		m.mode = modeFileList
 		return m, nil

@@ -295,7 +295,7 @@ func TestOverlays_ClippingAStyledRowLeavesTheTerminalClean(t *testing.T) {
 		"\x1b[38;2;147;153;178minternal/api/client/transport.ts\x1b[0m"
 
 	for _, width := range []int{20, 40, 57, 58, 59} {
-		got := fitOverlay([]string{row}, width, 1)
+		got := padTo(clipOverlayRow(row, width), width)
 
 		if w := lipgloss.Width(got); w != width {
 			t.Errorf("width %d: clipped row is %d columns", width, w)
@@ -322,4 +322,108 @@ func lastEscape(s string) string {
 		return s[i : i+j+1]
 	}
 	return s[i:]
+}
+
+// The files are what the overlay exists to answer, and joined onto the summary
+// they were the first thing clipped away on a narrow terminal.
+func TestOverlays_TheHistoryKeepsItsFilesOnANarrowTerminal(t *testing.T) {
+	t.Parallel()
+	m := historyModel(t)
+	m.session.RecordDelivery(review.Delivery{
+		At: time.Date(2026, 9, 29, 13, 4, 5, 0, time.UTC), Target: "clipboard",
+		Comments: []string{"c1", "c2", "c3"},
+		Files: []string{
+			"internal/ui/diffrender.go",
+			"internal/review/session.go",
+			"internal/git/repo.go",
+		},
+	})
+
+	got := stripANSI(m.renderHistoryOverlay(60, 12))
+	for _, want := range []string{"diffrender.go", "session.go", "repo.go"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the history lost %q at width 60:\n%s", want, got)
+		}
+	}
+}
+
+// Dropping rows off the end took the closing line with them: at the minimum
+// terminal the help overlay showed three of twenty-one keys and no way out.
+func TestOverlays_TheClosingLineSurvivesASmallPanel(t *testing.T) {
+	t.Parallel()
+	m := historyModel(t)
+
+	for _, height := range []int{1, 2, 3, 4, 5, 8, 10, 24} {
+		for _, o := range []struct {
+			name, body string
+		}{
+			{"help", m.renderHelpOverlay(80, height)},
+			{"history", m.renderHistoryOverlay(80, height)},
+		} {
+			rows := strings.Split(o.body, "\n")
+			if len(rows) != max(height, 0) {
+				t.Errorf("%s at height %d rendered %d rows", o.name, height, len(rows))
+				continue
+			}
+			// Four rows is the least that can carry a title and a way out.
+			if height >= 4 && !strings.Contains(stripANSI(o.body), "esc to close") {
+				t.Errorf("%s at height %d has no way out:\n%s", o.name, height, stripANSI(o.body))
+			}
+		}
+	}
+}
+
+// Silently showing three of twenty-one keys is worse than saying so.
+func TestOverlays_WhatWasDroppedIsCounted(t *testing.T) {
+	t.Parallel()
+	m := historyModel(t)
+	m.mode = modeReview
+
+	full := strings.Count(stripANSI(m.renderHelpOverlay(80, 40)), "\n")
+	got := stripANSI(m.renderHelpOverlay(80, 8))
+	if !strings.Contains(got, "more") {
+		t.Errorf("the help overlay dropped rows without saying so (%d rows in full):\n%s", full, got)
+	}
+}
+
+// A history with entries must never claim nothing was sent, whatever the room.
+func TestOverlays_ANonEmptyHistoryNeverClaimsNothingWasSent(t *testing.T) {
+	t.Parallel()
+	m := historyModel(t)
+	m.session.RecordDelivery(review.Delivery{
+		At: time.Date(2026, 9, 29, 13, 4, 5, 0, time.UTC), Target: "clipboard",
+		Comments: []string{"c1"}, Files: []string{"a.ts"},
+	})
+
+	for height := 1; height <= 12; height++ {
+		if got := stripANSI(m.renderHistoryOverlay(80, height)); strings.Contains(got, "nothing sent") {
+			t.Errorf("height %d claims nothing was sent:\n%s", height, got)
+		}
+	}
+}
+
+// H is a review-mode key, not a global. With the file list's help open it was
+// reaching the overlay's own switch and opening a history the file list does
+// not offer and the README does not document.
+func TestOverlays_HDoesNotOpenTheHistoryWhereItIsNotABinding(t *testing.T) {
+	t.Parallel()
+	m := historyModel(t)
+	m.mode = modeFileList
+	m.showHelp = true
+
+	updated, _ := m.routeKey(key("H"))
+	got := updated.(Model)
+	if got.showHistory {
+		t.Error("H opened the history from the file list's help overlay")
+	}
+	if !got.showHelp {
+		t.Error("H closed the help overlay instead of being ignored")
+	}
+
+	// In review mode, where it is a binding, it still closes the history.
+	m = historyModel(t)
+	m.showHistory = true
+	if updated, _ = m.routeKey(key("H")); updated.(Model).showHistory {
+		t.Error("H did not close the history")
+	}
 }

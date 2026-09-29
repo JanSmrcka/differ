@@ -11,8 +11,6 @@ func (m Model) updateDiffMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.quitConfirm = false
 	}
 	switch msg.String() {
-	case "ctrl+c":
-		return m, tea.Quit
 	case "q":
 		return m.confirmQuit()
 	case "esc", "h", "left":

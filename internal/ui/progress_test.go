@@ -183,3 +183,94 @@ func TestProgress_ANewFileIsNotMarkedChanged(t *testing.T) {
 		t.Error("a file that just appeared was marked changed")
 	}
 }
+
+// Rewriting a file with the same bytes is what a formatter does on a file that
+// was already formatted, and what `git checkout -- .` does to an unchanged
+// file. Keying on mtime got this wrong and flagged every file the reviewer had
+// read at once.
+func TestFileKeys_AnIdenticalRewriteIsNotAChange(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("a.ts", "one\ntwo\n", "init")
+	tr.Modify("a.ts", "one\nTWO\n")
+
+	before := keysOn(t, tr, false)
+	tr.Write("a.ts", "one\nTWO\n")
+	after := keysOn(t, tr, false)
+
+	if before["a.ts"] != after["a.ts"] {
+		t.Errorf("writing identical bytes moved the key:\n%q\n%q", before["a.ts"], after["a.ts"])
+	}
+}
+
+// Under -s a staged edit has to move the key even when the line counts are
+// identical — summing them hid exactly this.
+func TestFileKeys_StagedOnlyNoticesAnEditWithTheSameLineCounts(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("a.ts", "one\ntwo\n", "init")
+	tr.Modify("a.ts", "one\nTWO\n")
+	tr.Stage("a.ts")
+
+	before := keysOn(t, tr, true)
+	// Same shape, different content: still +1 -1.
+	tr.Write("a.ts", "one\nTHREE\n")
+	tr.Stage("a.ts")
+	after := keysOn(t, tr, true)
+
+	if before["a.ts"] == after["a.ts"] {
+		t.Errorf("a staged edit with unchanged line counts did not move the key: %q", before["a.ts"])
+	}
+}
+
+// And in the normal view, staging part of a file must not move the key: the
+// diff on screen runs to the working tree either way.
+func TestFileKeys_StagingHalfOfAFileDoesNotMoveTheKey(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("a.ts", "one\n", "init")
+	tr.Modify("a.ts", "one\ntwo\n")
+	tr.Stage("a.ts")
+	tr.Write("a.ts", "one\ntwo\nthree\n")
+
+	before := keysOn(t, tr, false)
+	tr.Stage("a.ts")
+	if after := keysOn(t, tr, false)["a.ts"]; before["a.ts"] != after {
+		t.Errorf("staging the rest moved the key:\n%q\n%q", before["a.ts"], after)
+	}
+}
+
+// A deleted file has no content to hash. It must say so rather than produce
+// something that looks like a hash of an empty file — a delete and a
+// truncate-to-empty are different things.
+func TestFileKeys_ADeletedFileIsDistinguishable(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("a.ts", "one\n", "init")
+	tr.CommitFile("b.ts", "one\n", "second")
+	tr.Delete("a.ts")
+	tr.Write("b.ts", "")
+
+	keys := keysOn(t, tr, false)
+	if keys["a.ts"] == keys["b.ts"] {
+		t.Errorf("a deleted file and an emptied file share a key: %q", keys["a.ts"])
+	}
+}
+
+// A non-ASCII path used to arrive escaped from git, so the file could not be
+// opened and every such file fingerprinted the same way.
+func TestFileKeys_ANonASCIIPathIsFingerprinted(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("žluťoučký.ts", "one\n", "init")
+	tr.Modify("žluťoučký.ts", "one\ntwo\n")
+
+	keys := keysOn(t, tr, false)
+	got, ok := keys["žluťoučký.ts"]
+	if !ok {
+		t.Fatalf("no key for the non-ASCII path: %v", keys)
+	}
+	if got == "gone" || got == "unknown" || got == "unreadable" {
+		t.Errorf("the file could not be read: %q", got)
+	}
+}

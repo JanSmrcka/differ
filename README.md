@@ -139,10 +139,10 @@ The status bar carries the whole review: `3/7 reviewed  2 comments  1 pending
 mode, and stops counting when the agent rewrites it — that is what `changed`
 means, and looking at it again clears it.
 
-A rewrite is noticed from the file's size and mtime plus git's line counts, so
-staging alone never counts as one. Under `-s` the worktree is not read at all
-(you are reviewing the index), which leaves one gap: a staged edit that keeps
-the line counts identical goes unnoticed there until they move.
+A rewrite is noticed by fingerprinting the content differ is actually showing
+you — the working-tree file normally and under `-r`, git's own object id for
+the staged content under `-s`. So staging never counts as a rewrite, and
+neither does a formatter writing the same bytes back.
 
 `H` lists what has left the session, most recent first:
 

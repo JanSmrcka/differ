@@ -380,3 +380,46 @@ func TestKeymap_ConfirmationsDisarmEachOther(t *testing.T) {
 		}
 	}
 }
+
+// The globals were never checked against the code — the AST tests only look at
+// the per-mode tables. ctrl+c is documented as "quit immediately", and in the
+// commit input it was swallowed by the text field: esc was the only way out.
+func TestKeymap_TheGlobalKeysWorkInEveryMode(t *testing.T) {
+	t.Parallel()
+	states := []struct {
+		name  string
+		setup func(m Model) Model
+	}{
+		{"file list", func(m Model) Model { m.mode = modeFileList; return m }},
+		{"diff", func(m Model) Model { m.mode = modeDiff; return m }},
+		{"review", func(m Model) Model { m.mode = modeReview; return m }},
+		{"commit", func(m Model) Model { m.mode = modeCommit; return m }},
+		{"branch picker", func(m Model) Model { m.mode = modeBranchPicker; return m }},
+		{"branch create", func(m Model) Model {
+			m.mode = modeBranchPicker
+			m.branchCreating = true
+			return m
+		}},
+		{"comment editor", func(m Model) Model {
+			m.mode = modeReview
+			m.commenting = true
+			return m
+		}},
+		{"help overlay", func(m Model) Model { m.showHelp = true; return m }},
+		{"history overlay", func(m Model) Model { m.mode = modeReview; m.showHistory = true; return m }},
+	}
+
+	for _, s := range states {
+		base := newTestModel(t, []fileItem{{change: git.FileChange{Path: "a.go", Status: git.StatusModified}}})
+		m := s.setup(base)
+
+		_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+		if cmd == nil {
+			t.Errorf("%s: ctrl+c did nothing", s.name)
+			continue
+		}
+		if _, quit := cmd().(tea.QuitMsg); !quit {
+			t.Errorf("%s: ctrl+c did not quit", s.name)
+		}
+	}
+}

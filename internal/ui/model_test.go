@@ -626,18 +626,33 @@ func TestUpdateBranchMode_CreateMode_Esc_Cancels(t *testing.T) {
 	}
 }
 
-func TestUpdateBranchMode_CreateMode_CtrlC_Cancels(t *testing.T) {
+// This reverses what the test here used to assert. ctrl+c cancelled the
+// new-branch input, while the keymap documented it as a global "quit
+// immediately" — and in the commit input the same key was swallowed by the
+// text field, so it meant three different things in three places. It quits
+// everywhere now; esc is what cancels an input.
+func TestUpdateBranchMode_CreateMode_EscCancels_CtrlCQuits(t *testing.T) {
 	t.Parallel()
-	m := newTestModel(t, nil)
-	m.mode = modeBranchPicker
-	m.branchCreating = true
-	m.branchInput.Focus()
-	m.branches = []string{"main"}
+	base := func() Model {
+		m := newTestModel(t, nil)
+		m.mode = modeBranchPicker
+		m.branchCreating = true
+		m.branchInput.Focus()
+		m.branches = []string{"main"}
+		return m
+	}
 
-	result, _ := m.updateBranchMode(tea.KeyMsg{Type: tea.KeyCtrlC})
-	rm := result.(Model)
-	if rm.branchCreating {
-		t.Error("ctrl+c should cancel branch creation, not quit")
+	result, _ := base().updateBranchMode(tea.KeyMsg{Type: tea.KeyEsc})
+	if result.(Model).branchCreating {
+		t.Error("esc should cancel branch creation")
+	}
+
+	_, cmd := base().Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if cmd == nil {
+		t.Fatal("ctrl+c did nothing in the new-branch input")
+	}
+	if _, quit := cmd().(tea.QuitMsg); !quit {
+		t.Error("ctrl+c should quit from the new-branch input")
 	}
 }
 
