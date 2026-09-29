@@ -72,20 +72,11 @@ func highlightSpan(content, filename, bgColor string, emph lipgloss.Style, s spa
 		return content
 	}
 	if chromaStyle == nil {
-		// No syntax highlighting — but the emphasis still has to show, and
-		// without colour it is the underline doing the work.
-		if !s.marks() {
-			return content
-		}
-		var b strings.Builder
-		for _, part := range s.split(content, 0) {
-			if part.emph {
-				b.WriteString(emph.Render(part.text))
-				continue
-			}
-			b.WriteString(part.text)
-		}
-		return b.String()
+		// Highlighting is off, which is also the only situation where the
+		// emphasis has no background to use. There is nothing to paint with,
+		// so the line goes out as it is — the +/- and the line's own
+		// background still say what changed.
+		return content
 	}
 
 	lexer := getLexer(filename)
@@ -104,15 +95,20 @@ func highlightSpan(content, filename, bgColor string, emph lipgloss.Style, s spa
 		// into two, and the renderer addresses rows by index: DisplayRows then
 		// disagrees with Content, and RowFor points at the wrong row for
 		// everything below.
+		// The span was measured against the line as it came in, so the offset
+		// has to advance by what the token was, not by what is left of it
+		// after the strip. Chroma normalises a bare CR to a newline, so a CR
+		// anywhere before the span used to shift every later boundary by one
+		// and the emphasis landed on the wrong rune.
+		width := len([]rune(token.Value))
 		token.Value = strings.ReplaceAll(token.Value, "\n", "")
-		if token.Value == "" {
-			continue
+		if token.Value != "" {
+			fg := tokenForeground(chromaStyle.Get(token.Type))
+			for _, part := range s.split(token.Value, offset) {
+				b.WriteString(paint(part.text, fg, bgColor, emph, part.emph))
+			}
 		}
-		fg := tokenForeground(chromaStyle.Get(token.Type))
-		for _, part := range s.split(token.Value, offset) {
-			b.WriteString(paint(part.text, fg, bgColor, emph, part.emph))
-		}
-		offset += len([]rune(token.Value))
+		offset += width
 	}
 	return b.String()
 }
@@ -131,9 +127,10 @@ func paint(text, fg, bgColor string, emph lipgloss.Style, emphasised bool) strin
 	if fg != "" {
 		style = style.Foreground(lipgloss.Color(fg))
 	}
-	if style.String() == "" && fg == "" {
-		return text
-	}
+	// No short-circuit on an "empty" style: Style.String() is Render(""), which
+	// is blind to text attributes, so an emphasis carrying only an underline
+	// looked empty and lost it. Rendering an actually-empty style returns the
+	// text unchanged anyway.
 	return style.Render(text)
 }
 

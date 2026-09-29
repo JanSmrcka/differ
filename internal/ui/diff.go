@@ -477,9 +477,10 @@ func renderCode(dl DiffLine, filename string, ls lineStyles, maxW int, changed s
 	text, cut := clipCode(dl.Content, maxW)
 	body, trailing := splitTrailing(text)
 
-	// The span was measured against the whole line, so what survived the cut
-	// decides how much of it is still on screen.
-	out := highlightSpan(body, filename, ls.bgColor, ls.emph, changed.clamp(len([]rune(body))))
+	// The span was measured against the whole line, so it is re-fitted to
+	// whatever survived the cut — and widened off any grapheme boundary it
+	// landed inside, which would otherwise change the line's width.
+	out := highlightSpan(body, filename, ls.bgColor, ls.emph, changed.snap(body))
 	if trailing != "" {
 		switch dl.Type {
 		case LineAdded, LineRemoved:

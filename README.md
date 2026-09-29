@@ -114,10 +114,11 @@ At the end of the code itself:
 | `·`  | trailing whitespace on an added or removed line              |
 
 In split view the part of a line that actually differs from the line it is
-paired with is shaded and underlined, so a one-character change does not look
-like a rewritten line. A pair with nothing in common is left alone — pointing
-at the whole line says no more than the `+`/`-` already does. The underline is
-what carries it under `--no-color`.
+paired with is shaded a step darker, so a one-character change does not look
+like a rewritten line. A pair that mostly differs is left alone: at that point
+it is a rewrite, and pointing at nearly the whole line says no more than the
+`+`/`-` already does. With colour off there is no within-line shading — the
+`+`/`-` and the line backgrounds still carry the change.
 
 Line-number columns widen to fit the file, so a 5-digit diff stays aligned.
 Tabs are expanded to `tab_width`. Hunks are separated by a rule carrying the

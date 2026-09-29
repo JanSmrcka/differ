@@ -141,12 +141,6 @@ func TestIntraLine_OnlyAReplacementWithSomethingInCommonIsEmphasised(t *testing.
 		})
 	}
 
-	// And switching it off is honoured.
-	r := NewDiffRenderer(ParseDiff("@@ -1,1 +1,1 @@\n context\n"), "a.ts", NewStyles(th), th, 80)
-	r.SetIntraLine(false)
-	if o, n := r.changedSpans(removed("call(ctx, 3)"), added("call(ctx, 9)")); o.marks() || n.marks() {
-		t.Error("SetIntraLine(false) still produced a span")
-	}
 }
 
 // Emphasis is paint, so it must never change a single character of the line,
@@ -222,4 +216,91 @@ func TestIntraLine_WithoutColourTheTextSurvives(t *testing.T) {
 			t.Errorf("without colour, %q is missing:\n%s", want, plain)
 		}
 	}
+}
+
+// Everything above this point tests decisions. This is the one that looks at
+// the paint.
+//
+// The PR that added this feature claimed a test like it was impossible,
+// because lipgloss emits nothing without a TTY. Half true: the default profile
+// under `go test` is Ascii, but the profile can be set, and then the escapes
+// are there to assert on. Four separate ways of switching the feature off
+// survived the suite before this existed.
+//
+// It is deliberately NOT parallel. The colour profile is global state, and a
+// dozen existing tests assert on unescaped strings — flipping the profile
+// underneath them fails them. Go runs parallel tests only after every
+// sequential top-level test has returned, so a non-parallel test cannot
+// overlap them.
+func TestIntraLine_TheChangedSpanIsActuallyPainted(t *testing.T) {
+	restore := lipgloss.ColorProfile()
+	defer lipgloss.SetColorProfile(restore)
+	lipgloss.SetColorProfile(0) // termenv.TrueColor, without importing termenv
+
+	th := theme.Themes["dark"]
+	render := func(raw string, width int) string {
+		r := NewDiffRenderer(ParseDiff(raw), "a.ts", NewStyles(th), th, width)
+		r.SetSplit(true)
+		return r.Content(-1)
+	}
+
+	// The emphasis background has to appear, and only around the changed part.
+	body := render("@@ -1,1 +1,1 @@\n-const x = doThing(ctx, 3);\n+const x = doThing(ctx, 9);\n", 100)
+	if !strings.Contains(body, "48;2") {
+		t.Fatalf("no emphasis background in the output:\n%q", body)
+	}
+	if emphasised := emphasisedText(body, th.AddedEmphBg); emphasised != "9" {
+		t.Errorf("emphasised %q, want just the changed character", emphasised)
+	}
+	if emphasised := emphasisedText(body, th.RemovedEmphBg); emphasised != "3" {
+		t.Errorf("emphasised %q on the removed side, want just the changed character", emphasised)
+	}
+
+	// A rewritten line gets none.
+	if got := emphasisedText(render("@@ -1,1 +1,1 @@\n-const total = sum(items);\n+return cache.get(key);\n", 100), th.AddedEmphBg); got != "" {
+		t.Errorf("a rewritten line emphasised %q", got)
+	}
+
+	// And a grapheme cluster is never split: the boundary is widened instead,
+	// because two halves of a flag are wider than the flag and the row would
+	// come out a column short.
+	for _, width := range []int{60, 70, 80, 100} {
+		left := strings.Repeat("y", 18) + "\U0001F469\u200d\U0001F469\u200d\U0001F467"
+		right := strings.Repeat("y", 18) + "\U0001F469\u200d\U0001F466"
+		for i, row := range strings.Split(render("@@ -1,1 +1,1 @@\n-"+left+"\n+"+right+"\n", width), "\n") {
+			if got := lipgloss.Width(row); got != width {
+				t.Errorf("width %d: row %d is %d columns — a cluster was split", width, i, got)
+			}
+		}
+	}
+
+	// A carriage return before the span used to shift every boundary by one.
+	got := emphasisedText(render("@@ -1,1 +1,1 @@\n-a\rbXd\n+a\rbYd\n", 60), th.AddedEmphBg)
+	if got != "Y" {
+		t.Errorf("with a CR in the line, emphasised %q, want %q", got, "Y")
+	}
+}
+
+// emphasisedText pulls out the text painted with the given background.
+//
+// The escape is taken from lipgloss rather than formatted here: its colour
+// conversion is not an exact round-trip of the hex value — #5e2b3d comes back
+// as 94;43;60 — so a hand-built sequence would not match.
+func emphasisedText(rendered, bg string) string {
+	probe := lipgloss.NewStyle().Background(lipgloss.Color(bg)).Render("x")
+	i, j := strings.Index(probe, "["), strings.Index(probe, "m")
+	if i < 0 || j <= i {
+		return ""
+	}
+	open := probe[i+1 : j]
+
+	var out strings.Builder
+	for _, chunk := range strings.Split(rendered, "\x1b[") {
+		k := strings.IndexByte(chunk, 'm')
+		if k < 0 || !strings.Contains(chunk[:k], open) {
+			continue
+		}
+		out.WriteString(chunk[k+1:])
+	}
+	return out.String()
 }

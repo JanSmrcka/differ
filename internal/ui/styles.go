@@ -24,9 +24,16 @@ type Styles struct {
 	DiffRemoved   lipgloss.Style
 	DiffAddedBg   lipgloss.Style // bg-only, for padding highlighted lines
 	DiffRemovedBg lipgloss.Style // bg-only, for padding highlighted lines
-	// The part of a split-view line that differs from its pair. Underlined as
-	// well as shaded, because under --no-color the shade is all there is and
-	// a within-line distinction has no other channel.
+	// The part of a split-view line that differs from its pair: a shade away
+	// from the line's own background.
+	//
+	// Background only, deliberately. An underline was the obvious way to
+	// carry it without colour, and lipgloss re-styles run by run when one is
+	// set — which puts an escape inside a grapheme cluster and makes a ZWJ
+	// emoji measure four columns instead of two, so the row loses a column
+	// off the end. It would not have helped where it was meant to either:
+	// NO_COLOR puts termenv in its Ascii profile, where nothing is emitted at
+	// all.
 	DiffAddedEmph      lipgloss.Style
 	DiffRemovedEmph    lipgloss.Style
 	DiffContext        lipgloss.Style
@@ -105,11 +112,9 @@ func NewStyles(t theme.Theme) Styles {
 		DiffRemovedBg: lipgloss.NewStyle().
 			Background(lipgloss.Color(t.RemovedBg)),
 		DiffAddedEmph: lipgloss.NewStyle().
-			Background(lipgloss.Color(t.AddedEmphBg)).
-			Underline(true),
+			Background(lipgloss.Color(t.AddedEmphBg)),
 		DiffRemovedEmph: lipgloss.NewStyle().
-			Background(lipgloss.Color(t.RemovedEmphBg)).
-			Underline(true),
+			Background(lipgloss.Color(t.RemovedEmphBg)),
 		DiffContext: lipgloss.NewStyle().
 			Foreground(lipgloss.Color(t.Fg)),
 		DiffHunkHeader: lipgloss.NewStyle().

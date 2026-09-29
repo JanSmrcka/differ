@@ -1,5 +1,7 @@
 package ui
 
+import "github.com/charmbracelet/lipgloss"
+
 // What changed *within* a pair of lines.
 //
 // Split view pairs a removed line with the added line that replaced it, and
@@ -46,10 +48,51 @@ type span struct{ from, to int }
 
 func (s span) marks() bool { return s.to > s.from }
 
-// clamp brings a span computed against the whole line into the coordinates of
-// however much of it survived being cut to the panel width.
-func (s span) clamp(runes int) span {
-	return span{from: min(s.from, runes), to: min(s.to, runes)}
+// snap widens a span until painting it separately cannot change the line's
+// rendered width.
+//
+// A boundary that lands inside a grapheme cluster — a flag, a ZWJ emoji — is
+// the problem: the terminal draws the two halves as separate glyphs, which are
+// wider than the cluster, and the row then overshoots its budget and gets a
+// column clipped off the end. Emphasis is paint, so it must not change what
+// the line measures.
+//
+// Widening a step at a time is enough because a cluster is a handful of runes;
+// past that the span is given up rather than allowed to corrupt the row, which
+// also keeps this from walking a 150,000-column line.
+func (s span) snap(text string) span {
+	if !s.marks() {
+		return s
+	}
+	full := lipgloss.Width(text)
+	runes := len([]rune(text))
+
+	const maxSteps = 8
+	for range maxSteps {
+		if s.paintedWidth(text) == full {
+			return s
+		}
+		if s.from == 0 && s.to >= runes {
+			break
+		}
+		s.from = max(s.from-1, 0)
+		s.to = min(s.to+1, runes)
+	}
+	if s.paintedWidth(text) == full {
+		return s
+	}
+	return span{}
+}
+
+// paintedWidth is how wide the line comes out once split at this span's
+// boundaries. It goes through split, so what is measured is exactly what is
+// painted.
+func (s span) paintedWidth(text string) int {
+	total := 0
+	for _, p := range s.split(text, 0) {
+		total += lipgloss.Width(p.text)
+	}
+	return total
 }
 
 // piece is a run of text that is either inside the changed span or outside it.
