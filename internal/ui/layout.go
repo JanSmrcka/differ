@@ -47,6 +47,16 @@ func (m Model) View() string {
 		body = m.renderHistoryOverlay(m.width, contentH)
 	case m.showProblem:
 		body = m.renderProblemOverlay(m.width, contentH)
+	case m.onePanel():
+		// One panel takes the terminal. A pair squeezed into sixty columns is
+		// two unusable panels rather than one usable one, and the diff is what
+		// differ is for — so the file list keeps the width only while it is
+		// what the user is working in.
+		only := m.rightPanel()
+		if m.showsFileList() {
+			only = m.leftPanel()
+		}
+		body = strings.Join(padLines(only, contentH), "\n")
 	default:
 		left := padLines(m.leftPanel(), contentH)
 		right := padLines(m.rightPanel(), contentH)
@@ -69,7 +79,7 @@ func (m Model) View() string {
 // panelRow places one line from each panel either side of the divider.
 func (m Model) panelRow(left, right string) string {
 	gap := strings.Repeat(" ", panelGap)
-	return padTo(left, fileListWidth) + gap + m.styles.Chrome.Render(verticalDivider) + gap + right
+	return padTo(left, m.listWidth()) + gap + m.styles.Chrome.Render(verticalDivider) + gap + right
 }
 
 // leftPanel is the file list, or the branch picker, under its own label.
