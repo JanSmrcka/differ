@@ -146,7 +146,13 @@ func (m Model) loadDiffCmd(resetScroll bool) tea.Cmd {
 	ref := m.ref
 	diffW := m.diffWidth()
 	filename := f.change.Path
-	splitMode := m.splitDiff && diffW >= minSplitWidth
+	// Split view needs the two-panel layout as well as the width. Without that
+	// it engaged between 60 and 71 columns — where the layout has collapsed and
+	// the diff briefly has the whole terminal — and then switched off at 72
+	// when the file list reappeared and cut the diff to 45. Widening a pane by
+	// one column dropped the user out of split view, which is the opposite of
+	// what the README promises.
+	splitMode := m.splitDiff && !m.onePanel() && diffW >= minSplitWidth
 	tabWidth := m.cfg.TabWidth
 	gen := m.themeGen
 	return func() tea.Msg {

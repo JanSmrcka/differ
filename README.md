@@ -54,8 +54,8 @@ The file list takes a quarter of the terminal rather than a fixed slice, within
 bounds, so a narrow split spends its width on the diff instead of on file
 names. Below 72 columns the layout collapses to one panel — whichever you are
 working in, and the file list regardless when there is nothing to show on the
-right. Split view falls back to unified when its half would be too narrow for
-two columns.
+right. Split view needs both panels and a half wide enough for two columns, so
+it is unified below that and never switches off as the terminal grows.
 
 Nothing depends on colour alone. Added and removed lines carry `+`/`-`, the
 cursor a bar, a staged file a dot, each status its letter, the focused panel a

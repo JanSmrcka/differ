@@ -310,8 +310,9 @@ func (m Model) renderCommitBar() string {
 	return lipgloss.NewStyle().Width(m.width).Render(m.commitBarContent())
 }
 
-// renderCommentEditor shows the textarea plus what the two closing keys do.
-func (m Model) renderCommentEditor() string {
+// renderCommentEditor shows the textarea plus what the two closing keys do,
+// inside budget rows.
+func (m Model) renderCommentEditor(budget int) string {
 	label := fmt.Sprintf(" comment · line %d ", m.draft.StartLine)
 	if m.draft.EndLine > m.draft.StartLine {
 		label = fmt.Sprintf(" comment · lines %d-%d ", m.draft.StartLine, m.draft.EndLine)
@@ -320,6 +321,16 @@ func (m Model) renderCommentEditor() string {
 		label = " edit" + label
 	}
 	head := m.renderBar(lipgloss.NewStyle(), m.styles.HelpKey.Render(label)+m.styles.HelpDesc.Render("· ctrl+s save · esc cancel"))
+
+	// The textarea takes whatever is left rather than a fixed five rows. It was
+	// fixed, and the frame was built as though the footer could always have it:
+	// at height 8 the content area came out at -1 and View() panicked in
+	// make([]string, -1). The head stays whatever happens — it is the only
+	// place "ctrl+s save · esc cancel" is written.
+	rows := max(budget-lipgloss.Height(head), 1)
+	if rows < commentEditorHeight {
+		m.commentInput.SetHeight(rows)
+	}
 	return lipgloss.JoinVertical(lipgloss.Left, head, m.commentInput.View())
 }
 

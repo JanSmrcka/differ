@@ -127,6 +127,12 @@ func TestResponsive_EveryDistinctionSurvivesWithoutColour(t *testing.T) {
 	tr := testutil.NewRepo(t)
 	tr.CommitFile("kept.ts", "one\n", "init")
 	tr.CommitFile("gone.ts", "one\n", "second")
+	// both.ts carries an addition *and* a deletion. Without one, the cursor
+	// landed on a pure deletion whose only "+" was in the hunk header's
+	// "-1 +0,0" — so the two assertions below were satisfied by the header and
+	// removing the +/- indicators entirely left the suite green.
+	tr.CommitFile("both.ts", "one\ntwo\n", "third")
+	tr.Modify("both.ts", "one\nCHANGED\n")
 	tr.Modify("kept.ts", "one\ntwo\n")
 	tr.Stage("kept.ts")
 	tr.Delete("gone.ts")
@@ -148,14 +154,37 @@ func TestResponsive_EveryDistinctionSurvivesWithoutColour(t *testing.T) {
 
 	// The diff's added and removed lines, and the cursor.
 	m.mode = modeDiff
+	for i, f := range m.files {
+		if f.change.Path == "both.ts" {
+			m.cursor = i
+		}
+	}
 	if cmd := m.loadDiffCmd(true); cmd != nil {
 		u, _ := m.Update(cmd())
 		m = u.(Model)
 	}
 	diff := stripANSI(m.renderer.Content(m.diffCursor))
-	for _, want := range []string{"+", "-", cursorMarker} {
-		if !strings.Contains(diff, want) {
-			t.Errorf("the diff does not mark %q without colour:\n%s", want, diff)
+	if !strings.Contains(diff, cursorMarker) {
+		t.Errorf("the diff does not mark the cursor without colour:\n%s", diff)
+	}
+	// Code rows only. The hunk header spells out "-2 +2" and would satisfy
+	// both of these on its own, which is exactly how the indicators went
+	// unprotected.
+	var code []string
+	for _, row := range strings.Split(diff, "\n") {
+		if !strings.Contains(row, strings.Repeat(horizontalRule, hunkRuleWidth)) && strings.TrimSpace(row) != "" {
+			code = append(code, row)
+		}
+	}
+	for _, want := range []string{"+", "-"} {
+		found := false
+		for _, row := range code {
+			if strings.Contains(row, want) {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("no code row marks %q without colour:\n%s", want, strings.Join(code, "\n"))
 		}
 	}
 
@@ -181,5 +210,42 @@ func TestResponsive_ReviewStateIsWordsNotColours(t *testing.T) {
 	got := stripANSI(m.renderFileList())
 	if !strings.Contains(got, "read") {
 		t.Errorf("review state is not readable without colour:\n%s", got)
+	}
+}
+
+// The greyscale test above runs under lipgloss's Ascii profile, where nothing
+// emits escapes at all — so NoColorTheme and stripANSI were both inert in it
+// and it would have passed identically with the dark theme. This one forces a
+// colour profile, which is the only way to show that --no-color actually
+// removes the colour and that the marks are what carry the meaning.
+//
+// Not t.Parallel: the profile is global and a dozen tests assert on unescaped
+// strings. Go runs parallel tests only after every sequential top-level test
+// returns, so a sequential test cannot overlap them.
+func TestResponsive_NoColorReallyRemovesTheColour(t *testing.T) {
+	restore := lipgloss.ColorProfile()
+	defer lipgloss.SetColorProfile(restore)
+	lipgloss.SetColorProfile(0) // termenv.TrueColor, without importing termenv
+
+	const raw = "@@ -1,2 +1,2 @@\n one\n-two\n+CHANGED\n"
+	render := func(th theme.Theme) string {
+		r := NewDiffRenderer(ParseDiff(raw), "a.ts", NewStyles(th), th, 80)
+		return r.Content(-1)
+	}
+
+	coloured := render(theme.Themes["dark"])
+	if coloured == stripANSI(coloured) {
+		t.Fatal("the dark theme emitted no escapes, so this test proves nothing")
+	}
+
+	plain := render(theme.NoColorTheme())
+	if plain != stripANSI(plain) {
+		t.Errorf("--no-color still emitted escapes:\n%q", plain)
+	}
+	// And the distinctions survive as glyphs.
+	for _, want := range []string{"+", "-"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("without colour the diff does not mark %q:\n%s", want, plain)
+		}
 	}
 }

@@ -147,6 +147,9 @@ func (m Model) handleResize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 	m.width = msg.Width
 	m.height = msg.Height
 	m.viewport = viewport.New(m.diffWidth(), m.listHeight())
+	// The filter lives in the file-list panel, so it is sized from that panel
+	// rather than from the constant floor it used to take.
+	m.branchFilter.Width = max(m.listWidth()-8, 1)
 	m.lastDiffContent = ""
 	m.ready = true
 	// The scroll offsets are the only list state that depends on the height.
