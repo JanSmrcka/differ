@@ -73,8 +73,8 @@ the changeset, and puts the additions and deletions against the right edge:
 ```
 
 `●` marks a staged file. While reviewing, the right-hand column carries how far
-you have got with each file instead — `·` read, `2 comments`, `sent`, or
-`changed` when the agent rewrote it after you read it.
+you have got with each file instead — `read`, `2 comments`, `sent`, or `changed`
+when the agent rewrote it after you read it.
 
 | Key           | Action                                     |
 | ------------- | ------------------------------------------ |

@@ -127,6 +127,10 @@ func (m Model) handleResize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 	m.viewport = viewport.New(m.diffWidth(), m.listHeight())
 	m.lastDiffContent = ""
 	m.ready = true
+	// The scroll offsets are the only list state that depends on the height.
+	// Growing the terminal past the whole changeset used to leave the window
+	// where it was, putting the files above it back out of reach.
+	m = m.clampFileScroll().clampBranchScroll()
 	// Re-render at the new size without resetting: a resize (or a tmux pane
 	// split) must not send the reviewer back to the top of the diff.
 	return m, m.loadDiffCmd(false)
@@ -284,6 +288,7 @@ func (m Model) handleBranchSwitched(msg branchSwitchedMsg) (tea.Model, tea.Cmd) 
 	m.statusMsg = "switched to " + m.repo.BranchName()
 	m.prevCurs = -1
 	m.cursor = 0
+	m = m.clampFileScroll()
 	return m, m.refreshFilesCmd()
 }
 
@@ -298,5 +303,6 @@ func (m Model) handleBranchCreated(msg branchCreatedMsg) (tea.Model, tea.Cmd) {
 	m.statusMsg = "created & switched to " + msg.name
 	m.prevCurs = -1
 	m.cursor = 0
+	m = m.clampFileScroll()
 	return m, m.refreshFilesCmd()
 }

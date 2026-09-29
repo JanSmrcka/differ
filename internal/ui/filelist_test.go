@@ -3,6 +3,10 @@ package ui
 import (
 	"strings"
 	"testing"
+	"time"
+	"unicode/utf8"
+
+	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/charmbracelet/lipgloss"
 
@@ -44,7 +48,7 @@ func TestFileList_ACursorPastThePanelScrollsIntoView(t *testing.T) {
 		t.Fatalf("cursor = %d, want 39", m.cursor)
 	}
 
-	shown := m.renderFileList(m.listHeight())
+	shown := m.renderFileList()
 	last := m.files[39].change.Path
 	if !strings.Contains(stripANSI(shown), "file"+string(rune('a'+39%26))+string(rune('0'+39/26))) {
 		t.Errorf("the last file (%s) is not on screen:\n%s", last, stripANSI(shown))
@@ -113,7 +117,7 @@ func TestFileList_TheRenderedListDisambiguatesPaths(t *testing.T) {
 		{change: git.FileChange{Path: "src/b/index.ts", Status: git.StatusModified}},
 		{change: git.FileChange{Path: "src/api/client.ts", Status: git.StatusModified}},
 	})
-	got := stripANSI(m.renderFileList(10))
+	got := stripANSI(m.renderFileList())
 
 	for _, want := range []string{"a/index.ts", "b/index.ts"} {
 		if !strings.Contains(got, want) {
@@ -133,33 +137,49 @@ func TestFileList_TheRenderedListDisambiguatesPaths(t *testing.T) {
 // each file, without opening it.
 func TestFileList_ShowsReviewState(t *testing.T) {
 	t.Parallel()
+	// The names are deliberately meaningless: naming a file "sent.ts" makes
+	// `Contains(got, "sent")` pass whether or not the badge is rendered, which
+	// is how two assertions here used to be unfalsifiable.
 	m := newTestModel(t, []fileItem{
-		{change: git.FileChange{Path: "read.ts", Status: git.StatusModified}},
-		{change: git.FileChange{Path: "commented.ts", Status: git.StatusModified}},
-		{change: git.FileChange{Path: "sent.ts", Status: git.StatusModified}},
-		{change: git.FileChange{Path: "moved.ts", Status: git.StatusModified}},
-		{change: git.FileChange{Path: "untouched.ts", Status: git.StatusModified}},
+		{change: git.FileChange{Path: "one.ts", Status: git.StatusModified}},
+		{change: git.FileChange{Path: "two.ts", Status: git.StatusModified}},
+		{change: git.FileChange{Path: "three.ts", Status: git.StatusModified}},
+		{change: git.FileChange{Path: "four.ts", Status: git.StatusModified}},
+		{change: git.FileChange{Path: "five.ts", Status: git.StatusModified}},
 	})
 	m.mode = modeReview
 	m.session = review.NewSession()
-	m.session.MarkViewed("read.ts")
-	m.session.Add(review.Comment{File: "commented.ts", StartLine: 1, EndLine: 1, Body: "x"})
-	sentComment := m.session.Add(review.Comment{File: "sent.ts", StartLine: 1, EndLine: 1, Body: "y"})
-	m.session.MarkSent([]string{sentComment.ID})
-	m.session.MarkViewed("moved.ts")
-	m.session.NoteChange("moved.ts")
+	m.session.MarkViewed("one.ts")
+	m.session.Add(review.Comment{File: "two.ts", StartLine: 1, EndLine: 1, Body: "x"})
+	delivered := m.session.Add(review.Comment{File: "three.ts", StartLine: 1, EndLine: 1, Body: "y"})
+	m.session.MarkSent([]string{delivered.ID})
+	m.session.MarkViewed("four.ts")
+	m.session.NoteChange("four.ts")
 
-	got := stripANSI(m.renderFileList(10))
-	for _, want := range []string{"1", "sent", "changed"} {
-		if !strings.Contains(got, want) {
-			t.Errorf("the list does not show %q:\n%s", want, got)
+	rowFor := func(path string) string {
+		for _, line := range strings.Split(stripANSI(m.renderFileList()), "\n") {
+			if strings.Contains(line, path) {
+				return line
+			}
+		}
+		t.Fatalf("no row for %s", path)
+		return ""
+	}
+
+	for _, c := range []struct{ path, want string }{
+		{"one.ts", "read"},
+		{"two.ts", "1 comment"},
+		{"three.ts", "sent"},
+		{"four.ts", "changed"},
+	} {
+		if row := rowFor(c.path); !strings.Contains(row, c.want) {
+			t.Errorf("%s should be badged %q: %q", c.path, c.want, row)
 		}
 	}
-	// An unreviewed file needs no badge — that is the normal state.
-	for _, line := range strings.Split(got, "\n") {
-		if strings.Contains(line, "untouched.ts") && strings.Contains(line, "viewed") {
-			t.Errorf("an unreviewed file was badged:\n%s", line)
-		}
+	// A file nobody has looked at needs no badge — that is the normal state,
+	// so its row carries the line counts like any other.
+	if row := rowFor("five.ts"); !strings.Contains(row, "+0 -0") {
+		t.Errorf("an unreviewed file lost its line counts: %q", row)
 	}
 }
 
@@ -173,7 +193,7 @@ func TestFileList_NoReviewColumnOutsideReviewMode(t *testing.T) {
 	m.session.NoteChange("a.ts")
 	m.mode = modeFileList
 
-	if got := stripANSI(m.renderFileList(10)); strings.Contains(got, "changed") {
+	if got := stripANSI(m.renderFileList()); strings.Contains(got, "changed") {
 		t.Errorf("review state leaked into the plain file list:\n%s", got)
 	}
 }
@@ -228,7 +248,7 @@ func TestFileList_TheWindowFollowsAShrinkingChangeset(t *testing.T) {
 	})
 	m = updated.(Model)
 
-	if got := stripANSI(m.renderFileList(m.listHeight())); strings.TrimSpace(got) == "" {
+	if got := stripANSI(m.renderFileList()); strings.TrimSpace(got) == "" {
 		t.Errorf("the list is empty after the changeset shrank (offset %d, %d files)", m.fileOffset, len(m.files))
 	}
 }
@@ -244,7 +264,7 @@ func TestFileList_RowsAreExactlyThePanelWideWithTheRightColumnAligned(t *testing
 		{change: git.FileChange{Path: "b.ts", Status: git.StatusAdded, AddedLines: 9}},
 	})
 
-	rows := strings.Split(m.renderFileList(10), "\n")
+	rows := strings.Split(m.renderFileList(), "\n")
 	if len(rows) != 3 {
 		t.Fatalf("rendered %d rows, want 3", len(rows))
 	}
@@ -253,12 +273,131 @@ func TestFileList_RowsAreExactlyThePanelWideWithTheRightColumnAligned(t *testing
 		if got := lipgloss.Width(row); got != fileListWidth {
 			t.Errorf("row %d is %d columns, want %d: %q", i, got, fileListWidth, stripANSI(row))
 		}
-		ends = append(ends, len(strings.TrimRight(stripANSI(row), " ")))
+		// Columns, not bytes: a byte count would call any non-ASCII name
+		// ragged.
+		ends = append(ends, lipgloss.Width(strings.TrimRight(stripANSI(row), " ")))
 	}
 	for i := 1; i < len(ends); i++ {
 		if ends[i] != ends[0] {
 			t.Errorf("the right column is ragged: rows end at %v\n%s", ends, stripANSI(strings.Join(rows, "\n")))
 			break
 		}
+	}
+}
+
+// A resize changes how many rows the list gets, and the offset is the only
+// piece of list state that depends on it. Growing the terminal past the whole
+// changeset used to leave the window where it was, so the files above it went
+// back to being unreachable — the very bug the offset was added to fix.
+func TestFileList_AResizeBringsTheWindowBack(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t, manyFiles(40))
+	m.mode = modeFileList
+	m.height = 30
+	m.ready = true
+
+	updated, _ := m.updateFileListMode(key("G"))
+	m = updated.(Model)
+	if m.fileOffset == 0 {
+		t.Fatal("G did not scroll the window")
+	}
+
+	// Grown past the whole changeset: everything fits, so nothing is hidden.
+	grown, _ := m.handleResize(tea.WindowSizeMsg{Width: 120, Height: 60})
+	g := grown.(Model)
+	if g.fileOffset != 0 {
+		t.Errorf("the whole changeset fits but the window starts at %d", g.fileOffset)
+	}
+	if first := stripANSI(strings.Split(g.renderFileList(), "\n")[0]); !strings.Contains(first, "filea0") {
+		t.Errorf("the first file is not on screen after growing: %q", first)
+	}
+
+	// Shrunk: the cursor has to still be visible.
+	shrunk, _ := m.handleResize(tea.WindowSizeMsg{Width: 120, Height: 12})
+	s := shrunk.(Model)
+	if s.cursor < s.fileOffset || s.cursor >= s.fileOffset+s.listHeight() {
+		t.Errorf("cursor %d is outside the window [%d, %d)", s.cursor, s.fileOffset, s.fileOffset+s.listHeight())
+	}
+}
+
+// The window must not be left past the end of a list that shrank under a
+// cursor which is still inside the old window — the case the earlier test
+// claimed to cover and did not, because it moved the cursor first.
+func TestFileList_TheWindowIsPulledBackWhenTheListShrinksUnderIt(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t, manyFiles(40))
+	m.mode = modeFileList
+	m.height = 30
+	m.cursor = 30
+	m = m.clampFileScroll()
+	if m.fileOffset == 0 {
+		t.Fatal("the window never scrolled")
+	}
+
+	// Half the changeset is committed away; the cursor lands inside what is
+	// left, so only the end-of-list clamp can save the window.
+	updated, _ := m.handleFilesRefreshed(filesRefreshedMsg{files: manyFiles(20), keys: map[string]string{}})
+	m = updated.(Model)
+
+	rows := strings.Split(m.renderFileList(), "\n")
+	if got := len(rows); got != min(20, m.listHeight()) {
+		t.Errorf("rendered %d rows from %d files in a %d-row panel (offset %d)",
+			got, len(m.files), m.listHeight(), m.fileOffset)
+	}
+}
+
+// Non-ASCII names are the common case for some of us, and the truncation used
+// to slice bytes: the row came out as mojibake.
+func TestFileList_TruncatingANonASCIINameKeepsItReadable(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		in   string
+		maxW int
+	}{
+		{"žluťoučký.ts", 4},
+		{"日本語のファイル.ts", 8},
+		{"src/components/žluťoučký-kůň.tsx", 12},
+		{"src.ts", 1},
+		{"src.ts", 0},
+	} {
+		got := truncatePath(c.in, c.maxW)
+		if !utf8.ValidString(got) {
+			t.Errorf("truncatePath(%q, %d) = %q, which is not valid UTF-8", c.in, c.maxW, got)
+		}
+		if w := lipgloss.Width(got); w > c.maxW && c.maxW > 0 {
+			t.Errorf("truncatePath(%q, %d) = %q, %d columns wide", c.in, c.maxW, got, w)
+		}
+	}
+}
+
+// A frame must not cost rows × files. The disambiguation looks at every path
+// in the changeset, and computing it inside the row renderer made a thousand
+// files cost 9 ms and 39 MB of garbage per keypress.
+//
+// The assertion is a ratio rather than a wall-clock budget: the suite runs in
+// parallel, so absolute timings here are whatever the rest of it leaves of the
+// CPU, while both halves of a ratio are inflated equally. The same number of
+// rows is drawn either way, so the only thing that grows with the changeset is
+// one pass over the paths.
+func TestFileList_RenderingDoesNotCostRowsTimesFiles(t *testing.T) {
+	t.Parallel()
+	frame := func(n int) time.Duration {
+		m := newTestModel(t, manyFiles(n))
+		m.height = 60
+		_ = m.renderFileList() // warm the styles
+		start := time.Now()
+		const runs = 20
+		for range runs {
+			_ = m.renderFileList()
+		}
+		return time.Since(start) / runs
+	}
+
+	small, large := frame(100), frame(1000)
+	// Quadratic in the changeset would be about 10×; linear is a little over
+	// 1×. Four is comfortably between the two and well clear of noise.
+	if large > 4*small {
+		t.Errorf("a 1000-file frame took %v against %v for 100 files — %0.1f×",
+			large, small, float64(large)/float64(small))
 	}
 }

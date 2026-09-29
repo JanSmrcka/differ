@@ -72,7 +72,7 @@ func (m Model) panelRow(left, right string) string {
 
 // leftPanel is the file list, or the branch picker, under its own label.
 func (m Model) leftPanel() []string {
-	body := m.renderFileList(m.listHeight())
+	body := m.renderFileList()
 	if m.mode == modeBranchPicker {
 		body = m.renderBranchList(m.listHeight())
 	}
