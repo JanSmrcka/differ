@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 // repoWith builds a throwaway directory holding the named files, standing in
@@ -388,29 +389,97 @@ func TestResolve_DetachActuallyRunsTheCommand(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	got, err := os.ReadFile(marker)
-	if err != nil {
-		t.Fatalf("the editor did not run: %v", err)
+	// Run deliberately does not wait for the editor, so poll for the proof
+	// that it started rather than assuming it has already finished.
+	want := filepath.Join(root, "src.ts")
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		got, err := os.ReadFile(marker)
+		if err == nil {
+			if string(got) != want {
+				t.Errorf("editor got %q, want %q", got, want)
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the editor never ran: %v", err)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
-	if want := filepath.Join(root, "src.ts"); string(got) != want {
-		t.Errorf("editor got %q, want %q", got, want)
+}
+func TestDetach_DoesNotWaitForTheEditor(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name, script string
+	}{
+		{"a launcher that stays in the foreground", "sleep 30"},
+		{"a launcher whose grandchild holds the pipes", "(sleep 30) & exit 0"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			root := repoWith(t, "src.ts")
+			ed := filepath.Join(t.TempDir(), "launcher")
+			if err := os.WriteFile(ed, []byte("#!/bin/sh\n"+c.script+"\n"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+
+			plan, err := Resolve(context.Background(), Config{Strategy: "detach"},
+				Request{File: "src.ts", Repo: root, Env: Env{Editor: ed}})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			done := make(chan error, 1)
+			start := time.Now()
+			go func() { done <- plan.Run(context.Background()) }()
+
+			select {
+			case err := <-done:
+				if err != nil {
+					t.Errorf("Run: %v", err)
+				}
+				if elapsed := time.Since(start); elapsed > 3*time.Second {
+					t.Errorf("Run took %v; a detached editor must not be waited on", elapsed)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("Run never returned; it is waiting on the editor")
+			}
+
+			// And the editor is still alive, not killed at some timeout.
+			out, _ := exec.Command("pgrep", "-f", ed).Output()
+			if strings.TrimSpace(string(out)) == "" {
+				if c.script == "sleep 30" {
+					t.Error("the editor was killed instead of left running")
+				}
+			}
+		})
 	}
 }
 
-func TestResolve_DetachReportsAFailingEditor(t *testing.T) {
+// The reason detach waits at all: a typo in editor_cmd must not fail in
+// silence.
+func TestDetach_AnImmediateFailureIsStillReported(t *testing.T) {
 	t.Parallel()
 	root := repoWith(t, "src.ts")
 	ed := filepath.Join(t.TempDir(), "failer")
-	if err := os.WriteFile(ed, []byte("#!/bin/sh\necho nope >&2\nexit 3\n"), 0o755); err != nil {
+	if err := os.WriteFile(ed, []byte("#!/bin/sh\necho 'no such profile' >&2\nexit 3\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
-	plan, err := Resolve(context.Background(), Config{Strategy: "detach"},
+	// A generous grace so a loaded machine cannot turn "reports the failure"
+	// into "declared it launched".
+	plan, err := Resolve(context.Background(),
+		Config{Strategy: "detach", Grace: 5 * time.Second},
 		Request{File: "src.ts", Repo: root, Env: Env{Editor: ed}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := plan.Run(context.Background()); err == nil {
-		t.Error("want an error from an editor that exits non-zero")
+	err = plan.Run(context.Background())
+	if err == nil {
+		t.Fatal("want an error from an editor that exits non-zero at once")
+	}
+	if !strings.Contains(err.Error(), "no such profile") {
+		t.Errorf("error = %q, want the editor's own stderr in it", err)
 	}
 }

@@ -264,8 +264,13 @@ differ does not try to guess which editor is which, so tell it:
 { "editor_cmd": "idea --line {line} {file}", "editor_strategy": "detach" }
 ```
 
-A `detach` editor that exits non-zero is reported in the status bar, so a
-typo in `editor_cmd` does not fail silently.
+`detach` starts the editor and leaves it running — it never waits for it, so
+a launcher that stays in the foreground (`gvim`, `emacs`, `code --wait`, the
+JetBrains launcher with no instance up) is not killed, and one that exits at
+once but leaves a GUI process behind does not hold differ up. It is watched
+only briefly, so an editor that fails on the spot — a bad flag, a missing
+profile — still reports its own stderr in the status bar instead of failing
+silently.
 
 An `editor_cmd` that starts with `tmux` runs exactly as written and ignores
 `editor_strategy` — it is already a mechanism. So a recipe like

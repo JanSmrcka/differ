@@ -9,6 +9,7 @@
 package editor
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -18,6 +19,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Env is the process environment the decision depends on. It is read once at
@@ -65,6 +67,9 @@ type Config struct {
 	Cmd string
 	// Strategy is editor_strategy; empty means auto.
 	Strategy string
+	// Grace is how long a detached editor is watched for an immediate
+	// failure. Zero means detachGrace.
+	Grace time.Duration
 }
 
 // Request is the situation: what to open, and where differ is running.
@@ -171,7 +176,7 @@ func Resolve(ctx context.Context, cfg Config, req Request) (Plan, error) {
 	if filepath.Base(argv[0]) == "tmux" {
 		return inlinePlan(argv, req), nil
 	}
-	return planFor(ctx, want, argv, req)
+	return planFor(ctx, cfg, want, argv, req)
 }
 
 func wantedStrategy(s string) (Strategy, error) {
@@ -192,12 +197,12 @@ func wantedStrategy(s string) (Strategy, error) {
 // than a silent downgrade — the same call internal/feedback makes when its
 // tmux target is unavailable. Only auto falls back, because falling back is
 // what auto means.
-func planFor(ctx context.Context, want Strategy, argv []string, req Request) (Plan, error) {
+func planFor(ctx context.Context, cfg Config, want Strategy, argv []string, req Request) (Plan, error) {
 	switch want {
 	case StrategyInline:
 		return inlinePlan(argv, req), nil
 	case StrategyDetach:
-		return detachPlan(argv, req), nil
+		return detachPlan(argv, req, cfg.Grace), nil
 	}
 	if !req.Env.InTmux {
 		if want == StrategyAuto {
@@ -227,9 +232,32 @@ func inlinePlan(argv []string, req Request) Plan {
 	return Plan{Kind: KindTerminal, Strategy: strategy, Argv: argv, Dir: req.Repo}
 }
 
-// detachPlan runs the editor and returns without waiting for the terminal,
-// because the editor does not want one.
-func detachPlan(argv []string, req Request) Plan {
+// detachGrace is how long a detached editor is watched before it is declared
+// launched. Long enough to catch one that dies on the spot — a bad flag, a
+// missing profile — and short enough not to delay the status line.
+const detachGrace = 300 * time.Millisecond
+
+// detachWaitDelay bounds how long Wait lingers over pipes the launcher's
+// children inherited. code, zed and subl all exit at once on a cold start and
+// leave a GUI grandchild holding stdout, which without this makes Wait block
+// for the editor's whole lifetime.
+const detachWaitDelay = 100 * time.Millisecond
+
+// detachPlan starts the editor and leaves it running.
+//
+// It must not wait for the editor: these are editors that own their own
+// window, and the whole point is that differ carries on. Waiting had two
+// failure modes, both measured — a launcher that stays in the foreground
+// (gvim, emacs, `code --wait`, the JetBrains launcher with no instance up)
+// was killed at the timeout, and one whose grandchild held the inherited
+// pipes blocked for as long as the editor lived.
+//
+// Only stderr is collected, and only for long enough to report an editor that
+// fails immediately, so a typo in editor_cmd does not vanish in silence.
+func detachPlan(argv []string, req Request, grace time.Duration) Plan {
+	if grace <= 0 {
+		grace = detachGrace
+	}
 	return Plan{
 		Kind:     KindDetached,
 		Strategy: StrategyDetach,
@@ -237,17 +265,46 @@ func detachPlan(argv []string, req Request) Plan {
 		Dir:      req.Repo,
 		Desc:     "opened " + req.File,
 		run: func(ctx context.Context) error {
-			ctx, cancel := context.WithTimeout(ctx, actTimeout)
-			defer cancel()
-			cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+			cmd := exec.Command(argv[0], argv[1:]...)
 			cmd.Dir = req.Repo
-			if out, err := cmd.CombinedOutput(); err != nil {
-				return fmt.Errorf("%s: %w: %s",
-					filepath.Base(argv[0]), err, strings.TrimSpace(string(out)))
+			// Stdin and Stdout stay nil, so the child gets /dev/null and
+			// cannot hold a pipe of ours open.
+			var stderr bytes.Buffer
+			cmd.Stderr = &stderr
+			cmd.WaitDelay = detachWaitDelay
+
+			if err := cmd.Start(); err != nil {
+				return fmt.Errorf("%s: %w", filepath.Base(argv[0]), err)
 			}
-			return nil
+
+			done := make(chan error, 1)
+			go func() { done <- cmd.Wait() }()
+
+			select {
+			case err := <-done:
+				// ErrWaitDelay only means a child outlived the launcher and
+				// kept the pipe; the editor started fine.
+				if err != nil && !errors.Is(err, exec.ErrWaitDelay) {
+					return fmt.Errorf("%s: %w%s", filepath.Base(argv[0]), err,
+						stderrText(stderr.String()))
+				}
+				return nil
+			case <-time.After(grace):
+				// Still running, which for a detached editor is success.
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
 		},
 	}
+}
+
+// stderrText renders collected stderr ready to append to an error.
+func stderrText(s string) string {
+	if s = strings.TrimSpace(s); s != "" {
+		return ": " + strings.ReplaceAll(s, "\n", " ")
+	}
+	return ""
 }
 
 // buildArgv expands the placeholders in tmpl and splits it into an argv.
