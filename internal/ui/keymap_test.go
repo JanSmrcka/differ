@@ -140,6 +140,28 @@ var handlerFor = map[viewMode]string{
 // mode's handler is not expected to carry them.
 var globalKeys = map[string]bool{"ctrl+c": true, "?": true, "!": true}
 
+// typingModes are the modes where every printable character is text. ? and !
+// are commands everywhere else, and routeKey answers them — but a handler
+// claiming one *here* would be an undocumented binding on a key the user
+// meant to type, which widening globalKeys stopped catching.
+var typingModes = map[viewMode]bool{modeCommit: true, modeBranchPicker: true}
+
+func TestKeymap_NoTypingModeStealsAGlobalKey(t *testing.T) {
+	t.Parallel()
+	handled := handledKeys(t)
+
+	for mode, fn := range handlerFor {
+		if !typingModes[mode] {
+			continue
+		}
+		for _, k := range handled[fn] {
+			if k == "?" || k == "!" {
+				t.Errorf("%s handles %q, which is a character there, not a command", fn, k)
+			}
+		}
+	}
+}
+
 func TestKeymap_EveryHandledKeyIsDocumented(t *testing.T) {
 	t.Parallel()
 	handled := handledKeys(t)

@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -57,6 +58,12 @@ type remedy struct {
 }
 
 var remedies = []remedy{
+	// First, because every false positive below was a pathspec error quoting a
+	// name the user chose: a file called "Permission to Travel.md" or a branch
+	// called "conflict (wip)" would otherwise be answered with advice about
+	// remotes and merges.
+	{"did not match any file", "no file, branch or ref by that name"},
+
 	{"index.lock", "another git process is holding the index — try again in a moment"},
 	{"not a git repository", "differ has to run inside a git repository"},
 	{"unknown revision", "no branch, tag or commit by that name"},
@@ -64,26 +71,34 @@ var remedies = []remedy{
 	{"nothing to commit", "nothing is staged — stage something with tab or a"},
 	{"no changes added to commit", "nothing is staged — stage something with tab or a"},
 	{"already exists", "a branch by that name already exists"},
+
 	// Push and pull. "no upstream branch" comes from a plain push, where
 	// suggesting P would be circular — the user just pressed it.
 	{"no upstream branch", "this branch has no upstream — P offers to set one"},
-	{"no tracking information", "push with P first to set the upstream"},
+	{"no tracking information for the current branch", "push with P first to set the upstream"},
 	{"non-fast-forward", "the remote has commits you do not — pull with F first"},
 	{"fetch first", "the remote has commits you do not — pull with F first"},
-	{"failed to push some refs", "the push was rejected — pull with F first"},
+	// A hook or a protected branch, not something pulling can fix. Before any
+	// generic push fragment, and there is no generic one: "failed to push some
+	// refs" says only that a push failed, which the summary already says.
+	{"remote rejected", "the remote refused the push — ! shows what it said"},
 	{"not possible to fast-forward", "the branch has diverged — differ only pulls fast-forward"},
 	{"your local changes", "commit or stash your changes first"},
 	{"would be overwritten", "commit or stash your changes first"},
-	{"fix conflicts", "resolve the conflict, then try again"},
-	{"conflict (", "resolve the conflict, then try again"},
+	{"automatic merge failed", "resolve the conflict, then try again"},
+
 	// The remote refusing, in each of the three shapes it comes in. These are
 	// before the generic permission fragment so a bare file-permission error
 	// does not get told to check its credentials.
 	{"could not read from remote", "check your access to the remote"},
 	{"permission denied (publickey", "check your access to the remote"},
-	{"permission to ", "check your access to the remote"},
+	// GitHub over HTTPS: "remote: Permission to foo/bar.git denied to user."
+	// Matched on " denied to " rather than "permission to ", which any path
+	// containing those words would satisfy.
+	{" denied to ", "check your access to the remote"},
 	{"authentication failed", "check your access to the remote"},
 	{"permission denied", "check the permissions on that path"},
+
 	// The tools other than git.
 	{"can't find pane", "the tmux target is gone — check tmux_target"},
 	{"can't find session", "the tmux target is gone — check tmux_target"},
@@ -126,12 +141,16 @@ func describe(action string, err error) problem {
 // maxHintWidth keeps a fallback hint from crowding out the rest of the bar.
 const maxHintWidth = 70
 
+var pushBanner = regexp.MustCompile(`^To \S+$`)
+
 // firstUsefulLine is the first line that says something, skipping git push's
 // "To <url>" banner.
 func firstUsefulLine(s string) string {
 	for line := range strings.SplitSeq(s, "\n") {
 		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "To ") {
+		// git push's banner, and only that: "To <url>" with nothing else on
+		// the line. A sentence that happens to start with "To" is kept.
+		if line == "" || pushBanner.MatchString(line) {
 			continue
 		}
 		return line
@@ -197,11 +216,13 @@ func (m Model) renderProblemOverlay(width, height int) string {
 // A blank panel reads as a bug. These say what is true and, where there is
 // one, what to do about it.
 func (m Model) emptyState() []string {
+	// The explanations have to fit the panel — 35 columns, one of them the
+	// left padding — or they are cut, and a cut sentence explains nothing.
 	switch {
 	case m.ref != "":
 		return []string{"No differences", fmt.Sprintf("Nothing differs from %s.", m.ref)}
 	case m.stagedOnly:
-		return []string{"Nothing staged", "Stage something, or run differ without -s."}
+		return []string{"Nothing staged", "Stage a file, or drop -s."}
 	case m.mode == modeReview:
 		// Reached two ways: opening `differ review` on a clean tree, and the
 		// changeset emptying while a review is open. "yet" would be wrong for
@@ -230,7 +251,10 @@ func (m Model) renderEmptyState() string {
 		rows = append(rows, " "+m.styles.HelpDesc.Render(l))
 	}
 	for i, r := range rows {
-		rows[i] = padTo(r, fileListWidth)
+		// truncateEnd as well as padTo: "Nothing differs from <a long ref>" is
+		// sixty columns, and padTo only pads — the row then ran past the panel
+		// and kinked the divider between the two halves of the layout.
+		rows[i] = padTo(truncateEnd(r, fileListWidth), fileListWidth)
 	}
 	return strings.Join(rows, "\n")
 }

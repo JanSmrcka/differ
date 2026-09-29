@@ -248,7 +248,7 @@ func (m Model) handleCommitDone(msg commitDoneMsg) (tea.Model, tea.Cmd) {
 func (m Model) handleCommitMsgGenerated(msg commitMsgGeneratedMsg) (tea.Model, tea.Cmd) {
 	m.generatingMsg = false
 	if msg.err != nil {
-		return m.fail("generating a commit message", msg.err), nil
+		return m.fail("the commit message", msg.err), nil
 	}
 	m.commitInput.SetValue(msg.message)
 	m.commitInput.CursorEnd()

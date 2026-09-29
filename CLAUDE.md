@@ -164,12 +164,15 @@ github.com/spf13/cobra                # CLI
 
 ### Failures
 
-Nothing puts a tool's own output in the status bar. `Model.fail(action, err)`
-is the one way a failure reaches the user: `describe` turns it into a summary,
+Nothing puts a tool's *whole* output in the status bar, and nothing puts any
+of it there unshaped. `Model.fail(action, err)` is the one way a failure
+reaches the user: `describe` turns it into a summary,
 a hint and the original text, the bar gets the one-line form, and `!` shows the
 rest. The hints are matched on fragments of git's wording because git has no
 error codes — an unmatched failure still gets presented, so a reworded git
-message degrades to "no hint" rather than to something wrong.
+message degrades to one line of its own words — capped, and with git's severity
+prefix stripped — rather than to something wrong. That fallback is the one
+place a tool's wording reaches the bar, and it is a deliberate last resort.
 
 `fail` touches nothing but the status bar and the stored problem. A failure
 must never cost the user their place in the diff or a comment they have

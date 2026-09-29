@@ -9,7 +9,9 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/jansmrcka/differ/internal/git"
+	"github.com/jansmrcka/differ/internal/review"
 	"github.com/jansmrcka/differ/internal/testutil"
 )
 
@@ -202,7 +204,7 @@ func TestEmptyState_SaysWhatIsTrueAndWhatToDo(t *testing.T) {
 		{
 			name:  "nothing staged under -s",
 			setup: func(m Model) Model { m.stagedOnly = true; return m },
-			wants: []string{"Nothing staged", "-s"},
+			wants: []string{"Nothing staged", "drop -s"},
 		},
 		{
 			name:  "nothing differs from a ref",
@@ -320,5 +322,217 @@ func TestProblem_RealGitFailuresReachTheHintTable(t *testing.T) {
 				t.Errorf("the detail is just an exit code: %q", m.problem.detail)
 			}
 		})
+	}
+}
+
+// The panel is 35 columns and padTo only pads, so a long explanation ran past
+// it and kinked the divider between the two halves of the layout. A ref name
+// can be any length.
+func TestEmptyState_FitsThePanelWhateverItSays(t *testing.T) {
+	t.Parallel()
+	for _, setup := range []func(m Model) Model{
+		func(m Model) Model { return m },
+		func(m Model) Model { m.stagedOnly = true; return m },
+		func(m Model) Model { m.ref = "origin/feat/errors-and-empty-states-55"; return m },
+		func(m Model) Model { m.mode = modeReview; return m },
+	} {
+		// The smallest terminal differ draws, with a status message — which
+		// costs the panel a row and is where the breathing room around the
+		// text has to give way to the text itself.
+		for _, size := range []struct {
+			w, h   int
+			status string
+		}{
+			{120, 40, ""},
+			{80, 24, ""},
+			{60, 10, ""},
+			{60, 10, "nothing to review"},
+		} {
+			m := setup(newTestModel(t, nil))
+			m.width, m.height, m.statusMsg = size.w, size.h, size.status
+
+			rows := strings.Split(m.renderFileList(), "\n")
+			for i, row := range rows {
+				if got := lipgloss.Width(row); got != fileListWidth {
+					t.Errorf("%dx%d: row %d is %d columns, want %d: %q",
+						size.w, size.h, i, got, fileListWidth, stripANSI(row))
+				}
+			}
+			if len(rows) > m.listHeight() {
+				t.Errorf("%dx%d status=%q: the empty state is %d rows in a %d-row panel",
+					size.w, size.h, size.status, len(rows), m.listHeight())
+			}
+			// And the explanation is what has to survive, not the padding.
+			if !strings.Contains(stripANSI(m.renderFileList()), strings.Fields(m.emptyState()[1])[0]) {
+				t.Errorf("%dx%d status=%q: the explanation was dropped:\n%s",
+					size.w, size.h, size.status, stripANSI(m.renderFileList()))
+			}
+		}
+	}
+}
+
+// Entering review mode with nothing to review still has to leave a working
+// review: a changeset arrives a moment later, and a review with no session has
+// no progress, no badges, and no way out but to leave and come back.
+func TestProblem_AnEmptyReviewIsStillAWorkingReview(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t, nil)
+	updated, _ := m.enterReviewMode()
+	m = updated.(Model)
+
+	if m.mode != modeReview {
+		t.Fatalf("mode = %v, want review", m.mode)
+	}
+	if m.session == nil {
+		t.Fatal("review mode opened without a session")
+	}
+
+	// The changeset arrives.
+	arrived, _ := m.handleFilesRefreshed(filesRefreshedMsg{
+		files: []fileItem{
+			{change: git.FileChange{Path: "a.ts", Status: git.StatusModified}},
+			{change: git.FileChange{Path: "b.ts", Status: git.StatusModified}},
+		},
+		keys: map[string]string{"a.ts": "k", "b.ts": "k"},
+	})
+	m = arrived.(Model)
+
+	moved, _ := m.updateReviewMode(key("n"))
+	m = moved.(Model)
+	if got := m.reviewSummary(); !strings.Contains(got, "/2") {
+		t.Errorf("progress = %q, want it to count the two files that arrived", got)
+	}
+}
+
+// The affordance has to survive the one-row bar, which drops whole words with
+// no ellipsis — so it goes before the hint, and the failure goes before the
+// review chatter that shares the row.
+func TestProblem_TheAffordanceSurvivesANarrowBar(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t, []fileItem{{change: git.FileChange{Path: "a.ts", Status: git.StatusModified}}})
+	m.mode = modeReview
+	m.session = review.NewSession()
+	m.splitDiff = true
+	m = m.fail("generating a commit message", errors.New("fatal: Unable to create '/r/.git/index.lock': File exists."))
+
+	for _, width := range []int{60, 72, 80, 120} {
+		m.width = width
+		got := stripANSI(m.renderHintBar())
+		if !strings.Contains(got, "!") {
+			t.Errorf("width %d: the bar does not offer !:\n%s", width, got)
+		}
+		if !strings.Contains(got, "failed") {
+			t.Errorf("width %d: the bar does not say anything failed:\n%s", width, got)
+		}
+	}
+}
+
+// Fragments are matched against a message that quotes names the *user* chose,
+// so a file called "Permission to Travel.md" must not be answered with advice
+// about remote credentials. Every case here is a real git message shape.
+func TestProblem_AFragmentDoesNotMatchAUserChosenName(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name, err, wantHint string
+	}{
+		{
+			name:     "a path containing the words permission to",
+			err:      "error: unable to unlink old 'docs/Permission to build.pdf': Permission denied",
+			wantHint: "permissions on that path",
+		},
+		{
+			name:     "a pathspec naming a conflict",
+			err:      "fatal: pathspec 'src/conflict (old).ts' did not match any file(s) known to git",
+			wantHint: "no file, branch or ref",
+		},
+		{
+			name:     "a pathspec naming local changes",
+			err:      "fatal: pathspec 'docs/local changes.md' did not match any file(s) known to git",
+			wantHint: "no file, branch or ref",
+		},
+		{
+			name:     "a pathspec naming tracking information",
+			err:      "error: pathspec 'no tracking information.txt' did not match any file(s) known to git",
+			wantHint: "no file, branch or ref",
+		},
+		{
+			name:     "a branch named after a conflict",
+			err:      "fatal: a branch named 'fix/conflict-handling' already exists",
+			wantHint: "already exists",
+		},
+		// And a hook or a protected branch refusing a push is not something
+		// pulling can fix, which is what the generic push fragment advised.
+		{
+			name: "a pre-receive hook declining",
+			err: "remote: policy: signed commits only\nTo /tmp/remote.git\n" +
+				" ! [remote rejected] master -> master (pre-receive hook declined)\n" +
+				"error: failed to push some refs to '/tmp/remote.git'",
+			wantHint: "refused the push",
+		},
+		{
+			name: "a genuinely behind push",
+			err: "To /tmp/remote.git\n ! [rejected]        master -> master (fetch first)\n" +
+				"error: failed to push some refs to '/tmp/remote.git'",
+			wantHint: "pull with F first",
+		},
+		{
+			name:     "GitHub refusing over HTTPS",
+			err:      "remote: Permission to foo/bar.git denied to someone.\nfatal: unable to access 'https://github.com/foo/bar.git/'",
+			wantHint: "access to the remote",
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			if got := describe("push", errors.New(c.err)); !strings.Contains(got.hint, c.wantHint) {
+				t.Errorf("hint = %q, want it to mention %q", got.hint, c.wantHint)
+			}
+		})
+	}
+}
+
+// git push opens with "To <url>", which is never the sentence that matters —
+// but a sentence that merely starts with "To" is.
+func TestProblem_OnlyPushsBannerIsSkipped(t *testing.T) {
+	t.Parallel()
+	if got := describe("commit", errors.New("To commit, stage something first.\nhint: use tab")); !strings.Contains(got.hint, "To commit") {
+		t.Errorf("hint = %q, want the sentence kept", got.hint)
+	}
+	if got := describe("push", errors.New("To /tmp/x\nsomething useful")); !strings.Contains(got.hint, "something useful") {
+		t.Errorf("hint = %q, want the banner skipped", got.hint)
+	}
+	// Nothing but banners: better the banner than nothing.
+	if got := describe("push", errors.New("To /tmp/a\nTo /tmp/b")); got.hint == "" {
+		t.Error("a message of nothing but banners produced no hint at all")
+	}
+}
+
+// A hint is capped, because git's first line can be a paragraph and the bar is
+// one row.
+func TestProblem_ALongFallbackHintIsCapped(t *testing.T) {
+	t.Parallel()
+	long := strings.Repeat("a very long explanation ", 20)
+	got := describe("commit", errors.New(long))
+
+	if w := lipgloss.Width(got.hint); w > maxHintWidth {
+		t.Errorf("hint is %d columns, want at most %d", w, maxHintWidth)
+	}
+	if !strings.HasSuffix(got.hint, "…") {
+		t.Errorf("the hint was cut without saying so: %q", got.hint)
+	}
+}
+
+// The affordance is before the hint, and a test says so — moving it back was
+// otherwise free.
+func TestProblem_TheAffordanceComesBeforeTheHint(t *testing.T) {
+	t.Parallel()
+	line := describe("push", errors.New("fatal: Could not read from remote repository.")).line()
+	bang, hint := strings.Index(line, "!"), strings.Index(line, "access to the remote")
+	if bang < 0 || hint < 0 {
+		t.Fatalf("line is missing the affordance or the hint: %q", line)
+	}
+	if bang > hint {
+		t.Errorf("the affordance comes after the hint, so a long hint cuts it off: %q", line)
 	}
 }

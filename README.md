@@ -239,8 +239,9 @@ push failed  ·  ! details  ·  the remote has commits you do not — pull with 
 `!` shows the failure in full, including what git (or tmux, or the clipboard
 helper) actually said. It comes before the hint in the line because the bar is
 one row and cuts what does not fit — with the hint first, a long one took the
-`!` with it. That text is never put in the status bar, and it is
-never thrown away either — for the failures nobody anticipated it is the only
+`!` with it. The bar gets differ's own sentence, not that text — except
+where differ has nothing to say, when it gets one capped line of it. And it is
+never thrown away — for the failures nobody anticipated it is the only
 useful thing there is.
 
 A failure changes nothing else: not your place in the diff, not the comments

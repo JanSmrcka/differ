@@ -15,14 +15,17 @@ import (
 
 // enterReviewMode switches into review, creating the session on first use.
 func (m Model) enterReviewMode() (tea.Model, tea.Cmd) {
+	if m.session == nil {
+		// Before the early return below: a changeset can arrive later, and a
+		// review mode with no session is dead — no progress, no badges, and
+		// the only way out is to leave and come back.
+		m.session = review.NewSession()
+	}
 	if len(m.files) == 0 {
 		// Nothing to review, but the panel says that better than the status
 		// bar can — and it says it in the same place the file list would.
 		m.mode = modeReview
 		return m, nil
-	}
-	if m.session == nil {
-		m.session = review.NewSession()
 	}
 	m.mode = modeReview
 	m.session.MarkViewed(m.currentFilePath())
