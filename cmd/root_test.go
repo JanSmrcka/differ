@@ -223,3 +223,34 @@ func TestCLI_AnUnknownSubcommandIsAUsageError(t *testing.T) {
 		t.Errorf("an unknown command should show usage:\n%s", got.stderr)
 	}
 }
+
+// An unknown --theme used to fall back to dark without a word, so a typo left
+// you wondering why the colours had not changed.
+func TestCLI_AnUnknownThemeIsAUsageError(t *testing.T) {
+	t.Parallel()
+	got := runCLI(t, notARepo(t), "--theme", "solarised")
+
+	if got.code != 2 {
+		t.Errorf("exited %d, want 2 for a bad flag value", got.code)
+	}
+	if !strings.Contains(got.stderr, "solarised") {
+		t.Errorf("the error does not name the theme:\n%s", got.stderr)
+	}
+	// And it says what the choices are, because the user cannot guess them.
+	for _, want := range []string{"mocha", "gruvbox", "tokyonight"} {
+		if !strings.Contains(got.stderr, want) {
+			t.Errorf("the error does not offer %q:\n%s", want, got.stderr)
+		}
+	}
+}
+
+// The themes are listed where someone would look for them.
+func TestCLI_HelpListsTheThemes(t *testing.T) {
+	t.Parallel()
+	got := runCLI(t, notARepo(t), "--help")
+	for _, want := range []string{"mocha", "latte", "gruvbox", "tokyonight", "github"} {
+		if !strings.Contains(got.stdout, want) {
+			t.Errorf("--help does not mention the %q theme:\n%s", want, got.stdout)
+		}
+	}
+}

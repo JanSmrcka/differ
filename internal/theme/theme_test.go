@@ -6,13 +6,58 @@ import (
 	"regexp"
 	"strconv"
 	"testing"
+
+	"github.com/alecthomas/chroma/v2/styles"
 )
 
 func TestThemes_MapCompleteness(t *testing.T) {
 	t.Parallel()
-	for _, name := range []string{"dark", "light"} {
+	for _, name := range []string{
+		"mocha", "latte", "gruvbox", "tokyonight", "github",
+		// The original two names, kept so nobody's config breaks.
+		"dark", "light",
+	} {
 		if _, ok := Themes[name]; !ok {
 			t.Errorf("Themes map missing %q", name)
+		}
+	}
+}
+
+// Every theme in the registry is held to the same standard. The checks used to
+// be written out per theme, which meant a theme added later was covered by
+// nothing until someone remembered to add four more test functions.
+func TestThemes_EveryThemeIsComplete(t *testing.T) {
+	t.Parallel()
+	for name, th := range Themes {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			checkNonEmpty(t, th, name)
+			checkValidHex(t, th, name)
+			checkContrast(t, th, name)
+			if th.ChromaStyle == "" {
+				t.Errorf("%s has no Chroma style, so its diffs would be unhighlighted", name)
+			}
+		})
+	}
+}
+
+// A theme's Chroma style has to exist. Naming one Chroma does not have falls
+// back to monokai, which looks nothing like the rest of the theme.
+func TestThemes_EveryChromaStyleExists(t *testing.T) {
+	t.Parallel()
+	for name, th := range Themes {
+		if styles.Get(th.ChromaStyle) == nil {
+			t.Errorf("%s names Chroma style %q, which does not exist", name, th.ChromaStyle)
+		}
+	}
+}
+
+// The aliases have to be the same themes, not copies that can drift.
+func TestThemes_AliasesPointAtTheSameTheme(t *testing.T) {
+	t.Parallel()
+	for alias, real := range map[string]string{"dark": "mocha", "light": "latte"} {
+		if !reflect.DeepEqual(Themes[alias], Themes[real]) {
+			t.Errorf("%q and %q have drifted apart", alias, real)
 		}
 	}
 }
@@ -27,32 +72,6 @@ func checkNonEmpty(t *testing.T, th Theme, label string) {
 		if field.Kind() == reflect.String && field.String() == "" {
 			t.Errorf("%s.%s is empty", label, name)
 		}
-	}
-}
-
-func TestDarkTheme_NonEmpty(t *testing.T) {
-	t.Parallel()
-	checkNonEmpty(t, DarkTheme(), "DarkTheme")
-}
-
-func TestLightTheme_NonEmpty(t *testing.T) {
-	t.Parallel()
-	checkNonEmpty(t, LightTheme(), "LightTheme")
-}
-
-func TestDarkTheme_ChromaStyle(t *testing.T) {
-	t.Parallel()
-	th := DarkTheme()
-	if th.ChromaStyle == "" {
-		t.Error("dark theme ChromaStyle should not be empty")
-	}
-}
-
-func TestLightTheme_ChromaStyle(t *testing.T) {
-	t.Parallel()
-	th := LightTheme()
-	if th.ChromaStyle == "" {
-		t.Error("light theme ChromaStyle should not be empty")
 	}
 }
 
@@ -72,16 +91,6 @@ func checkValidHex(t *testing.T, th Theme, label string) {
 			t.Errorf("%s.%s = %q is not valid #RRGGBB", label, name, field.String())
 		}
 	}
-}
-
-func TestDarkTheme_ValidHex(t *testing.T) {
-	t.Parallel()
-	checkValidHex(t, DarkTheme(), "DarkTheme")
-}
-
-func TestLightTheme_ValidHex(t *testing.T) {
-	t.Parallel()
-	checkValidHex(t, LightTheme(), "LightTheme")
 }
 
 // relativeLuminance computes WCAG relative luminance from a hex color.
@@ -141,16 +150,6 @@ func checkContrast(t *testing.T, th Theme, label string) {
 				label, p.label, ratio, p.minRatio, p.fg, p.bg)
 		}
 	}
-}
-
-func TestDarkTheme_ContrastRatios(t *testing.T) {
-	t.Parallel()
-	checkContrast(t, DarkTheme(), "DarkTheme")
-}
-
-func TestLightTheme_ContrastRatios(t *testing.T) {
-	t.Parallel()
-	checkContrast(t, LightTheme(), "LightTheme")
 }
 
 // TestContrastRatio_KnownValues verifies the formula against known WCAG values.
