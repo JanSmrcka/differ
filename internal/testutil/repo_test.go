@@ -133,3 +133,33 @@ func TestNewBareRepo_CanBeUsedAsARemote(t *testing.T) {
 		t.Errorf("remote log = %q, want the pushed commit", got)
 	}
 }
+
+// The four settings NewRepo writes have to be repo-local, not environmental.
+// Production code runs git through internal/git, which builds its own
+// exec.Cmd and does not carry this package's environment — so anything that
+// only lived in Repo.env would stop protecting the test the moment the code
+// under test ran git itself. core.hooksPath is the one that matters most: it
+// points at a directory that does not exist, which is what stops a developer's
+// own commit hooks from running inside the test suite.
+func TestNewRepo_IsolatingConfigIsRepoLocal(t *testing.T) {
+	t.Parallel()
+	r := NewRepo(t)
+
+	for _, tc := range []struct{ key, want string }{
+		{"user.name", "test"},
+		{"user.email", "test@test.com"},
+		{"commit.gpgsign", "false"},
+	} {
+		if got := r.Git("config", "--local", "--get", tc.key); got != tc.want {
+			t.Errorf("local %s = %q, want %q", tc.key, got, tc.want)
+		}
+	}
+
+	hooks := r.Git("config", "--local", "--get", "core.hooksPath")
+	if hooks == "" {
+		t.Fatal("core.hooksPath is not set locally, so the developer's own hooks would run")
+	}
+	if _, err := os.Stat(hooks); !os.IsNotExist(err) {
+		t.Errorf("core.hooksPath %q exists; it must point at nothing", hooks)
+	}
+}
