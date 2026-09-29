@@ -57,12 +57,11 @@ func (r *Repo) writeLocalConfig(hooksPath string) {
 		"[core]\n\thooksPath = " + hooksPath + "\n"
 
 	path := filepath.Join(r.Dir, ".git", "config")
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+	existing, err := os.ReadFile(path)
 	if err != nil {
-		r.t.Fatalf("open %s: %v", path, err)
+		r.t.Fatalf("read %s: %v", path, err)
 	}
-	defer f.Close()
-	if _, err := f.WriteString(settings); err != nil {
+	if err := os.WriteFile(path, append(existing, settings...), 0o644); err != nil {
 		r.t.Fatalf("write %s: %v", path, err)
 	}
 }
