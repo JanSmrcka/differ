@@ -87,6 +87,11 @@ const (
 	StrategyReuse  Strategy = "reuse"  // an editor already open in this session
 	StrategyWindow Strategy = "window" // a new tmux window
 	StrategyInline Strategy = "inline" // take over differ's terminal
+	// StrategyDetach runs the editor in the background and returns at once.
+	// It is for editors that need no terminal and reuse their own window —
+	// VS Code, Zed, Sublime. differ does not guess which editor is which, so
+	// this is only ever chosen explicitly.
+	StrategyDetach Strategy = "detach"
 	// StrategyCustom is an editor_cmd that is itself a tmux command. It is
 	// not an editor invocation but a mechanism, so it runs as written instead
 	// of being wrapped in one of ours. It cannot be configured.
@@ -98,6 +103,7 @@ func Strategies() []string {
 	return []string{
 		string(StrategyAuto), string(StrategyReuse),
 		string(StrategyWindow), string(StrategyInline),
+		string(StrategyDetach),
 	}
 }
 
@@ -117,7 +123,8 @@ const (
 type Plan struct {
 	Kind     Kind
 	Strategy Strategy
-	// Argv and Dir are set for KindTerminal.
+	// Argv is the command, and Dir where it runs. KindTerminal plans are run
+	// from these by the caller; for KindDetached they describe what Run does.
 	Argv []string
 	Dir  string
 	// Desc is the status line for a success. Empty means say nothing.
@@ -171,7 +178,7 @@ func wantedStrategy(s string) (Strategy, error) {
 	switch st := Strategy(strings.TrimSpace(s)); st {
 	case "", StrategyAuto:
 		return StrategyAuto, nil
-	case StrategyReuse, StrategyWindow, StrategyInline:
+	case StrategyReuse, StrategyWindow, StrategyInline, StrategyDetach:
 		return st, nil
 	default:
 		return "", fmt.Errorf("unknown editor_strategy %q — use one of: %s",
@@ -186,8 +193,11 @@ func wantedStrategy(s string) (Strategy, error) {
 // tmux target is unavailable. Only auto falls back, because falling back is
 // what auto means.
 func planFor(ctx context.Context, want Strategy, argv []string, req Request) (Plan, error) {
-	if want == StrategyInline {
+	switch want {
+	case StrategyInline:
 		return inlinePlan(argv, req), nil
+	case StrategyDetach:
+		return detachPlan(argv, req), nil
 	}
 	if !req.Env.InTmux {
 		if want == StrategyAuto {
@@ -215,6 +225,29 @@ func inlinePlan(argv []string, req Request) Plan {
 		strategy = StrategyCustom
 	}
 	return Plan{Kind: KindTerminal, Strategy: strategy, Argv: argv, Dir: req.Repo}
+}
+
+// detachPlan runs the editor and returns without waiting for the terminal,
+// because the editor does not want one.
+func detachPlan(argv []string, req Request) Plan {
+	return Plan{
+		Kind:     KindDetached,
+		Strategy: StrategyDetach,
+		Argv:     argv,
+		Dir:      req.Repo,
+		Desc:     "opened " + req.File,
+		run: func(ctx context.Context) error {
+			ctx, cancel := context.WithTimeout(ctx, actTimeout)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+			cmd.Dir = req.Repo
+			if out, err := cmd.CombinedOutput(); err != nil {
+				return fmt.Errorf("%s: %w: %s",
+					filepath.Base(argv[0]), err, strings.TrimSpace(string(out)))
+			}
+			return nil
+		},
+	}
 }
 
 // buildArgv expands the placeholders in tmpl and splits it into an argv.

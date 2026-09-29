@@ -344,3 +344,73 @@ func TestStrategies_AreListedForTheUser(t *testing.T) {
 		}
 	}
 }
+
+// A GUI editor reuses its own window and wants neither differ's terminal nor
+// a tmux window. Nothing infers that — the user says so.
+func TestResolve_DetachRunsTheEditorInTheBackground(t *testing.T) {
+	t.Parallel()
+	root := repoWith(t, "src.ts")
+	ed := stubEditor(t, "myed")
+
+	for _, inTmux := range []bool{false, true} {
+		plan, err := Resolve(context.Background(), Config{Strategy: "detach", Cmd: ed + " {file}"},
+			Request{File: "src.ts", Repo: root, Env: Env{Editor: ed, InTmux: inTmux, TmuxPane: "%1"}})
+		if err != nil {
+			t.Fatalf("InTmux=%v: %v", inTmux, err)
+		}
+		if plan.Strategy != StrategyDetach {
+			t.Errorf("InTmux=%v: Strategy = %q, want detach", inTmux, plan.Strategy)
+		}
+		if plan.Kind != KindDetached {
+			t.Errorf("InTmux=%v: Kind = %v, want KindDetached", inTmux, plan.Kind)
+		}
+	}
+}
+
+// It has to actually run the thing, and report a failure rather than swallow
+// it.
+func TestResolve_DetachActuallyRunsTheCommand(t *testing.T) {
+	t.Parallel()
+	root := repoWith(t, "src.ts")
+	marker := filepath.Join(t.TempDir(), "ran.txt")
+	ed := filepath.Join(t.TempDir(), "writer")
+	script := "#!/bin/sh\nprintf '%s' \"$1\" > " + marker + "\n"
+	if err := os.WriteFile(ed, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := Resolve(context.Background(), Config{Strategy: "detach", Cmd: ed + " {file}"},
+		Request{File: "src.ts", Repo: root, Env: Env{Editor: ed}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := plan.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	got, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatalf("the editor did not run: %v", err)
+	}
+	if want := filepath.Join(root, "src.ts"); string(got) != want {
+		t.Errorf("editor got %q, want %q", got, want)
+	}
+}
+
+func TestResolve_DetachReportsAFailingEditor(t *testing.T) {
+	t.Parallel()
+	root := repoWith(t, "src.ts")
+	ed := filepath.Join(t.TempDir(), "failer")
+	if err := os.WriteFile(ed, []byte("#!/bin/sh\necho nope >&2\nexit 3\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := Resolve(context.Background(), Config{Strategy: "detach"},
+		Request{File: "src.ts", Repo: root, Env: Env{Editor: ed}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := plan.Run(context.Background()); err == nil {
+		t.Error("want an error from an editor that exits non-zero")
+	}
+}

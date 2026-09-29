@@ -222,10 +222,10 @@ editors it can check: `+<line>` for `vi`/`vim`/`nvim`/`view`/`nano`, and
 | `reuse` | only reuse; say so when there is nothing to reuse |
 | `window` | always a new tmux window |
 | `inline` | always take over differ's terminal, and resume when the editor exits |
+| `detach` | run the editor in the background and carry on |
 
-Outside tmux every value except `inline` is refused with a message rather
-than silently downgraded, so a setting that cannot work never looks like it
-did.
+Outside tmux `reuse` and `window` are refused with a message rather than
+silently downgraded, so a setting that cannot work never looks like it did.
 
 **Reuse** finds a pane in differ's *own* tmux session that is running
 `nvim`/`vim`/`vi`, hands it the file over nvim's RPC socket, and focuses that
@@ -245,15 +245,27 @@ Reuse needs nvim's RPC socket, which nvim creates by default — under
 has no such socket, so it gets a new window instead.
 
 **Other editors.** VS Code, Zed and Sublime reuse their own window already and
-do not want a terminal or a tmux window at all. differ does not try to guess
-which editor is which, so tell it:
+want neither a terminal nor a tmux window — that is what `detach` is for.
+differ does not try to guess which editor is which, so tell it:
 
 ```json
 {
   "editor_cmd": "code -r --goto {file}:{line}",
-  "editor_strategy": "inline"
+  "editor_strategy": "detach"
 }
 ```
+
+`-r` makes VS Code reuse its window instead of opening a new one, and leaving
+`--wait` off lets it return immediately. The same shape works for others:
+
+```json
+{ "editor_cmd": "zed {file}:{line}",  "editor_strategy": "detach" }
+{ "editor_cmd": "subl {file}:{line}", "editor_strategy": "detach" }
+{ "editor_cmd": "idea --line {line} {file}", "editor_strategy": "detach" }
+```
+
+A `detach` editor that exits non-zero is reported in the status bar, so a
+typo in `editor_cmd` does not fail silently.
 
 An `editor_cmd` that starts with `tmux` runs exactly as written and ignores
 `editor_strategy` — it is already a mechanism. So a recipe like
