@@ -164,10 +164,14 @@ func TestHelpOverlay_CtrlCStillQuits(t *testing.T) {
 	m.mode = modeFileList
 	m.showHelp = true
 
+	// Through Update, because ctrl+c is answered in the dispatcher now,
+	// before any mode or overlay can claim it — that is what makes it work in
+	// the commit input too.
+	//
 	// Not key("ctrl+c"): that helper only builds single runes and silently
 	// returns KeyDown for anything longer, which is how I first "confirmed"
 	// this bug while actually sending the wrong key.
-	_, cmd := m.routeKey(tea.KeyMsg{Type: tea.KeyCtrlC})
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
 	if cmd == nil {
 		t.Fatal("ctrl+c did nothing with the overlay open")
 	}

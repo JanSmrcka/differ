@@ -197,7 +197,8 @@ func (m Model) refreshFilesCmd() tea.Cmd {
 				return filesRefreshedMsg{err: err}
 			}
 		}
-		return filesRefreshedMsg{files: buildFileItems(repo, files, untracked)}
+		items := buildFileItems(repo, files, untracked)
+		return filesRefreshedMsg{files: items, keys: fileKeysOf(repo, items, stagedOnly)}
 	}
 }
 
@@ -213,7 +214,8 @@ func (m Model) buildRefreshedFiles() filesRefreshedMsg {
 			return filesRefreshedMsg{err: err}
 		}
 	}
-	return filesRefreshedMsg{files: buildFileItems(m.repo, files, untracked)}
+	items := buildFileItems(m.repo, files, untracked)
+	return filesRefreshedMsg{files: items, keys: fileKeysOf(m.repo, items, m.stagedOnly)}
 }
 
 func (m Model) saveSplitPrefCmd() tea.Cmd {

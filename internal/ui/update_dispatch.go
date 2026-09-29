@@ -60,33 +60,50 @@ func (m Model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case tea.KeyMsg:
+		// ctrl+c is documented as quitting immediately, so it is answered
+		// before anything else can claim it. In the commit input and the
+		// branch-name input the key reached the text field, which swallowed
+		// it — bubbletea does not quit on ctrl+c by itself — and esc was the
+		// only way out of either.
+		if msg.String() == "ctrl+c" {
+			return m, tea.Quit
+		}
 		return m.routeKey(msg)
 	}
 	return m, nil
 }
 
 func (m Model) routeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// The help overlay is global: it answers the same keys everywhere, and
-	// while it is open it swallows the rest so a stray j does not scroll a
-	// diff the user cannot see.
-	if !m.typing() {
+	// An open overlay owns the keyboard, whatever it is drawn over. The check
+	// is outside the typing guard on purpose: an async message can switch the
+	// mode underneath an overlay — the branch list arriving is enough — and
+	// inside the guard every key then went into that mode's text input, which
+	// left the overlay with no way to close.
+	if m.showHelp || m.showHistory {
 		switch msg.String() {
-		case "ctrl+c":
-			// Listed in the overlay as "quit immediately", so it has to work
-			// there too — the early return below used to swallow it.
-			return m, tea.Quit
 		case "?":
-			m.showHelp = !m.showHelp
+			m.showHelp, m.showHistory = !m.showHelp, false
 			return m, nil
-		case "esc", "q":
-			if m.showHelp {
-				m.showHelp = false
+		case "H":
+			// H closes the history, but does not open one from the help
+			// overlay: unlike ?, it is not a global — it exists only in
+			// review mode, and the file list's help does not list it.
+			if m.showHistory {
+				m.showHistory = false
 				return m, nil
 			}
-		}
-		if m.showHelp {
+		case "esc", "q":
+			m.showHelp, m.showHistory = false, false
 			return m, nil
 		}
+		// Everything else is swallowed, so a stray j does not scroll a diff
+		// the user cannot see.
+		return m, nil
+	}
+
+	if !m.typing() && msg.String() == "?" {
+		m.showHelp = true
+		return m, nil
 	}
 
 	switch m.mode {
@@ -164,6 +181,7 @@ func (m Model) handleFilesRefreshed(msg filesRefreshedMsg) (tea.Model, tea.Cmd) 
 		m.statusMsg = "refresh failed: " + msg.err.Error()
 		return m, nil
 	}
+	m = m.noteChangedFiles(msg.keys)
 	if filesEqual(m.files, msg.files) {
 		return m, m.loadDiffCmd(false)
 	}
@@ -230,6 +248,9 @@ func (m Model) handleBranchesLoaded(msg branchesLoadedMsg) (tea.Model, tea.Cmd) 
 		m.statusMsg = "no branches"
 		return m, nil
 	}
+	// An overlay belongs to the view it was opened over, and this is a
+	// different view arriving in the background.
+	m.showHelp, m.showHistory = false, false
 	m.mode = modeBranchPicker
 	m.branches = msg.branches
 	m.currentBranch = msg.current

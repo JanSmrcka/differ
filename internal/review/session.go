@@ -11,6 +11,7 @@ package review
 import (
 	"fmt"
 	"sort"
+	"time"
 )
 
 // State is where a comment is in its life: written, delivered, or no longer
@@ -79,13 +80,40 @@ func (c Comment) WasSent() bool {
 }
 
 // FileState is how far the user has got with one file.
+//
+// The values are a precedence order read from the bottom up: FileStateOf
+// returns the highest that applies, because that is the one the user needs to
+// act on. A file that changed under them outranks anything they had already
+// done with it.
 type FileState int
 
 const (
 	FileUnreviewed FileState = iota
 	FileViewed
+	// FileSent means every comment on this file has been delivered — there is
+	// nothing left to do with it.
+	FileSent
+	// FileCommented means comments are waiting to go out.
 	FileCommented
+	// FileChanged means the file changed after the user last looked at it, so
+	// whatever they concluded may no longer hold.
+	FileChanged
 )
+
+func (f FileState) String() string {
+	switch f {
+	case FileViewed:
+		return "viewed"
+	case FileSent:
+		return "sent"
+	case FileCommented:
+		return "commented"
+	case FileChanged:
+		return "changed"
+	default:
+		return "unreviewed"
+	}
+}
 
 // Progress summarises a session against the files currently in the diff.
 type Progress struct {
@@ -95,17 +123,27 @@ type Progress struct {
 	Pending  int
 	Sent     int
 	Stale    int
+	// Changed counts files rewritten since the user last read them. They do
+	// not count towards Reviewed: whatever was concluded about them was
+	// concluded about different code.
+	Changed int
 }
 
 // Session is the review state for one run of the application.
 type Session struct {
 	comments []Comment
 	viewed   map[string]bool
-	nextID   int
+	// changed names the files that were rewritten after the user last looked
+	// at them. Looking again clears the flag.
+	changed map[string]bool
+	// deliveries is what left the session, in the order it was attempted,
+	// failures included.
+	deliveries []Delivery
+	nextID     int
 }
 
 func NewSession() *Session {
-	return &Session{viewed: map[string]bool{}}
+	return &Session{viewed: map[string]bool{}, changed: map[string]bool{}}
 }
 
 // Add stores a comment, assigning it an ID, and returns the stored copy.
@@ -205,19 +243,60 @@ func (s *Session) MarkSent(ids []string) {
 	}
 }
 
-// MarkViewed records that the user has looked at a file.
-func (s *Session) MarkViewed(file string) { s.viewed[file] = true }
+// MarkViewed records that the user has looked at a file. It is also how a
+// change is acknowledged: having looked at the new content, they are no longer
+// working from the old.
+func (s *Session) MarkViewed(file string) {
+	s.viewed[file] = true
+	delete(s.changed, file)
+}
 
-// FileStateOf reports how far the user has got with a file. Carrying comments
-// outranks merely having been viewed.
+// NoteChange records that a file's content moved underneath the user.
+//
+// A file they have not looked at cannot go stale on them — there is nothing to
+// invalidate — so the flag is only set for one they have seen.
+func (s *Session) NoteChange(file string) {
+	if s.viewed[file] {
+		s.changed[file] = true
+	}
+}
+
+// ChangedSinceViewed reports whether a file was rewritten after the user last
+// read it.
+func (s *Session) ChangedSinceViewed(file string) bool { return s.changed[file] }
+
+// FileStateOf reports how far the user has got with a file, as the highest
+// state that applies.
 func (s *Session) FileStateOf(file string) FileState {
+	if s.changed[file] {
+		return FileChanged
+	}
 	if s.CountFor(file) > 0 {
+		if s.allSent(file) {
+			return FileSent
+		}
 		return FileCommented
 	}
 	if s.viewed[file] {
 		return FileViewed
 	}
 	return FileUnreviewed
+}
+
+// allSent reports whether every comment on a file has been delivered. A file
+// with no comments is not "all sent" — it has nothing to send.
+func (s *Session) allSent(file string) bool {
+	found := false
+	for _, c := range s.comments {
+		if c.File != file {
+			continue
+		}
+		found = true
+		if !c.WasSent() {
+			return false
+		}
+	}
+	return found
 }
 
 // PendingCount and SentCount count comments by state.
@@ -242,7 +321,11 @@ func (s *Session) Progress(files []string) Progress {
 	current := make(map[string]bool, len(files))
 	for _, f := range files {
 		current[f] = true
-		if s.FileStateOf(f) != FileUnreviewed {
+		switch s.FileStateOf(f) {
+		case FileUnreviewed:
+		case FileChanged:
+			p.Changed++
+		default:
 			p.Reviewed++
 		}
 	}
@@ -261,4 +344,40 @@ func (s *Session) Progress(files []string) Progress {
 		}
 	}
 	return p
+}
+
+// Delivery is one attempt to send feedback out of the session — the history
+// the user can ask for when they lose track of what already went to the agent.
+//
+// The clock is the caller's: a Session has no time source of its own, so its
+// tests stay deterministic.
+type Delivery struct {
+	At time.Time
+	// Target is the delivery mechanism's name, as feedback.Target reports it.
+	Target string
+	// Comments are the IDs in this payload, and Files the files they came
+	// from.
+	Comments []string
+	Files    []string
+	// Err is why the delivery failed, empty when it succeeded.
+	Err string
+}
+
+// OK reports whether the delivery succeeded.
+func (d Delivery) OK() bool { return d.Err == "" }
+
+// RecordDelivery appends an attempt to the history. Failures are recorded too:
+// "did that actually go out?" is the question the history exists to answer,
+// and a send that silently failed is the worst answer to be missing.
+func (s *Session) RecordDelivery(d Delivery) {
+	s.deliveries = append(s.deliveries, d)
+}
+
+// History is every delivery attempt, most recent first.
+func (s *Session) History() []Delivery {
+	out := make([]Delivery, 0, len(s.deliveries))
+	for i := len(s.deliveries) - 1; i >= 0; i-- {
+		out = append(out, s.deliveries[i])
+	}
+	return out
 }

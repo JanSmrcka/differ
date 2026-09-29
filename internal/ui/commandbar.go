@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -136,10 +137,7 @@ func fitBarItems(head, tail []string, width int) string {
 // does not change the layout's height — the diff viewport must not resize and
 // fail to come back.
 func (m Model) renderHelpOverlay(width, height int) string {
-	rows := make([]string, 0, height)
-	title := m.styles.HelpKey.Render(" keys · " + modeName(m.mode))
-	rows = append(rows, title, "")
-
+	var rows []string
 	for _, b := range append(keymapFor(m.mode), globalBindings()...) {
 		if b.Desc == "" && b.Help == "" {
 			continue // an alias row, already covered by its label
@@ -157,15 +155,65 @@ func (m Model) renderHelpOverlay(width, height int) string {
 		}
 		rows = append(rows, key+m.styles.HelpDesc.Render(text))
 	}
-	rows = append(rows, "", m.styles.HelpDesc.Render(" ? or esc to close"))
+	return m.fitOverlay(" keys · "+modeName(m.mode), rows, "? or esc to close", width, height)
+}
+
+// fitOverlay lays a title, a body and a closing line into exactly the panel
+// area, and is the only place either overlay decides what to drop.
+//
+// Both dimensions matter. A row wider than the terminal soft-wraps, the body
+// gains a line, and the bottom rule and command bar are pushed off screen —
+// the very failure overlays are drawn over the panels to avoid. A body taller
+// than the panel used to be cut at the end, which silently took the closing
+// line with it: at the minimum 80x10 terminal the help overlay showed three of
+// twenty-one keys and no way out. The closing line is now kept whatever
+// happens, and what was dropped is counted.
+//
+// Rows arrive already styled, so the width cut cannot be a rune slice: an
+// escape sequence measures zero columns, and dropping runes off the end takes
+// the reset with it — the colour then bleeds down the rest of the screen — or
+// cuts an escape in half. MaxWidth understands escapes and closes what it
+// cuts; the ellipsis goes on afterwards, outside the styled text.
+func (m Model) fitOverlay(title string, body []string, closing string, width, height int) string {
+	footer := m.styles.HelpDesc.Render(" " + closing)
+
+	// The title, the blank line under it, the blank line above the footer and
+	// the footer itself.
+	const chrome = 4
+	switch room := height - chrome; {
+	case room <= 0:
+		body = nil
+	case len(body) > room:
+		// One of the rows left goes to saying how many are not shown.
+		keep := room - 1
+		hidden := len(body) - keep
+		body = append(body[:keep:keep],
+			m.styles.HelpDesc.Render(fmt.Sprintf(" … %d more", hidden)))
+	}
+
+	rows := append([]string{m.styles.HelpKey.Render(title), ""}, body...)
+	rows = append(rows, "", footer)
 
 	for i, r := range rows {
-		rows[i] = padTo(r, width)
+		rows[i] = padTo(clipOverlayRow(r, width), width)
 	}
 	for len(rows) < height {
 		rows = append(rows, padTo("", width))
 	}
-	return strings.Join(rows[:height], "\n")
+	return strings.Join(rows[:max(height, 0)], "\n")
+}
+
+// clipOverlayRow cuts one row to the width, marking the cut.
+func clipOverlayRow(row string, width int) string {
+	if width <= 0 || lipgloss.Width(row) <= width {
+		return row
+	}
+	if width == 1 {
+		// MaxWidth(0) does not truncate at all, so the row would pass through
+		// whole and wrap.
+		return "…"
+	}
+	return lipgloss.NewStyle().MaxWidth(width-1).Render(row) + "…"
 }
 
 // modeName is what the mode is called in the help overlay's title.

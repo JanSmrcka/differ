@@ -57,8 +57,6 @@ func (m Model) updateFileListMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	switch msg.String() {
-	case "ctrl+c":
-		return m, tea.Quit
 	case "q":
 		return m.confirmQuit()
 	case "j", "down":

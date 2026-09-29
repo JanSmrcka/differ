@@ -53,12 +53,13 @@ func (m Model) updateReviewMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.startHunkComment()
 	case "x":
 		return m.deleteCommentAtCursor()
+	case "H":
+		m.showHistory = !m.showHistory
+		return m, nil
 	case "s":
 		return m.sendCommentAtCursor()
 	case "S":
 		return m.sendAllPending()
-	case "ctrl+c":
-		return m, tea.Quit
 	case "esc":
 		m.mode = modeFileList
 		return m, nil
@@ -107,6 +108,12 @@ func (m Model) reviewSummary() string {
 	}
 	if p.Stale > 0 {
 		out += fmt.Sprintf("  %d stale", p.Stale)
+	}
+	// Files the agent rewrote while the user was reading elsewhere. Worth
+	// saying out loud: they no longer count as reviewed, so the ratio above
+	// would otherwise appear to go backwards for no reason.
+	if p.Changed > 0 {
+		out += fmt.Sprintf("  %d changed", p.Changed)
 	}
 	return out
 }

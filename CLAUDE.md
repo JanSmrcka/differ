@@ -53,6 +53,8 @@ main.go → cmd/root.go (cobra commands)
                    ├── mode_*.go   — per-mode key handling
                    ├── keymap.go   — the keymap: one table, read by bar/overlay/tests
                    ├── commandbar.go — the one-line command bar and ? overlay
+                   ├── history.go  — the H overlay: what was sent, where, and whether it arrived
+                   ├── progress.go — review progress: which files moved under the reviewer
                    ├── log.go      — LogModel (commit log browser)
                    ├── diff.go     — diff parser + single-line rendering
                    ├── hunk.go     — hunk model, line addressing, navigation
@@ -162,7 +164,10 @@ github.com/spf13/cobra                # CLI
 - **Chroma + lipgloss**: apply Chroma foreground colors token-by-token, keep diff background from line type. Chroma must not override background.
 - **Terminal width**: always respect `tea.WindowSizeMsg`. File list panel fixed ~35 chars (`fileListWidth`), diff gets the rest.
 - **Viewport**: call `viewport.SetContent()` on content change, `viewport.GotoTop()` on file switch.
-- **Unicode width**: use `lipgloss.Width()` not `len()`.
+- **Unicode width**: use `lipgloss.Width()` not `len()`. In a test, `strings.Index` gives a *byte* offset — measuring a column means `lipgloss.Width(row[:i])`, because the gutter glyphs are multi-byte.
+- **`Repo.run` passes `-c core.quotepath=false`.** Without it git escapes non-ASCII bytes in every path it prints, so `žluťoučký.ts` arrived as `"\305\276lu..."`: the file list showed the escaped form and asking git for that file's diff matched nothing.
+- **`ctrl+c` is answered in `dispatch`,** before any mode or overlay. In the commit and new-branch inputs the text field swallowed it — bubbletea does not quit on ctrl+c by itself — so `esc` was the only way out. `esc` cancels an input; `ctrl+c` always quits.
+- **An overlay owns the keyboard while it is open,** checked outside the typing guard: an async message (the branch list arriving) can switch the mode underneath one, and inside the guard every key then went into that mode's input.
 - **Git diff flags**: always `--no-ext-diff --color=never` for predictable output.
 - **Untracked files**: no diff available — read file content directly and turn it into an all-added diff with `ParseNewFile()`, then render it through `DiffRenderer` like any other diff.
 - **AI commit messages**: runs configurable `commit_msg_cmd` (default `claude -p`). Diff truncated to 8000 chars. Falls back gracefully if CLI unavailable.

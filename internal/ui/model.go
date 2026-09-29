@@ -52,7 +52,12 @@ type diffLoadedMsg struct {
 // changed", which matters because review comments are staled off this.
 type filesRefreshedMsg struct {
 	files []fileItem
-	err   error
+	// keys fingerprints each file's content, so a refresh can say which files
+	// moved rather than only that the changeset did. The file list is
+	// deliberately not keyed on it: a touch with no edit must not scroll the
+	// reviewer back to the top of the diff.
+	keys map[string]string
+	err  error
 }
 type commitDoneMsg struct{ err error }
 
@@ -95,9 +100,13 @@ type branchCreatedMsg struct {
 
 // Model holds all UI state; behavior split across focused files.
 type Model struct {
-	repo       *git.Repo
-	cfg        config.Config
+	repo *git.Repo
+	cfg  config.Config
+	// files is the changeset on show; fileKeys fingerprints each one's
+	// content as of the last refresh, which is how the next refresh can tell
+	// a rewritten file from an untouched one.
 	files      []fileItem
+	fileKeys   map[string]string
 	styles     Styles
 	theme      theme.Theme
 	stagedOnly bool
@@ -143,6 +152,9 @@ type Model struct {
 	// showHelp draws the full keymap over the panels. It is drawn over them
 	// rather than below, so opening it cannot change the layout's height.
 	showHelp bool
+	// showHistory draws the session's delivery history over the panels, the
+	// same way.
+	showHistory bool
 
 	upstream     git.UpstreamInfo
 	pushConfirm  bool

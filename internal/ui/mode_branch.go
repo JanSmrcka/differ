@@ -64,8 +64,6 @@ func (m Model) updateBranchMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.mode = modeFileList
 		m.branchFilter.Blur()
 		return m, nil
-	case "ctrl+c":
-		return m, tea.Quit
 	case "up", "ctrl+k":
 		if m.branchCursor > 0 {
 			m.branchCursor--
@@ -108,7 +106,7 @@ func (m Model) updateBranchMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) updateBranchCreateMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "esc", "ctrl+c":
+	case "esc":
 		m.branchCreating = false
 		m.branchInput.Reset()
 		m.branchFilter.Focus()

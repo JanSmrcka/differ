@@ -106,17 +106,24 @@ It never changes git state — staging and committing stay explicit actions.
 
 | Key       | Action                          |
 | --------- | ------------------------------- |
-| `r`       | toggle review mode              |
 | `j/k`     | move line cursor                |
 | `}` / `{` | next/prev hunk                  |
+| `d/u`     | half page down/up               |
+| `n/p`     | next/prev file                  |
+| `g/G`     | first/last line                 |
 | `c`       | comment on line (edit existing) |
 | `C`       | comment on whole hunk           |
 | `x`       | delete comment under cursor     |
 | `s`       | send comment under cursor       |
 | `S`       | send all pending comments       |
-| `n/p`     | next/prev file                  |
+| `H`       | what has been sent this session |
+| `r`       | toggle review mode              |
+| `e`       | open in editor at the cursor's line |
+| `tab`     | stage/unstage                   |
 | `v`       | toggle split diff               |
+| `b`       | open branch picker              |
 | `esc`     | back to file list               |
+| `q`       | quit                            |
 
 In the comment editor: `ctrl+s` saves, `esc` cancels. Comments are multiline,
 shown inline under the line they refer to, and marked `pending` until sent.
@@ -124,6 +131,31 @@ They live for the session only — nothing is written to disk or to git.
 
 Quitting with unsent comments asks for confirmation — review state is
 session-only, so `q` really does discard them.
+
+### Progress and history
+
+The status bar carries the whole review: `3/7 reviewed  2 comments  1 pending
+1 changed`. A file counts as reviewed once you have looked at it in review
+mode, and stops counting when the agent rewrites it — that is what `changed`
+means, and looking at it again clears it.
+
+A rewrite is noticed by fingerprinting the content differ is actually showing
+you — the working-tree file normally and under `-r`, git's own object id for
+the staged content under `-s`. So staging never counts as a rewrite, and
+neither does a formatter writing the same bytes back.
+
+`H` lists what has left the session, most recent first:
+
+```
+ sent this session
+
+ 14:22:06  2 comments → tmux  sent  src/api/client.ts, src/auth/login.ts
+ 14:19:41  1 comment → tmux   failed: tmux pane %9 is gone  src/legacy.ts
+```
+
+Failures are in the list on purpose: a send that went nowhere is the one worth
+being able to look up. A failed send changes nothing — the comments stay
+pending and can be retried once the target is back.
 
 ### Stale comments
 
