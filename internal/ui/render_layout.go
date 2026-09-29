@@ -20,13 +20,11 @@ func (m Model) branchName() string {
 }
 
 func (m Model) renderFileList(height int) string {
+	end := min(m.fileOffset+max(height, 0), len(m.files))
 	var b strings.Builder
-	for i, f := range m.files {
-		if i >= height {
-			break
-		}
-		b.WriteString(m.renderFileItem(f, i == m.cursor))
-		if i < len(m.files)-1 {
+	for i := m.fileOffset; i < end; i++ {
+		b.WriteString(m.renderFileItem(m.files[i], i == m.cursor))
+		if i < end-1 {
 			b.WriteByte('\n')
 		}
 	}
@@ -39,28 +37,106 @@ func (m Model) renderFileItem(f fileItem, selected bool) string {
 	if f.change.Staged {
 		stagedRaw = "● "
 	}
+
 	stats := fmt.Sprintf("+%d -%d", f.change.AddedLines, f.change.DeletedLines)
 	if m.hasStaleComments(f.change.Path) {
 		stats = staleMarker + " " + stats
 	}
-	name := filepath.Base(f.change.Path)
-	if f.change.OldPath != "" {
-		name = filepath.Base(f.change.OldPath) + " → " + filepath.Base(f.change.Path)
+	// While reviewing, how far the user has got with the file takes the place
+	// of the line counts: it is what they are navigating by, and 35 columns
+	// does not hold both.
+	right := stats
+	if badge := m.reviewBadge(f.change.Path); badge != "" {
+		right = badge
 	}
-	nameMaxW := fileListWidth - lipgloss.Width(stagedRaw) - lipgloss.Width(status) - 1 - lipgloss.Width(stats) - 1
-	if nameMaxW < 1 {
-		nameMaxW = 1
-	}
-	name = truncatePath(name, nameMaxW)
+
+	// The right-hand column sits against the right edge, so the eye can run
+	// down it. The name is padded to whatever is left — after the panel's own
+	// left padding, which the old arithmetic forgot, leaving names a column
+	// too long and the column ragged.
+	room := fileListWidth - filePanelPadding
+	nameW := room - lipgloss.Width(stagedRaw) - lipgloss.Width(status) - 1 - lipgloss.Width(right) - 1
+	name := padTo(truncatePath(m.displayName(f), max(nameW, 1)), max(nameW, 1))
+
 	if selected {
-		return m.styles.FileSelected.Width(fileListWidth).Render(fmt.Sprintf("%s%s %s %s", stagedRaw, status, name, stats))
+		return m.styles.FileSelected.Width(fileListWidth).Render(fmt.Sprintf("%s%s %s %s", stagedRaw, status, name, right))
 	}
+
 	staged := stagedRaw
 	if f.change.Staged {
 		staged = m.styles.StagedIcon.Render("● ")
 	}
-	line := fmt.Sprintf("%s%s %s %s", staged, m.styleStatus(status, f.change.Status), name, stats)
+	line := fmt.Sprintf("%s%s %s %s", staged, m.styleStatus(status, f.change.Status), name, m.styleRight(f, right))
 	return m.styles.FileItem.Width(fileListWidth).Render(line)
+}
+
+// displayName is how a file is named in the list: enough of its path to tell
+// it apart from the others in the changeset, and both names for a rename.
+func (m Model) displayName(f fileItem) string {
+	short := m.shortNames()
+	name := short[f.change.Path]
+	if name == "" {
+		name = filepath.Base(f.change.Path)
+	}
+	if f.change.OldPath != "" {
+		return filepath.Base(f.change.OldPath) + " → " + name
+	}
+	return name
+}
+
+// shortNames is the disambiguated name for every file in the changeset,
+// computed from the whole set because that is what decides how much of each
+// path is needed.
+func (m Model) shortNames() map[string]string {
+	paths := make([]string, 0, len(m.files))
+	for _, f := range m.files {
+		paths = append(paths, f.change.Path)
+	}
+	return shortNames(paths)
+}
+
+// reviewBadge is the one-word review state of a file, or "" when there is
+// nothing worth saying — outside review mode, or for a file nobody has looked
+// at yet, which is the normal state and needs no badge.
+func (m Model) reviewBadge(path string) string {
+	if m.mode != modeReview || m.session == nil {
+		return ""
+	}
+	var badge string
+	switch m.session.FileStateOf(path) {
+	case review.FileChanged:
+		badge = "changed"
+	case review.FileCommented:
+		badge = plural(m.session.CountFor(path), "comment")
+	case review.FileSent:
+		badge = "sent"
+	case review.FileViewed:
+		badge = "·"
+	default:
+		return ""
+	}
+	// The badge takes the place of the line counts, which is where the stale
+	// marker used to live — so it has to carry it, or a file whose comments no
+	// longer match the diff stops being flagged in the list.
+	if m.hasStaleComments(path) {
+		badge = staleMarker + " " + badge
+	}
+	return badge
+}
+
+// styleRight colours the right-hand column: the additions and deletions carry
+// the diff's own colours, and a review badge the comment colour, so the column
+// says what kind of thing it is before it is read.
+func (m Model) styleRight(f fileItem, text string) string {
+	if m.reviewBadge(f.change.Path) != "" {
+		return m.styles.CommentMeta.Render(text)
+	}
+	if text != fmt.Sprintf("+%d -%d", f.change.AddedLines, f.change.DeletedLines) {
+		// Carries the stale marker; leave it in the marker's colour.
+		return m.styles.CommentStale.Render(text)
+	}
+	return m.styles.StatusAdded.Render(fmt.Sprintf("+%d", f.change.AddedLines)) +
+		" " + m.styles.StatusDeleted.Render(fmt.Sprintf("-%d", f.change.DeletedLines))
 }
 
 // hasStaleComments reports whether a file carries comments that no longer

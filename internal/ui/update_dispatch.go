@@ -196,6 +196,10 @@ func (m Model) handleFilesRefreshed(msg filesRefreshedMsg) (tea.Model, tea.Cmd) 
 	if m.cursor >= len(m.files) {
 		m.cursor = max(0, len(m.files)-1)
 	}
+	// The agent committing half its work shrinks the changeset under the
+	// window, which would otherwise stay scrolled past the end and show an
+	// empty panel.
+	m = m.clampFileScroll()
 	m.prevCurs = -1
 	m.lastDiffContent = ""
 	if len(m.files) == 0 {

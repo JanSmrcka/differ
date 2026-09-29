@@ -61,6 +61,21 @@ no handler, or a handler is missing from here.
 
 ### File List
 
+The list scrolls, shows enough of each path to tell it apart from the others in
+the changeset, and puts the additions and deletions against the right edge:
+
+```
+ ● M login.ts                +12 -4
+   M a/index.ts               +8 -2
+   M b/index.ts               +3 -0
+   A format.ts               +31 -0
+   ? NOTES.md                 +3 -0
+```
+
+`●` marks a staged file. While reviewing, the right-hand column carries how far
+you have got with each file instead — `·` read, `2 comments`, `sent`, or
+`changed` when the agent rewrote it after you read it.
+
 | Key           | Action                                     |
 | ------------- | ------------------------------------------ |
 | `j/k`         | navigate files                             |
