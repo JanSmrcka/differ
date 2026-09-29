@@ -353,9 +353,9 @@ func TestEmptyState_FitsThePanelWhateverItSays(t *testing.T) {
 
 			rows := strings.Split(m.renderFileList(), "\n")
 			for i, row := range rows {
-				if got := lipgloss.Width(row); got != fileListWidth {
+				if got := lipgloss.Width(row); got != m.listWidth() {
 					t.Errorf("%dx%d: row %d is %d columns, want %d: %q",
-						size.w, size.h, i, got, fileListWidth, stripANSI(row))
+						size.w, size.h, i, got, m.listWidth(), stripANSI(row))
 				}
 			}
 			if len(rows) > m.listHeight() {

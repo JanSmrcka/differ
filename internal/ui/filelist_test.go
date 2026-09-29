@@ -271,8 +271,8 @@ func TestFileList_RowsAreExactlyThePanelWideWithTheRightColumnAligned(t *testing
 	}
 	var ends []int
 	for i, row := range rows {
-		if got := lipgloss.Width(row); got != fileListWidth {
-			t.Errorf("row %d is %d columns, want %d: %q", i, got, fileListWidth, stripANSI(row))
+		if got := lipgloss.Width(row); got != m.listWidth() {
+			t.Errorf("row %d is %d columns, want %d: %q", i, got, m.listWidth(), stripANSI(row))
 		}
 		// Columns, not bytes: a byte count would call any non-ASCII name
 		// ragged.

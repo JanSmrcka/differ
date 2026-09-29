@@ -254,7 +254,7 @@ func (m Model) renderEmptyState() string {
 		// truncateEnd as well as padTo: "Nothing differs from <a long ref>" is
 		// sixty columns, and padTo only pads — the row then ran past the panel
 		// and kinked the divider between the two halves of the layout.
-		rows[i] = padTo(truncateEnd(r, fileListWidth), fileListWidth)
+		rows[i] = padTo(truncateEnd(r, m.listWidth()), m.listWidth())
 	}
 	return strings.Join(rows, "\n")
 }

@@ -168,9 +168,10 @@ func TestHelpOverlay_CtrlCStillQuits(t *testing.T) {
 	// before any mode or overlay can claim it — that is what makes it work in
 	// the commit input too.
 	//
-	// Not key("ctrl+c"): that helper only builds single runes and silently
-	// returns KeyDown for anything longer, which is how I first "confirmed"
-	// this bug while actually sending the wrong key.
+	// Built by hand, from when key() silently turned any multi-rune name into
+	// KeyDown — which is how this bug was first "confirmed" while actually
+	// sending the wrong key. key("ctrl+c") is correct now, but the explicit
+	// form is what this test is about.
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
 	if cmd == nil {
 		t.Fatal("ctrl+c did nothing with the overlay open")

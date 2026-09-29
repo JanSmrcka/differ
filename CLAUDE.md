@@ -226,7 +226,8 @@ way to the status bar rather than handing `describe` an error built by hand.
   dependency, an fd per directory under kqueue on macOS, and a walk of the
   whole tree to install the watches. The cost is processes; the fix is fewer of
   them.
-- **Terminal width**: always respect `tea.WindowSizeMsg`. File list panel fixed ~35 chars (`fileListWidth`), diff gets the rest.
+- **Terminal width**: always respect `tea.WindowSizeMsg`. The file list takes `m.listWidth()` — a quarter of the terminal, clamped to `[minListWidth, maxListWidth]` — and the diff gets the rest. It is a method, not a constant: below `twoPanelWidth` the layout collapses to one panel and the width belongs entirely to whichever it is. Ask the model, never assume.
+- **Colour is never the only channel.** Every distinction carries a mark or a word as well as a hue: `+`/`-`, the cursor bar, the staged dot, the status letter, the focus bar, and review state as a word. `TestResponsive_EveryDistinctionSurvivesWithoutColour` strips the colour and checks each one is still there.
 - **Viewport**: call `viewport.SetContent()` on content change, `viewport.GotoTop()` on file switch.
 - **Unicode width**: use `lipgloss.Width()` not `len()`. In a test, `strings.Index` gives a *byte* offset — measuring a column means `lipgloss.Width(row[:i])`, because the gutter glyphs are multi-byte.
 - **`Repo.run` passes `-c core.quotepath=false`.** Without it git escapes non-ASCII bytes in every path it prints, so `žluťoučký.ts` arrived as `"\305\276lu..."`: the file list showed the escaped form and asking git for that file's diff matched nothing.

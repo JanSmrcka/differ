@@ -103,7 +103,17 @@ func (m Model) renderThemeOverlay(width, height int) string {
 		}
 		rows = append(rows, label+" "+m.themeSwatch(theme.Themes[name], width-lipgloss.Width(label)-2))
 	}
-	return m.fitOverlay(" theme", rows, "j/k · enter keeps · esc cancels", width, height)
+	// The closing line is the one thing fitOverlay always keeps, so it says
+	// less rather than being cut: the file-list panel is 24 columns at 80, and
+	// "j/k · enter keeps · esc cancels" arrived as "j/k · enter keeps · es…".
+	closing := "j/k · enter keeps · esc cancels"
+	if width < lipgloss.Width(closing)+2 {
+		closing = "j/k · enter · esc"
+	}
+	if width < lipgloss.Width(closing)+2 {
+		closing = "enter · esc"
+	}
+	return m.fitOverlay(" theme", rows, closing, width, height)
 }
 
 // themeSwatch shows a theme's diff colours, in whatever room is left.
