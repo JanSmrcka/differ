@@ -114,6 +114,7 @@ It never changes git state — staging and committing stay explicit actions.
 | `x`       | delete comment under cursor     |
 | `s`       | send comment under cursor       |
 | `S`       | send all pending comments       |
+| `H`       | what has been sent this session |
 | `n/p`     | next/prev file                  |
 | `v`       | toggle split diff               |
 | `esc`     | back to file list               |
@@ -124,6 +125,26 @@ They live for the session only — nothing is written to disk or to git.
 
 Quitting with unsent comments asks for confirmation — review state is
 session-only, so `q` really does discard them.
+
+### Progress and history
+
+The status bar carries the whole review: `3/7 reviewed · 2 comments · 1
+pending · 1 changed`. A file counts as reviewed once you have looked at it in
+review mode, and stops counting when the agent rewrites it — that is what
+`changed` means, and looking at it again clears it.
+
+`H` lists what has left the session, most recent first:
+
+```
+ sent this session
+
+ 14:22:06  2 comments → tmux  sent  src/api/client.ts, src/auth/login.ts
+ 14:19:41  1 comment → tmux   failed: tmux pane %9 is gone  src/legacy.ts
+```
+
+Failures are in the list on purpose: a send that went nowhere is the one worth
+being able to look up. A failed send changes nothing — the comments stay
+pending and can be retried once the target is back.
 
 ### Stale comments
 

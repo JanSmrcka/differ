@@ -40,9 +40,12 @@ func (m Model) View() string {
 	// the layout's height does not change while it is open and the diff
 	// viewport is exactly where it was when it closes.
 	var body string
-	if m.showHelp {
+	switch {
+	case m.showHelp:
 		body = m.renderHelpOverlay(m.width, contentH)
-	} else {
+	case m.showHistory:
+		body = m.renderHistoryOverlay(m.width, contentH)
+	default:
 		left := padLines(m.leftPanel(), contentH)
 		right := padLines(m.rightPanel(), contentH)
 		rows := make([]string, contentH)

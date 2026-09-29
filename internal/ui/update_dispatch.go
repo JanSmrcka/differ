@@ -77,14 +77,21 @@ func (m Model) routeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case "?":
 			m.showHelp = !m.showHelp
+			// Two overlays in the same space would draw over each other.
+			m.showHistory = false
 			return m, nil
 		case "esc", "q":
-			if m.showHelp {
-				m.showHelp = false
+			if m.showHelp || m.showHistory {
+				m.showHelp, m.showHistory = false, false
 				return m, nil
 			}
 		}
 		if m.showHelp {
+			return m, nil
+		}
+		// The history swallows the rest so a stray j does not scroll a diff
+		// the user cannot see — but H itself must get through to close it.
+		if m.showHistory && msg.String() != "H" {
 			return m, nil
 		}
 	}
@@ -164,6 +171,7 @@ func (m Model) handleFilesRefreshed(msg filesRefreshedMsg) (tea.Model, tea.Cmd) 
 		m.statusMsg = "refresh failed: " + msg.err.Error()
 		return m, nil
 	}
+	m = m.noteChangedFiles(msg.keys)
 	if filesEqual(m.files, msg.files) {
 		return m, m.loadDiffCmd(false)
 	}

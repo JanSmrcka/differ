@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/jansmrcka/differ/internal/feedback"
@@ -132,6 +133,7 @@ func (m Model) send(cs []review.Comment) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleFeedbackSent(msg feedbackSentMsg) (tea.Model, tea.Cmd) {
+	m.recordDelivery(msg)
 	if msg.err != nil {
 		// Comments stay pending: the user can retry or switch target.
 		m.statusMsg = "send failed: " + msg.err.Error()
@@ -157,4 +159,40 @@ func plural(n int, word string) string {
 		return fmt.Sprintf("1 %s", word)
 	}
 	return fmt.Sprintf("%d %ss", n, word)
+}
+
+// recordDelivery files an attempt in the session history, whether it worked or
+// not. It is called before anything is marked sent, so the history is written
+// even when the delivery failed — a send that silently went nowhere is the one
+// the user most needs to be able to look up.
+func (m Model) recordDelivery(msg feedbackSentMsg) {
+	if m.session == nil || len(msg.ids) == 0 {
+		return
+	}
+	d := review.Delivery{
+		At:       time.Now(),
+		Target:   msg.target,
+		Comments: msg.ids,
+		Files:    m.filesOf(msg.ids),
+	}
+	if msg.err != nil {
+		d.Err = msg.err.Error()
+	}
+	m.session.RecordDelivery(d)
+}
+
+// filesOf names the files a set of comments came from, each once, in the order
+// the comments were sent.
+func (m Model) filesOf(ids []string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, id := range ids {
+		c, ok := m.session.Get(id)
+		if !ok || seen[c.File] {
+			continue
+		}
+		seen[c.File] = true
+		out = append(out, c.File)
+	}
+	return out
 }
