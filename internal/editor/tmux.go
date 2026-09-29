@@ -41,7 +41,9 @@ func run(ctx context.Context, args ...string) (string, error) {
 	defer cancel()
 	out, err := exec.CommandContext(ctx, "tmux", args...).Output()
 	if err != nil {
-		return "", fmt.Errorf("tmux %s: %w", strings.Join(args, " "), err)
+		// Without tmux's stderr this reads "exit status 1" and says nothing
+		// about why. internal/feedback/tmux.go appends it too.
+		return "", fmt.Errorf("tmux %s: %w%s", strings.Join(args, " "), err, stderrOf(err))
 	}
 	return strings.TrimRight(string(out), "\n"), nil
 }

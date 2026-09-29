@@ -2,9 +2,11 @@ package editor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -33,15 +35,26 @@ type nvimServer struct {
 	CWD    string
 }
 
-// socketCandidates lists the sockets nvim may be listening on.
-func socketCandidates(env Env) []string {
+// socketCandidateRoots are the directories nvim may have put its socket in.
+//
+// nvim uses stdpath('run'): $XDG_RUNTIME_DIR where one exists, else $TMPDIR,
+// else /tmp. The last is the common case on a plain SSH session or in a
+// container without systemd-logind, where neither variable is set — without
+// it reuse would quietly never fire there.
+func socketCandidateRoots(env Env) []string {
 	var roots []string
 	if env.XDGRuntimeDir != "" {
-		roots = append(roots, env.XDGRuntimeDir)
+		roots = append(roots, strings.TrimSuffix(env.XDGRuntimeDir, "/"))
 	}
 	if env.TmpDir != "" {
 		roots = append(roots, strings.TrimSuffix(env.TmpDir, "/"))
 	}
+	return append(roots, "/tmp")
+}
+
+// socketCandidates lists the sockets nvim may be listening on.
+func socketCandidates(env Env) []string {
+	roots := socketCandidateRoots(env)
 
 	var out []string
 	seen := map[string]bool{}
@@ -67,7 +80,9 @@ func queryNvim(ctx context.Context, socket, expr string) (string, error) {
 
 	out, err := exec.CommandContext(ctx, "nvim", "--server", socket, "--remote-expr", expr).Output()
 	if err != nil {
-		return "", fmt.Errorf("nvim on %s did not answer: %w", socket, err)
+		// .Output() collects stderr into ExitError, but %w prints only
+		// "exit status 1". nvim says why on stderr, so pass that on.
+		return "", fmt.Errorf("nvim on %s did not answer: %w%s", socket, err, stderrOf(err))
 	}
 	return strings.TrimRight(string(out), "\n"), nil
 }
@@ -108,13 +123,40 @@ func openInNvim(ctx context.Context, socket, absPath string, line int) error {
 	if err != nil {
 		return err
 	}
-	// execute() returns whatever the command printed. nvim reports a refusal
-	// that way rather than by failing, so pass its own words on instead of
-	// inventing our own — and never retry with a bang.
-	if msg := strings.TrimSpace(out); msg != "" {
-		return fmt.Errorf("nvim: %s", strings.ReplaceAll(msg, "\n", " "))
+	// execute() returns everything the command printed, which on a perfectly
+	// successful open is the file announcement — `"/path" 3L, 6B` — whenever
+	// 'shortmess' lacks F, or a plugin echoes on BufReadPost. Reporting that
+	// as a failure also skipped focusing the pane, so the file opened and
+	// nothing appeared to happen. Only an actual complaint counts; when there
+	// is one, it is nvim's own words, never a bang retry.
+	if msg := nvimComplaint(out); msg != "" {
+		return fmt.Errorf("nvim: %s", msg)
 	}
 	return nil
+}
+
+// vimError matches the two shapes nvim uses to complain: a numbered error
+// such as E37, and an autocommand failure.
+var vimError = regexp.MustCompile(`\bE\d+:|(^|\n)\s*Error\b`)
+
+// nvimComplaint returns the text of a complaint in execute() output, or "".
+func nvimComplaint(out string) string {
+	msg := strings.TrimSpace(out)
+	if msg == "" || !vimError.MatchString(msg) {
+		return ""
+	}
+	return strings.ReplaceAll(msg, "\n", " ")
+}
+
+// stderrOf renders the stderr an ExitError carried, ready to append.
+func stderrOf(err error) string {
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
+		if s := strings.TrimSpace(string(ee.Stderr)); s != "" {
+			return ": " + strings.ReplaceAll(s, "\n", " ")
+		}
+	}
+	return ""
 }
 
 // vimEscape quotes a path for a vimscript single-quoted string, where the

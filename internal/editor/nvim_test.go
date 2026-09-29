@@ -260,3 +260,93 @@ func TestOpenInNvim_HandlesAwkwardPaths(t *testing.T) {
 		t.Errorf("open buffer = %q, want %q", name, target)
 	}
 }
+
+// execute() returns every message the command emitted, not just complaints.
+// With shortmess-=F — or any plugin that echoes on BufReadPost — a perfectly
+// successful open returns `"/path" 3L, 6B`, which must not be reported as a
+// failure. It used to be, and because reusePlan returns before focusing, the
+// user was left in differ with no sign anything had happened.
+func TestOpenInNvim_AChattyEditorIsNotAFailure(t *testing.T) {
+	t.Parallel()
+	sock := headlessNvim(t, nil, "--cmd", "set shortmess-=F")
+	target := filepath.Join(filepath.Dir(sock), "chatty.txt")
+	if err := os.WriteFile(target, []byte("a\nb\nc\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := openInNvim(context.Background(), sock, target, 2); err != nil {
+		t.Fatalf("a successful open was reported as a failure: %v", err)
+	}
+	name, err := queryNvim(context.Background(), sock, `expand("%:p")`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if name != target {
+		t.Errorf("open buffer = %q, want %q", name, target)
+	}
+}
+
+func TestNvimComplaint(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name, out string
+		want      bool
+	}{
+		{"the usual file announcement", "\n\"/tmp/f.go\" 3L, 6B", false},
+		{"nothing at all", "", false},
+		{"a numbered vim error", "\nE37: No write since last change", true},
+		{"an autocmd failure", "\nError in BufEnter Autocommands for \"*\"", true},
+		{"a swap file warning", "\nE325: ATTENTION", true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			if got := nvimComplaint(c.out) != ""; got != c.want {
+				t.Errorf("nvimComplaint(%q) reports error=%v, want %v", c.out, got, c.want)
+			}
+		})
+	}
+}
+
+// An unreachable socket must say more than "exit status 1".
+func TestQueryNvim_TheErrorCarriesNvimsOwnWords(t *testing.T) {
+	t.Parallel()
+	if _, err := exec.LookPath("nvim"); err != nil {
+		t.Skip("nvim not installed")
+	}
+	_, err := queryNvim(context.Background(), filepath.Join(shortDir(t), "nope"), "1")
+	if err == nil {
+		t.Fatal("want an error")
+	}
+	if !strings.Contains(err.Error(), "E247") && !strings.Contains(err.Error(), "connect") {
+		t.Errorf("error = %q, want nvim's own complaint in it", err)
+	}
+}
+
+func TestSocketCandidates_LooksInTmpWhenNothingElseIsSet(t *testing.T) {
+	t.Parallel()
+	// A plain SSH session or a container: no XDG_RUNTIME_DIR, no TMPDIR.
+	// nvim's stdpath('run') is /tmp/nvim.<user>/ there.
+	got := socketCandidateRoots(Env{User: "someone"})
+	for _, r := range got {
+		if r == "/tmp" {
+			return
+		}
+	}
+	t.Errorf("roots = %v, want /tmp among them", got)
+}
+
+// $USER is unset in containers and under systemd, while nvim still names its
+// socket directory from the real login name.
+func TestNewEnv_FallsBackToTheRealUserName(t *testing.T) {
+	if os.Getenv("USER") == "" {
+		t.Skip("$USER is unset here, so there is nothing to compare against")
+	}
+	got := currentUser("")
+	if got == "" {
+		t.Error("currentUser should find a name when $USER is empty")
+	}
+	if want := currentUser(os.Getenv("USER")); want != os.Getenv("USER") {
+		t.Errorf("currentUser(%q) = %q, should prefer the environment", want, os.Getenv("USER"))
+	}
+}

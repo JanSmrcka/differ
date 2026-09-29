@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -41,8 +42,20 @@ func NewEnv() Env {
 		TmuxPane:      os.Getenv("TMUX_PANE"),
 		TmpDir:        os.Getenv("TMPDIR"),
 		XDGRuntimeDir: os.Getenv("XDG_RUNTIME_DIR"),
-		User:          os.Getenv("USER"),
+		User:          currentUser(os.Getenv("USER")),
 	}
+}
+
+// currentUser is the login name nvim builds its socket directory from.
+// $USER is unset in containers and under systemd, so fall back to asking.
+func currentUser(fromEnv string) string {
+	if fromEnv != "" {
+		return fromEnv
+	}
+	if u, err := user.Current(); err == nil {
+		return u.Username
+	}
+	return ""
 }
 
 // Config mirrors the two configuration fields this package cares about rather

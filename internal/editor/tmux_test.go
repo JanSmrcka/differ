@@ -372,3 +372,19 @@ func TestWindowPlan_NamesTheWindowAfterTheEditor(t *testing.T) {
 		t.Errorf("window names = %q, want one named after the command", names)
 	}
 }
+
+// "exit status 1" on its own says nothing. internal/feedback/tmux.go — the
+// file this one deliberately copies — appends tmux's stderr, and so must
+// this.
+func TestRun_TheErrorCarriesTmuxsOwnWords(t *testing.T) {
+	skipWithoutTmux(t)
+	_, err := run(context.Background(), "new-window", "-t", "nosuchxyz:", "true")
+	if err == nil {
+		t.Fatal("want an error for a session that does not exist")
+	}
+	// "can't find" is tmux's own wording and appears nowhere in the arguments
+	// we pass, so it cannot come from the command echo.
+	if !strings.Contains(err.Error(), "can't find") {
+		t.Errorf("error = %q, want tmux's own complaint in it", err)
+	}
+}
