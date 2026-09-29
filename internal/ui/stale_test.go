@@ -178,7 +178,7 @@ func TestStale_FileListMarksFilesWithStaleComments(t *testing.T) {
 	tr.ExternalEdit("src.ts", strings.Replace(content, "await getUser(id)", "await getUser(id, o)", 1))
 	m = reload(t, m)
 
-	list := m.renderFileList(m.contentHeight())
+	list := m.renderFileList()
 	if !strings.Contains(list, staleMarker) {
 		t.Errorf("file list should mark a file with stale comments:\n%s", list)
 	}

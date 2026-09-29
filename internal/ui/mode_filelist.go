@@ -63,14 +63,18 @@ func (m Model) updateFileListMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.cursor < len(m.files)-1 {
 			m.cursor++
 		}
+		m = m.clampFileScroll()
 	case "k", "up":
 		if m.cursor > 0 {
 			m.cursor--
 		}
+		m = m.clampFileScroll()
 	case "g":
 		m.cursor = 0
+		m = m.clampFileScroll()
 	case "G":
 		m.cursor = max(0, len(m.files)-1)
+		m = m.clampFileScroll()
 	case "enter", "l", "right":
 		m.mode = modeDiff
 		return m, nil
@@ -110,7 +114,7 @@ func (m Model) nextFile() (tea.Model, tea.Cmd) {
 	if m.cursor < len(m.files)-1 {
 		m.cursor++
 		m.prevCurs = m.cursor
-		return m.onFileFocused(), m.loadDiffCmd(true)
+		return m.clampFileScroll().onFileFocused(), m.loadDiffCmd(true)
 	}
 	return m, nil
 }
@@ -119,9 +123,30 @@ func (m Model) prevFile() (tea.Model, tea.Cmd) {
 	if m.cursor > 0 {
 		m.cursor--
 		m.prevCurs = m.cursor
-		return m.onFileFocused(), m.loadDiffCmd(true)
+		return m.clampFileScroll().onFileFocused(), m.loadDiffCmd(true)
 	}
 	return m, nil
+}
+
+// clampFileScroll brings the cursor back into the visible window, scrolling by
+// the smallest amount that does it. Same shape as clampBranchScroll — the two
+// lists share a panel and must behave the same way in it.
+func (m Model) clampFileScroll() Model {
+	h := m.listHeight()
+	if h <= 0 {
+		return m
+	}
+	switch {
+	case m.cursor < m.fileOffset:
+		m.fileOffset = m.cursor
+	case m.cursor >= m.fileOffset+h:
+		m.fileOffset = m.cursor - h + 1
+	}
+	// A changeset that shrank can leave the window past the end of the list.
+	if maxOffset := max(len(m.files)-h, 0); m.fileOffset > maxOffset {
+		m.fileOffset = maxOffset
+	}
+	return m
 }
 
 // onFileFocused records that a file has been looked at, but only while
