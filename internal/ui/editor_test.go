@@ -178,3 +178,73 @@ func TestEditor_NoLineIsClaimedFromTheFileList(t *testing.T) {
 		t.Errorf("editorLine = %d in the file list, want 0", got)
 	}
 }
+
+// The renderer is loaded asynchronously, so between switching files and the
+// diff arriving it still belongs to the previous one. Gating on the mode is
+// not enough: entering the diff and n/p both leave the old renderer in place.
+func TestEditor_NoLineIsClaimedWhileTheRendererBelongsToAnotherFile(t *testing.T) {
+	tr := testutil.NewRepo(t)
+	tr.ApplyFixture(testutil.Fixture(t, "multi_hunk"))
+	tr.Write("second.ts", "const a = 1\nconst b = 2\nconst c = 3\n")
+	tr.Stage("second.ts")
+	m := liveModel(t, tr)
+	if len(m.files) < 2 {
+		t.Skipf("need two files, got %d", len(m.files))
+	}
+
+	u, _ := m.updateFileListMode(key("l"))
+	m = u.(Model)
+	m = m.setCursor(m.renderer.Parsed().FirstCommentableLine())
+	if m.editorLine() == 0 {
+		t.Fatal("the diff should give a line before the file is switched")
+	}
+
+	// n moves to the next file; its diff has not arrived yet, so the renderer
+	// still describes the old one.
+	u, _ = m.updateDiffMode(key("n"))
+	m = u.(Model)
+
+	if got := m.editorLine(); got != 0 {
+		t.Errorf("editorLine = %d while the renderer still belongs to %q, want 0",
+			got, m.files[0].change.Path)
+	}
+}
+
+// A hunk header has no line on either side. Scanning backwards from it walks
+// into the previous hunk and returns its last line, which can be a hundred
+// lines from what the reviewer is looking at.
+func TestEditor_ACursorOnAHunkHeaderUsesThatHunksStart(t *testing.T) {
+	m, _ := editorModel(t)
+	u, _ := m.updateFileListMode(key("l"))
+	m = u.(Model)
+
+	parsed := m.renderer.Parsed()
+	// The second hunk's header: the first one has nothing before it, which is
+	// the case the HunkAt fallback already covers.
+	header := -1
+	seen := 0
+	for i, l := range parsed.Lines {
+		if l.Type == LineHunkHeader {
+			seen++
+			if seen == 2 {
+				header = i
+				break
+			}
+		}
+	}
+	if header < 0 {
+		t.Skip("fixture has fewer than two hunks")
+	}
+	m = m.setCursor(header)
+	if m.diffCursor != header {
+		t.Skipf("the cursor does not rest on a hunk header (landed on %d)", m.diffCursor)
+	}
+
+	hunk, ok := parsed.HunkAt(header)
+	if !ok {
+		t.Fatal("no hunk at its own header")
+	}
+	if got := m.editorLine(); got != hunk.NewStart {
+		t.Errorf("editorLine = %d, want the hunk's own start %d", got, hunk.NewStart)
+	}
+}

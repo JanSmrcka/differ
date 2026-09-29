@@ -55,18 +55,33 @@ func (m Model) openFileInEditor() (tea.Model, tea.Cmd) {
 // above the code the reviewer was reading. Returns 0 when there is nothing to
 // aim at, as in the file list.
 func (m Model) editorLine() int {
-	// Only the diff and review modes have a cursor that means a line. The
-	// file list shows a preview, but its renderer is loaded asynchronously and
-	// can still belong to the previously selected file — a line from that
-	// diff would point somewhere arbitrary in this one.
+	// Only the diff and review modes have a cursor that means a line; the
+	// file list just shows a preview.
 	if m.mode != modeDiff && m.mode != modeReview {
 		return 0
 	}
-	if m.renderer == nil {
+	// Diffs load asynchronously, so the renderer on screen may still be the
+	// previous file's — after entering the diff, or after n/p, until
+	// diffLoadedMsg arrives. A line taken from it would be about the wrong
+	// file, so claim none until the two agree.
+	if m.renderer == nil || m.rendererPath != m.currentFilePath() {
 		return 0
 	}
+
 	parsed := m.renderer.Parsed()
-	for i := m.diffCursor; i >= 0 && i < len(parsed.Lines); i-- {
+	if m.diffCursor < 0 || m.diffCursor >= len(parsed.Lines) {
+		return 0
+	}
+	// A hunk header belongs to the hunk it introduces, not to whatever came
+	// before it. Scanning back from one would walk into the previous hunk and
+	// return its last line, which can be a long way from what is on screen.
+	if parsed.Lines[m.diffCursor].Type == LineHunkHeader {
+		if h, ok := parsed.HunkAt(m.diffCursor); ok {
+			return h.NewStart
+		}
+		return 0
+	}
+	for i := m.diffCursor; i >= 0; i-- {
 		if n := parsed.Lines[i].NewNum; n > 0 {
 			return n
 		}
