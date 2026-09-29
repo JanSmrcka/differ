@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jansmrcka/differ/internal/testutil"
 )
@@ -17,11 +18,11 @@ func TestProbe_IsStableWhenNothingChanges(t *testing.T) {
 	repo := setupTestRepo(t)
 	writeFile(t, repo, "a.txt", "one\n")
 
-	first, err := repo.Probe()
+	first, err := repo.Probe("")
 	if err != nil {
 		t.Fatalf("Probe: %v", err)
 	}
-	second, err := repo.Probe()
+	second, err := repo.Probe("")
 	if err != nil {
 		t.Fatalf("Probe: %v", err)
 	}
@@ -47,13 +48,13 @@ func TestProbe_MovesWhenAnAlreadyModifiedFileIsEditedAgain(t *testing.T) {
 	testutil.GitIn(t, repo.Dir(), "commit", "-m", "add a")
 
 	writeFile(t, repo, "a.txt", "one\ntwo\n")
-	first, err := repo.Probe()
+	first, err := repo.Probe("")
 	if err != nil {
 		t.Fatalf("Probe: %v", err)
 	}
 
 	writeFile(t, repo, "a.txt", "one\ntwo\nthree\n")
-	second, err := repo.Probe()
+	second, err := repo.Probe("")
 	if err != nil {
 		t.Fatalf("Probe: %v", err)
 	}
@@ -89,11 +90,11 @@ func TestProbedPaths_ReadsGitsOwnRecords(t *testing.T) {
 		"sp ace/new file.txt",
 	}
 	if len(got) != len(want) {
-		t.Fatalf("got %d paths %q, want %d %q", len(got), got, len(want), want)
+		t.Fatalf("got %d paths %+v, want %d %q", len(got), got, len(want), want)
 	}
 	for i := range want {
-		if got[i] != want[i] {
-			t.Errorf("path %d = %q, want %q", i, got[i], want[i])
+		if got[i].path != want[i] {
+			t.Errorf("path %d = %q, want %q", i, got[i].path, want[i])
 		}
 	}
 }
@@ -156,12 +157,12 @@ func TestProbe_MovesForEveryKindOfChange(t *testing.T) {
 			testutil.GitIn(t, repo.Dir(), "add", "a.txt")
 			testutil.GitIn(t, repo.Dir(), "commit", "-m", "first")
 
-			before, err := repo.Probe()
+			before, err := repo.Probe("")
 			if err != nil {
 				t.Fatalf("Probe: %v", err)
 			}
 			tc.do(t, repo)
-			after, err := repo.Probe()
+			after, err := repo.Probe("")
 			if err != nil {
 				t.Fatalf("Probe: %v", err)
 			}
@@ -186,7 +187,7 @@ func TestProbe_MovesWhenTheUpstreamMovesAhead(t *testing.T) {
 	testutil.GitIn(t, repo.Dir(), "remote", "add", "origin", remote)
 	testutil.GitIn(t, repo.Dir(), "push", "-u", "origin", "HEAD")
 
-	before, err := repo.Probe()
+	before, err := repo.Probe("")
 	if err != nil {
 		t.Fatalf("Probe: %v", err)
 	}
@@ -198,7 +199,7 @@ func TestProbe_MovesWhenTheUpstreamMovesAhead(t *testing.T) {
 	testutil.GitIn(t, repo.Dir(), "add", "a.txt")
 	testutil.GitIn(t, repo.Dir(), "commit", "-m", "second")
 
-	after, err := repo.Probe()
+	after, err := repo.Probe("")
 	if err != nil {
 		t.Fatalf("Probe: %v", err)
 	}
@@ -230,7 +231,7 @@ func TestProbe_NoticesAnEditInsideAnUntrackedDirectory(t *testing.T) {
 
 	// A directory git has never seen, with a file already in it.
 	writeFile(t, repo, "build/out.js", "one\n")
-	before, err := repo.Probe()
+	before, err := repo.Probe("")
 	if err != nil {
 		t.Fatalf("Probe: %v", err)
 	}
@@ -240,11 +241,377 @@ func TestProbe_NoticesAnEditInsideAnUntrackedDirectory(t *testing.T) {
 
 	// Editing it without changing anything else about the tree.
 	writeFile(t, repo, "build/out.js", "one\ntwo\n")
-	after, err := repo.Probe()
+	after, err := repo.Probe("")
 	if err != nil {
 		t.Fatalf("Probe: %v", err)
 	}
 	if before == after {
 		t.Error("an edit inside an untracked directory left the probe unchanged")
+	}
+}
+
+// Under -r the screen showed a comparison against a ref, and git status says
+// nothing about any ref but HEAD. So the fingerprint never moved when the ref
+// did, and the refresh was gated off permanently — a teammate's push you
+// fetched, a sibling worktree committing, a rebase of the base branch, all
+// invisible for as long as the session lasted. It is the worst failure this
+// design can have: the screen stops updating and says nothing.
+func TestProbe_MovesWhenTheRefItComparesAgainstMoves(t *testing.T) {
+	t.Parallel()
+	repo := setupTestRepo(t)
+	writeFile(t, repo, "a.txt", "one\n")
+	testutil.GitIn(t, repo.Dir(), "add", "a.txt")
+	testutil.GitIn(t, repo.Dir(), "commit", "-m", "first")
+	testutil.GitIn(t, repo.Dir(), "branch", "base")
+	testutil.GitIn(t, repo.Dir(), "checkout", "-q", "-b", "work")
+
+	before, err := repo.Probe("base")
+	if err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+
+	// base moves under us, with the working tree untouched.
+	testutil.GitIn(t, repo.Dir(), "checkout", "-q", "base")
+	writeFile(t, repo, "b.txt", "two\n")
+	testutil.GitIn(t, repo.Dir(), "add", "b.txt")
+	testutil.GitIn(t, repo.Dir(), "commit", "-m", "on base")
+	testutil.GitIn(t, repo.Dir(), "checkout", "-q", "work")
+
+	after, err := repo.Probe("base")
+	if err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+	if before == after {
+		t.Error("the ref moved and the probe did not — the screen would never refresh again")
+	}
+
+	// And with no ref the probe must not start asking about one.
+	plain, err := repo.Probe("")
+	if err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+	if strings.Contains(plain, "ref:") {
+		t.Errorf("the working-tree probe mentions a ref: %q", plain)
+	}
+}
+
+// A ref that does not exist is a stable answer, and becomes unstable the
+// moment it appears.
+func TestProbe_AnUnresolvableRefIsStableUntilItExists(t *testing.T) {
+	t.Parallel()
+	repo := setupTestRepo(t)
+	writeFile(t, repo, "a.txt", "one\n")
+	testutil.GitIn(t, repo.Dir(), "add", "a.txt")
+	testutil.GitIn(t, repo.Dir(), "commit", "-m", "first")
+
+	first, err := repo.Probe("nosuchref")
+	if err != nil {
+		t.Fatalf("an unresolvable ref made the probe fail: %v", err)
+	}
+	second, err := repo.Probe("nosuchref")
+	if err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+	if first != second {
+		t.Error("an unresolvable ref gave two different answers")
+	}
+
+	testutil.GitIn(t, repo.Dir(), "branch", "nosuchref")
+	third, err := repo.Probe("nosuchref")
+	if err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+	if third == first {
+		t.Error("the ref appeared and the probe did not move")
+	}
+}
+
+// The probe must not fight the user for the index.
+//
+// git status rewrites .git/index to refresh its stat cache, which takes
+// index.lock — measured at 8 failed `git add`s in 120 while probing in a loop.
+// The eight commands this replaced never wrote the index, so the contention
+// would have been new, and it lands on exactly differ's user: an agent running
+// git in the same repository while differ watches it.
+func TestProbe_DoesNotTakeTheIndexLock(t *testing.T) {
+	t.Parallel()
+	found := false
+	for _, arg := range probeFormat {
+		if arg == "--no-optional-locks" {
+			found = true
+		}
+		if arg == "status" && !found {
+			t.Fatal("--no-optional-locks must come before the subcommand")
+		}
+	}
+	if !found {
+		t.Error("the probe may rewrite .git/index and make the user's git commands fail")
+	}
+
+	// And it still has to work with the lock held by someone else.
+	repo := setupTestRepo(t)
+	writeFile(t, repo, "a.txt", "one\n")
+	lock := filepath.Join(repo.Dir(), ".git", "index.lock")
+	if err := os.WriteFile(lock, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Remove(lock) }()
+
+	if _, err := repo.Probe(""); err != nil {
+		t.Errorf("the probe failed while another git process held the lock: %v", err)
+	}
+}
+
+// Each half of the stat, on its own. Removing the stat wholesale is caught by
+// the re-edit test, but size, mtime and the gone marker were individually
+// unprotected.
+func TestProbe_TheStatNoticesSizeAndTimeSeparately(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name  string
+		first string
+		then  string
+	}{
+		// Same length, different bytes: only the mtime can tell these apart.
+		{"same size, different content", "aaa\n", "bbb\n"},
+		// Different length: size alone is enough.
+		{"different size", "aaa\n", "aaaa\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			repo := setupTestRepo(t)
+			writeFile(t, repo, "a.txt", tc.first)
+			testutil.GitIn(t, repo.Dir(), "add", "a.txt")
+			testutil.GitIn(t, repo.Dir(), "commit", "-m", "first")
+			writeFile(t, repo, "a.txt", tc.first+"x\n")
+
+			before, err := repo.Probe("")
+			if err != nil {
+				t.Fatalf("Probe: %v", err)
+			}
+			writeFile(t, repo, "a.txt", tc.then+"x\n")
+			after, err := repo.Probe("")
+			if err != nil {
+				t.Fatalf("Probe: %v", err)
+			}
+			if before == after {
+				t.Error("the probe did not move")
+			}
+		})
+	}
+}
+
+// A file that disappears between the status and the stat is a change, and
+// stays one stable answer while it is gone.
+func TestProbe_AVanishedPathIsNamedRatherThanIgnored(t *testing.T) {
+	t.Parallel()
+	repo := setupTestRepo(t)
+	writeFile(t, repo, "a.txt", "one\n")
+	testutil.GitIn(t, repo.Dir(), "add", "a.txt")
+	testutil.GitIn(t, repo.Dir(), "commit", "-m", "first")
+	writeFile(t, repo, "gone.txt", "two\n")
+
+	before, err := repo.Probe("")
+	if err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+	if !strings.Contains(before, "gone.txt") {
+		t.Fatalf("the untracked file is not in the probe: %q", before)
+	}
+	if err := os.Remove(filepath.Join(repo.Dir(), "gone.txt")); err != nil {
+		t.Fatal(err)
+	}
+	after, err := repo.Probe("")
+	if err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+	if before == after {
+		t.Error("a file disappearing left the probe unchanged")
+	}
+}
+
+// Unmerged records. This is the one record type whose status output never
+// changes as you work — the three stage object ids are fixed for the duration
+// of the conflict — so the whole signal rests on parsing its path correctly
+// and lstat'ing it. Get the field count wrong and a conflict-resolution
+// session silently stops updating.
+func TestProbe_NoticesEditsToAConflictedFile(t *testing.T) {
+	t.Parallel()
+	repo := setupTestRepo(t)
+	writeFile(t, repo, "a.txt", "base\n")
+	testutil.GitIn(t, repo.Dir(), "add", "a.txt")
+	testutil.GitIn(t, repo.Dir(), "commit", "-m", "base")
+	testutil.GitIn(t, repo.Dir(), "checkout", "-q", "-b", "other")
+	writeFile(t, repo, "a.txt", "theirs\n")
+	testutil.GitIn(t, repo.Dir(), "commit", "-qam", "theirs")
+	testutil.GitIn(t, repo.Dir(), "checkout", "-q", "master")
+	writeFile(t, repo, "a.txt", "ours\n")
+	testutil.GitIn(t, repo.Dir(), "commit", "-qam", "ours")
+	_ = testutil.GitInAllowFail(t, repo.Dir(), "merge", "other")
+
+	before, err := repo.Probe("")
+	if err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+	if !strings.Contains(before, "\x00u ") {
+		t.Skipf("no unmerged record produced; probe was %q", before)
+	}
+
+	// Resolving it by hand, without staging.
+	writeFile(t, repo, "a.txt", "resolved\n")
+	after, err := repo.Probe("")
+	if err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+	if before == after {
+		t.Error("editing a conflicted file left the probe unchanged")
+	}
+}
+
+// Submodules. porcelain v2 reports a dirty submodule as "1 .M SC.. 160000 …"
+// and the two object ids are the superproject's *recorded* commit, which stays
+// put however many commits land inside. The directory's mtime and size do not
+// move either. So the first pointer move was visible (the record appears) and
+// every later one was not, which is worse than never noticing at all.
+func TestProbe_MovesWhenASubmodulesHeadMovesAgain(t *testing.T) {
+	t.Parallel()
+	sub := setupTestRepo(t)
+	writeFile(t, sub, "s.txt", "one\n")
+	testutil.GitIn(t, sub.Dir(), "add", "s.txt")
+	testutil.GitIn(t, sub.Dir(), "commit", "-m", "sub first")
+
+	super := setupTestRepo(t)
+	writeFile(t, super, "a.txt", "one\n")
+	testutil.GitIn(t, super.Dir(), "add", "a.txt")
+	testutil.GitIn(t, super.Dir(), "commit", "-m", "first")
+	out := testutil.GitInAllowFail(t, super.Dir(), "-c", "protocol.file.allow=always",
+		"submodule", "add", sub.Dir(), "sub")
+	if !super.hasPath("sub") {
+		t.Skipf("submodule add did not work here: %s", out)
+	}
+	testutil.GitIn(t, super.Dir(), "commit", "-m", "add submodule")
+
+	commitInSub := func(body string) {
+		dir := filepath.Join(super.Dir(), "sub")
+		testutil.GitIn(t, dir, "config", "user.email", "t@t")
+		testutil.GitIn(t, dir, "config", "user.name", "t")
+		if err := os.WriteFile(filepath.Join(dir, "s.txt"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		testutil.GitIn(t, dir, "commit", "-qam", body)
+	}
+
+	commitInSub("two\n")
+	first, err := super.Probe("")
+	if err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+
+	// The second move is the one that used to be invisible.
+	commitInSub("three\n")
+	second, err := super.Probe("")
+	if err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+	if first == second {
+		t.Error("a second commit inside the submodule left the probe unchanged")
+	}
+}
+
+// Lstat, not Stat. What the diff shows for a symlink is the link's own target
+// text, so the link is what has to be watched.
+//
+// Isolating that takes some care. The link is already modified before the
+// change, so git status says the same thing either way; the two candidate
+// targets are the same length and are given the same mtime, so following the
+// link sees nothing move. Only the link's own mtime does.
+func TestProbe_WatchesASymlinkRatherThanWhatItPointsAt(t *testing.T) {
+	t.Parallel()
+	repo := setupTestRepo(t)
+	writeFile(t, repo, "one.txt", "1\n")
+	writeFile(t, repo, "two.txt", "2\n")
+	writeFile(t, repo, "thr.txt", "3\n")
+	link := filepath.Join(repo.Dir(), "link")
+	if err := os.Symlink("one.txt", link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	testutil.GitIn(t, repo.Dir(), "add", "-A")
+	testutil.GitIn(t, repo.Dir(), "commit", "-m", "first")
+
+	// Same length and the same timestamp, so Stat cannot tell them apart.
+	stamp := time.Now().Add(-time.Hour)
+	for _, name := range []string{"two.txt", "thr.txt"} {
+		if err := os.Chtimes(filepath.Join(repo.Dir(), name), stamp, stamp); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// The link is already modified, so the status output stops moving here.
+	repoint := func(target string) {
+		if err := os.Remove(link); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(target, link); err != nil {
+			t.Fatal(err)
+		}
+	}
+	repoint("two.txt")
+	before, err := repo.Probe("")
+	if err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+
+	repoint("thr.txt")
+	after, err := repo.Probe("")
+	if err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+	if before == after {
+		t.Error("retargeting a symlink between two identical-looking files left the probe unchanged")
+	}
+}
+
+// Size earns its place independently of the mtime.
+//
+// In ordinary use the mtime catches everything size would, so this pins the
+// mtime back by hand to isolate it. The case is not academic: tar, unzip,
+// cp -p and rsync -t all restore timestamps, so a file can genuinely change
+// length while keeping the mtime it had.
+func TestProbe_NoticesALengthChangeThatKeptItsTimestamp(t *testing.T) {
+	t.Parallel()
+	repo := setupTestRepo(t)
+	writeFile(t, repo, "a.txt", "one\n")
+	testutil.GitIn(t, repo.Dir(), "add", "a.txt")
+	testutil.GitIn(t, repo.Dir(), "commit", "-m", "first")
+	writeFile(t, repo, "a.txt", "one\ntwo\n")
+
+	path := filepath.Join(repo.Dir(), "a.txt")
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stamp := info.ModTime()
+
+	before, err := repo.Probe("")
+	if err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+
+	writeFile(t, repo, "a.txt", "one\ntwo\nthree\n")
+	if err := os.Chtimes(path, stamp, stamp); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.Stat(path); err != nil {
+		t.Fatal(err)
+	} else if !got.ModTime().Equal(stamp) {
+		t.Skipf("could not pin the mtime here (%v vs %v)", got.ModTime(), stamp)
+	}
+
+	after, err := repo.Probe("")
+	if err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+	if before == after {
+		t.Error("a file grew with its timestamp unchanged and the probe did not move")
 	}
 }

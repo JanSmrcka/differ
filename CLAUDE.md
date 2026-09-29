@@ -218,7 +218,25 @@ way to the status bar rather than handing `describe` an error built by hand.
   never hashes the working tree — so editing an already-modified file produces
   byte-identical output. `--untracked-files=all` is not optional either: the
   default collapses an untracked directory to one entry, and an edit inside it
-  would move neither the output nor the directory's mtime.
+  would move neither the output nor the directory's mtime. `-r <ref>` costs a
+  second process, because status describes the worktree against the index and
+  HEAD and says nothing about any other ref — without it the fingerprint never
+  moved when the ref did and the screen froze for the session. A submodule is
+  asked for its own HEAD, because the gitlink oids status reports are the
+  superproject's *recorded* commit and stay put however many commits land
+  inside.
+- **`--no-optional-locks`, or the probe fights the user for the index.** `git
+  status` opportunistically rewrites `.git/index` to refresh its stat cache,
+  which takes `index.lock` — measured at 8 failed `git add`s in 120 while
+  probing in a loop. None of the eight commands the probe replaced wrote the
+  index, so that contention would have been new, and it lands on exactly
+  differ's user: an agent running git in the same repository.
+- **Seeing a change and acting on it are separately paced.** The probe runs
+  every tick; the rebuild runs at most every `refreshEvery` ticks. Without the
+  second limit a sustained burst moved the fingerprint on every probe and cost
+  nine git processes a second — more churn than the two-second rebuild it
+  replaced. A fingerprint is only stored once the refresh actually happens, so
+  a change held back is delayed, never dropped.
 - **Not a filesystem watcher, and this was measured.** `git --version` costs
   13.6 ms on this machine against `git status`'s 15.6, so ~14 of every 16 ms is
   starting the process, not doing the work. A watcher removes the ~2 ms and

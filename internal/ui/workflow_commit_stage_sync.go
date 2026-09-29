@@ -116,14 +116,35 @@ func (m Model) handleTick() (tea.Model, tea.Cmd) {
 	}
 	// One question — "did anything move?" — instead of eight answers nobody
 	// asked for. The refresh happens in handleRepoProbed, and only if it did.
+	//
+	// Not while one is already out: tea.Tick does not wait for the previous
+	// command, so on a repository where git status takes longer than the
+	// interval the probes would pile up, each one contending for the index
+	// with the last.
+	m.ticksSinceRefresh++
+	if m.probing {
+		return m, tickCmd()
+	}
+	m.probing = true
 	return m, tea.Batch(m.probeCmd(), tickCmd())
 }
+
+// refreshEvery is the most often the expensive rebuild runs, in ticks.
+//
+// The probe is cheap and runs every tick, so a change is noticed within a
+// second. Acting on it is rate-limited: while an agent writes continuously
+// every probe would move, and a refresh a second is nine git processes a
+// second — more churn than the two-second rebuild this replaced, in exactly
+// the burst the issue is about. This is the coalescing it asks for: many
+// writes in quick succession become one refresh, not twenty.
+const refreshEvery = 2
 
 // probeCmd asks git for the repository's fingerprint, off the update loop.
 func (m Model) probeCmd() tea.Cmd {
 	repo := m.repo
+	ref := m.ref
 	return func() tea.Msg {
-		fingerprint, err := repo.Probe()
+		fingerprint, err := repo.Probe(ref)
 		return repoProbedMsg{fingerprint: fingerprint, err: err}
 	}
 }
@@ -134,6 +155,7 @@ func (m Model) probeCmd() tea.Cmd {
 // A burst of writes is coalesced by the interval itself: whatever an agent does
 // between two probes becomes one refresh, however many files it touched.
 func (m Model) handleRepoProbed(msg repoProbedMsg) (tea.Model, tea.Cmd) {
+	m.probing = false
 	if msg.err != nil {
 		// The probe is an optimisation, never a gate. A repository mid-rebase,
 		// a vanished git binary or an unreadable index must cost the user a
@@ -143,7 +165,14 @@ func (m Model) handleRepoProbed(msg repoProbedMsg) (tea.Model, tea.Cmd) {
 	if msg.fingerprint == m.repoFingerprint {
 		return m, nil
 	}
+	if m.ticksSinceRefresh < refreshEvery {
+		// Seen, but not acted on yet. The fingerprint is deliberately not
+		// stored: the next probe must still find a difference, or this change
+		// would be dropped rather than delayed.
+		return m, nil
+	}
 	m.repoFingerprint = msg.fingerprint
+	m.ticksSinceRefresh = 0
 	return m, m.refreshEverythingCmd()
 }
 

@@ -138,6 +138,10 @@ type Model struct {
 	// The last probe's fingerprint. An equal one means the tick can stop
 	// without asking git anything else.
 	repoFingerprint string
+	// Whether a probe is out. tea.Tick does not wait for the previous one.
+	probing bool
+	// Ticks since the last full rebuild, so a burst coalesces.
+	ticksSinceRefresh int
 	// fileOffset is the first file on screen. The list is taller than the
 	// panel in any real agent changeset, so without it the files past the
 	// panel height were unreachable.
@@ -272,6 +276,10 @@ func NewModel(repo *git.Repo, cfg config.Config, changes []git.FileChange, untra
 	ca.SetHeight(commentEditorHeight)
 
 	return Model{
+		// Open, so a change arriving in the first seconds refreshes at once
+		// rather than waiting for the rate limit to fill.
+		ticksSinceRefresh: refreshEvery,
+
 		repo:         repo,
 		cfg:          cfg,
 		files:        files,
