@@ -158,8 +158,15 @@ github.com/spf13/cobra                # CLI
 
 ### Adding a new theme
 
-1. Define color values in `internal/theme/theme.go`, add to `Themes` map
-2. `styles.go` picks it up automatically
+1. Define color values in `internal/theme/theme.go`, add it to the `Themes`
+   map and to `ThemeNames()`.
+2. `styles.go` picks it up automatically.
+3. Run the tests. `theme_test.go` walks the whole registry, so the new theme
+   is held to the same standard as the others without another test being
+   written: every field non-empty and valid hex, a Chroma style that actually
+   exists, and the contrast floor on every pair — including the marks drawn
+   inside the diff. Take the palette from upstream rather than eyeballing it,
+   and record the source and licence next to the constructor.
 
 ## Gotchas
 

@@ -237,15 +237,36 @@ Requires [Claude CLI](https://docs.anthropic.com/en/docs/claude-code) installed.
 ## Themes
 
 ```bash
-differ --theme dark   # default
-differ --theme light
+differ --theme gruvbox
 ```
+
+| Name         | Palette                                                      |
+| ------------ | ------------------------------------------------------------ |
+| `mocha`      | Catppuccin-derived — the default, also reachable as `dark`    |
+| `latte`      | Catppuccin-derived, light — also reachable as `light`         |
+| `gruvbox`    | Gruvbox Dark (medium)                                        |
+| `tokyonight` | Tokyo Night (night)                                          |
+| `github`     | GitHub Dark                                                  |
+
+Each is paired with the Chroma style of the same family, so the chrome and the
+syntax highlighting agree. In Gruvbox, Tokyo Night and GitHub Dark every
+palette colour is its upstream value; the diff backgrounds are differ's own in
+all five, because no upstream palette has a concept of them. `mocha` and
+`latte` are differ's original two themes and only *derived* from Catppuccin —
+their purple is One Dark's and their staged green is Dracula's.
+
+Every theme is held to the same contrast floor by a test — the diff colours,
+the marks differ draws inside the diff, and review comment text, which is the
+user's own words and gets the body-text bar rather than the accent one.
+
+An unknown `--theme` is refused and the choices are listed; a stale name in the
+config falls back quietly rather than stopping differ from opening.
 
 Config file: `~/.config/differ/config.json`
 
 ```json
 {
-  "theme": "dark",
+  "theme": "mocha",
   "commit_msg_cmd": "claude -p",
   "commit_msg_prompt": "Write a concise git commit message for this diff:",
   "editor_cmd": "",

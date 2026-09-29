@@ -73,6 +73,13 @@ type Theme struct {
 	CommentMetaFg string
 	StaleFg       string
 
+	// Semantic colours, named for what they mean rather than where they are
+	// used, so a new piece of UI does not need a new field.
+	SuccessFg string
+	WarningFg string
+	ErrorFg   string
+	MutedFg   string
+
 	// Accent
 	AccentFg string
 
@@ -81,13 +88,50 @@ type Theme struct {
 }
 
 // Themes is the registry of built-in themes.
+//
+// Each is paired with the Chroma style of the same family, so the chrome and
+// the syntax highlighting agree. "dark" and "light" are the names differ
+// shipped with and stay as aliases, so nobody's config breaks.
+//
+// In Gruvbox, Tokyo Night and GitHub Dark every *palette* colour is its
+// upstream value, with the token name in a comment so it can be checked again
+// later. The diff surfaces are not: AddedBg, RemovedBg and the two emphasis
+// backgrounds are differ's own in all five themes, because no upstream palette
+// has a concept of them. Each says so where it differs.
+//
+// Mocha and Latte are only *derived* from Catppuccin. They are differ's
+// original two themes, and a fair number of their values — the purple is One
+// Dark's, the staged green is Dracula's, several surfaces come from nowhere —
+// are not Catppuccin at all. Renaming them did not change them, and this says
+// so rather than claiming a provenance they do not have.
 var Themes = map[string]Theme{
-	"dark":  DarkTheme(),
-	"light": LightTheme(),
+	"mocha":      MochaTheme(),
+	"latte":      LatteTheme(),
+	"gruvbox":    GruvboxTheme(),
+	"tokyonight": TokyoNightTheme(),
+	"github":     GitHubDarkTheme(),
+
+	"dark":  MochaTheme(),
+	"light": LatteTheme(),
 }
 
-// DarkTheme returns a Catppuccin Mocha-inspired pastel dark theme.
-func DarkTheme() Theme {
+// ThemeNames lists the registry in a stable order, for error messages and the
+// picker.
+func ThemeNames() []string {
+	return []string{"mocha", "latte", "gruvbox", "tokyonight", "github"}
+}
+
+// DarkTheme is the original name for Mocha, kept because cmd/ and the tests
+// have always called it.
+func DarkTheme() Theme { return MochaTheme() }
+
+// LightTheme is the original name for Latte.
+func LightTheme() Theme { return LatteTheme() }
+
+// MochaTheme is differ's original dark theme, derived from Catppuccin Mocha.
+// https://github.com/catppuccin/catppuccin — MIT. Not value-for-value: see
+// the note on Themes.
+func MochaTheme() Theme {
 	return Theme{
 		Bg: "#1e1e2e",
 		Fg: "#e0e0f0",
@@ -139,14 +183,21 @@ func DarkTheme() Theme {
 		CommentMetaFg: "#9399b2",
 		StaleFg:       "#fab387",
 
+		SuccessFg: "#a6e3a1",
+		WarningFg: "#f9e2af",
+		ErrorFg:   "#f38ba8",
+		MutedFg:   "#9399b2",
+
 		AccentFg: "#c678dd",
 
 		ChromaStyle: "catppuccin-mocha",
 	}
 }
 
-// LightTheme returns a Catppuccin Latte-inspired pastel light theme.
-func LightTheme() Theme {
+// LatteTheme is differ's original light theme, derived from Catppuccin Latte.
+// https://github.com/catppuccin/catppuccin — MIT. Not value-for-value: see
+// the note on Themes.
+func LatteTheme() Theme {
 	return Theme{
 		Bg: "#eff1f5",
 		Fg: "#4c4f69",
@@ -186,17 +237,28 @@ func LightTheme() Theme {
 		PanelLabelFg:   "#8c8fa1",
 		HeaderNameFg:   "#8839ef",
 		HeaderBranchFg: "#5c5f77",
-		HeaderMetaFg:   "#8c8fa1",
+		HeaderMetaFg:   "#6c6f85", // subtext0
 
 		BorderFg:    "#8839ef",
 		StatusBarBg: "#e6e9ef",
 		StatusBarFg: "#6c6f85",
 		HelpKeyFg:   "#8839ef",
-		HelpDescFg:  "#8c8fa1",
+		HelpDescFg:  "#6c6f85", // subtext0
 
-		CommentFg:     "#df8e1d",
-		CommentMetaFg: "#8c8fa1",
-		StaleFg:       "#fe640b",
+		// Catppuccin Latte's own yellow (#df8e1d), green (#40a02b) and peach
+		// (#fe640b) are 2.3, 3.0 and 2.6 against its base — fine as an accent,
+		// unreadable as the text of a review comment. These are the same hues
+		// darkened until they clear the bar. The palette has no legible
+		// alternative to darken towards, which is why they are derived rather
+		// than picked from it.
+		CommentFg:     "#8a5a00",
+		CommentMetaFg: "#6c6f85", // subtext0
+		StaleFg:       "#a64100",
+
+		SuccessFg: "#2d7a1f",
+		WarningFg: "#8a5a00",
+		ErrorFg:   "#d20f39",
+		MutedFg:   "#6c6f85",
 
 		AccentFg: "#8839ef",
 
@@ -218,3 +280,203 @@ func NoColorTheme() Theme {
 // NoHighlight turns syntax highlighting off. An empty style name cannot: it
 // falls back to a default, which would put the colour straight back.
 const NoHighlight = "none"
+
+// GruvboxTheme is Gruvbox Dark, in its "medium" contrast.
+// https://github.com/morhetz/gruvbox — MIT.
+func GruvboxTheme() Theme {
+	return Theme{
+		Bg: "#282828", // bg0
+		Fg: "#ebdbb2", // fg1
+
+		AddedFg:   "#b8bb26", // bright green
+		AddedBg:   "#32361a",
+		RemovedFg: "#fb4934", // bright red
+		RemovedBg: "#3c1f1e",
+		HunkFg:    "#83a598", // bright blue
+
+		// differ's own: hue-matched to the brights, no upstream equivalent.
+		AddedEmphBg:   "#4a4a1e",
+		RemovedEmphBg: "#5a2f2a",
+
+		MarkFg: "#a89984", // fg4
+
+		LineNumFg:        "#7c6f64", // bg4
+		LineNumAddedFg:   "#b8bb26",
+		LineNumRemovedFg: "#fb4934",
+
+		HeaderBg: "#3c3836", // bg1
+		HeaderFg: "#d3869b", // bright purple
+
+		HunkBg: "#3c3836",
+		CardBg: "#32302f", // bg0_s
+
+		SelectedBg:  "#504945", // bg2
+		SelectedFg:  "#fbf1c7", // fg0
+		StagedFg:    "#b8bb26",
+		ModifiedFg:  "#fabd2f", // bright yellow
+		AddedFileFg: "#b8bb26",
+		DeletedFg:   "#fb4934",
+		RenamedFg:   "#d3869b",
+		UntrackedFg: "#928374", // gray
+
+		ChromeFg:       "#504945",
+		PanelLabelFg:   "#928374",
+		HeaderNameFg:   "#d3869b",
+		HeaderBranchFg: "#bdae93", // fg3
+		HeaderMetaFg:   "#928374",
+
+		BorderFg:    "#665c54", // bg3
+		StatusBarBg: "#1d2021", // bg0_h
+		StatusBarFg: "#bdae93",
+		HelpKeyFg:   "#8ec07c", // bright aqua
+		HelpDescFg:  "#a89984",
+
+		CommentFg:     "#fabd2f",
+		CommentMetaFg: "#a89984",
+		StaleFg:       "#fe8019", // bright orange
+
+		SuccessFg: "#b8bb26",
+		WarningFg: "#fabd2f",
+		ErrorFg:   "#fb4934",
+		MutedFg:   "#a89984",
+
+		AccentFg: "#d3869b",
+
+		ChromaStyle: "gruvbox",
+	}
+}
+
+// TokyoNightTheme is Tokyo Night, the "night" variant.
+// https://github.com/folke/tokyonight.nvim — Apache-2.0.
+func TokyoNightTheme() Theme {
+	return Theme{
+		Bg: "#1a1b26",
+		Fg: "#c0caf5",
+
+		AddedFg:   "#9ece6a",
+		AddedBg:   "#20303b",
+		RemovedFg: "#f7768e",
+		RemovedBg: "#37222c",
+		HunkFg:    "#7aa2f7",
+
+		// differ's own, as are AddedBg/RemovedBg above.
+		AddedEmphBg:   "#2c4a3e",
+		RemovedEmphBg: "#4c2b38",
+
+		// Not an upstream token: the palette's comment colour (#565f89) is
+		// 2.2 against the diff backgrounds, and these marks are notes about
+		// the code rather than chrome, so they have to be legible.
+		MarkFg: "#8189ad",
+
+		LineNumFg:        "#3b4261",
+		LineNumAddedFg:   "#9ece6a",
+		LineNumRemovedFg: "#f7768e",
+
+		// bg_highlight and bg_dark are the night variant's own; #24283b and
+		// #1f2335 are storm's, which is what these were.
+		HeaderBg: "#292e42",
+		HeaderFg: "#bb9af7",
+
+		HunkBg: "#292e42",
+		CardBg: "#16161e",
+
+		SelectedBg:  "#33467c",
+		SelectedFg:  "#c0caf5",
+		StagedFg:    "#9ece6a",
+		ModifiedFg:  "#e0af68",
+		AddedFileFg: "#9ece6a",
+		DeletedFg:   "#f7768e",
+		RenamedFg:   "#bb9af7",
+		UntrackedFg: "#565f89",
+
+		ChromeFg:       "#3b4261",
+		PanelLabelFg:   "#565f89", // comment
+		HeaderNameFg:   "#bb9af7", // magenta
+		HeaderBranchFg: "#a9b1d6", // fg_dark
+		HeaderMetaFg:   "#737aa2", // dark5
+
+		BorderFg:    "#3b4261",
+		StatusBarBg: "#16161e",
+		StatusBarFg: "#a9b1d6",
+		HelpKeyFg:   "#7dcfff",
+		HelpDescFg:  "#737aa2", // dark5
+
+		CommentFg:     "#e0af68",
+		CommentMetaFg: "#737aa2", // dark5
+		StaleFg:       "#ff9e64",
+
+		SuccessFg: "#9ece6a",
+		WarningFg: "#e0af68",
+		ErrorFg:   "#f7768e",
+		MutedFg:   "#a9b1d6", // fg_dark — muted, but still text
+
+		AccentFg: "#bb9af7",
+
+		ChromaStyle: "tokyonight-night",
+	}
+}
+
+// GitHubDarkTheme is GitHub's dark default.
+// https://primer.style — MIT.
+func GitHubDarkTheme() Theme {
+	return Theme{
+		Bg: "#0d1117",
+		Fg: "#c9d1d9",
+
+		AddedFg:   "#3fb950",
+		AddedBg:   "#12261e",
+		RemovedFg: "#ff7b72",
+		RemovedBg: "#25171c",
+		HunkFg:    "#58a6ff",
+
+		// differ's own; AddedBg/RemovedBg reproduce Primer's own overlays.
+		AddedEmphBg:   "#1b4721",
+		RemovedEmphBg: "#542426",
+
+		MarkFg: "#8b949e",
+
+		LineNumFg:        "#484f58",
+		LineNumAddedFg:   "#3fb950",
+		LineNumRemovedFg: "#ff7b72",
+
+		HeaderBg: "#161b22",
+		HeaderFg: "#bc8cff",
+
+		HunkBg: "#161b22",
+		CardBg: "#161b22",
+
+		SelectedBg:  "#1f6feb",
+		SelectedFg:  "#f0f6fc",
+		StagedFg:    "#3fb950",
+		ModifiedFg:  "#d29922",
+		AddedFileFg: "#3fb950",
+		DeletedFg:   "#ff7b72",
+		RenamedFg:   "#bc8cff",
+		UntrackedFg: "#6e7681",
+
+		ChromeFg:       "#30363d",
+		PanelLabelFg:   "#8b949e",
+		HeaderNameFg:   "#bc8cff",
+		HeaderBranchFg: "#c9d1d9",
+		HeaderMetaFg:   "#8b949e",
+
+		BorderFg:    "#30363d",
+		StatusBarBg: "#010409",
+		StatusBarFg: "#c9d1d9",
+		HelpKeyFg:   "#58a6ff",
+		HelpDescFg:  "#8b949e",
+
+		CommentFg:     "#d29922",
+		CommentMetaFg: "#8b949e",
+		StaleFg:       "#db6d28",
+
+		SuccessFg: "#3fb950",
+		WarningFg: "#d29922",
+		ErrorFg:   "#ff7b72",
+		MutedFg:   "#8b949e",
+
+		AccentFg: "#bc8cff",
+
+		ChromaStyle: "github-dark",
+	}
+}

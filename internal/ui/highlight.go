@@ -27,10 +27,15 @@ func initChromaStyle(styleName string) {
 		if styleName == theme.NoHighlight {
 			return
 		}
-		chromaStyle = styles.Get(styleName)
-		if chromaStyle == nil {
-			chromaStyle = styles.Get("monokai")
+		// A registry lookup, because styles.Get never returns nil: it hands
+		// back Chroma's own Fallback — "swapoff", which paints almost
+		// nothing — for a name it does not know. The nil check that used to
+		// be here could not fire, so a typo'd style name silently produced a
+		// colourless diff instead of the monokai it claimed to fall back to.
+		if _, ok := styles.Registry[styleName]; !ok {
+			styleName = "monokai"
 		}
+		chromaStyle = styles.Get(styleName)
 	})
 }
 
