@@ -106,18 +106,24 @@ It never changes git state — staging and committing stay explicit actions.
 
 | Key       | Action                          |
 | --------- | ------------------------------- |
-| `r`       | toggle review mode              |
 | `j/k`     | move line cursor                |
 | `}` / `{` | next/prev hunk                  |
+| `d/u`     | half page down/up               |
+| `n/p`     | next/prev file                  |
+| `g/G`     | first/last line                 |
 | `c`       | comment on line (edit existing) |
 | `C`       | comment on whole hunk           |
 | `x`       | delete comment under cursor     |
 | `s`       | send comment under cursor       |
 | `S`       | send all pending comments       |
 | `H`       | what has been sent this session |
-| `n/p`     | next/prev file                  |
+| `r`       | toggle review mode              |
+| `e`       | open in editor at the cursor's line |
+| `tab`     | stage/unstage                   |
 | `v`       | toggle split diff               |
+| `b`       | open branch picker              |
 | `esc`     | back to file list               |
+| `q`       | quit                            |
 
 In the comment editor: `ctrl+s` saves, `esc` cancels. Comments are multiline,
 shown inline under the line they refer to, and marked `pending` until sent.
@@ -128,10 +134,15 @@ session-only, so `q` really does discard them.
 
 ### Progress and history
 
-The status bar carries the whole review: `3/7 reviewed · 2 comments · 1
-pending · 1 changed`. A file counts as reviewed once you have looked at it in
-review mode, and stops counting when the agent rewrites it — that is what
-`changed` means, and looking at it again clears it.
+The status bar carries the whole review: `3/7 reviewed  2 comments  1 pending
+1 changed`. A file counts as reviewed once you have looked at it in review
+mode, and stops counting when the agent rewrites it — that is what `changed`
+means, and looking at it again clears it.
+
+A rewrite is noticed from the file's size and mtime plus git's line counts, so
+staging alone never counts as one. Under `-s` the worktree is not read at all
+(you are reviewing the index), which leaves one gap: a staged edit that keeps
+the line counts identical goes unnoticed there until they move.
 
 `H` lists what has left the session, most recent first:
 

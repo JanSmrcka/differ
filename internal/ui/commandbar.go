@@ -158,14 +158,24 @@ func (m Model) renderHelpOverlay(width, height int) string {
 		rows = append(rows, key+m.styles.HelpDesc.Render(text))
 	}
 	rows = append(rows, "", m.styles.HelpDesc.Render(" ? or esc to close"))
+	return fitOverlay(rows, width, height)
+}
 
+// fitOverlay makes a block of rows exactly the size of the panel area.
+//
+// Clipping is the point, not the padding: a row wider than the terminal
+// soft-wraps, the body gains a line, and the bottom rule and the command bar
+// are pushed off screen — the very failure overlays are drawn over the panels
+// to avoid. A long file path in the history and a long help sentence both
+// reach that width on a 60-column terminal.
+func fitOverlay(rows []string, width, height int) string {
 	for i, r := range rows {
-		rows[i] = padTo(r, width)
+		rows[i] = padTo(truncateEnd(r, width), width)
 	}
 	for len(rows) < height {
 		rows = append(rows, padTo("", width))
 	}
-	return strings.Join(rows[:height], "\n")
+	return strings.Join(rows[:max(height, 0)], "\n")
 }
 
 // modeName is what the mode is called in the help overlay's title.

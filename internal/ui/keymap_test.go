@@ -289,6 +289,7 @@ func TestKeymap_TheREADMEMatchesTheKeymap(t *testing.T) {
 	sections := map[viewMode]string{
 		modeFileList: "### File List",
 		modeDiff:     "### Diff View",
+		modeReview:   "### Review Mode",
 	}
 	for mode, heading := range sections {
 		table := sectionTable(t, string(readme), heading)

@@ -54,6 +54,7 @@ main.go → cmd/root.go (cobra commands)
                    ├── keymap.go   — the keymap: one table, read by bar/overlay/tests
                    ├── commandbar.go — the one-line command bar and ? overlay
                    ├── history.go  — the H overlay: what was sent, where, and whether it arrived
+                   ├── progress.go — review progress: which files moved under the reviewer
                    ├── log.go      — LogModel (commit log browser)
                    ├── diff.go     — diff parser + single-line rendering
                    ├── hunk.go     — hunk model, line addressing, navigation

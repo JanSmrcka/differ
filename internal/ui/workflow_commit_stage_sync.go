@@ -2,16 +2,13 @@ package ui
 
 import (
 	"fmt"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/jansmrcka/differ/internal/config"
-	"github.com/jansmrcka/differ/internal/git"
 )
 
 // Commit, staging, polling, sync, and async command workflows.
@@ -201,7 +198,7 @@ func (m Model) refreshFilesCmd() tea.Cmd {
 			}
 		}
 		items := buildFileItems(repo, files, untracked)
-		return filesRefreshedMsg{files: items, keys: fileKeysOf(repo, items)}
+		return filesRefreshedMsg{files: items, keys: fileKeysOf(repo, items, stagedOnly)}
 	}
 }
 
@@ -218,7 +215,7 @@ func (m Model) buildRefreshedFiles() filesRefreshedMsg {
 		}
 	}
 	items := buildFileItems(m.repo, files, untracked)
-	return filesRefreshedMsg{files: items, keys: fileKeysOf(m.repo, items)}
+	return filesRefreshedMsg{files: items, keys: fileKeysOf(m.repo, items, m.stagedOnly)}
 }
 
 func (m Model) saveSplitPrefCmd() tea.Cmd {
@@ -271,25 +268,4 @@ func (m Model) generateCommitMsgCmd() tea.Cmd {
 		}
 		return commitMsgGeneratedMsg{message: strings.TrimSpace(string(out))}
 	}
-}
-
-// fileKeysOf fingerprints each changed file, cheaply enough to do on every
-// refresh: git's own view of it plus the worktree file's size and mtime.
-//
-// git status already tells us the status and the line counts, so the only
-// extra cost is one stat per changed file — and the mtime is what catches the
-// case the counts miss, an agent re-editing the same line.
-func fileKeysOf(repo *git.Repo, files []fileItem) map[string]string {
-	keys := make(map[string]string, len(files))
-	for _, f := range files {
-		c := f.change
-		key := fmt.Sprintf("%c|%t|%d|%d", c.Status, c.Staged, c.AddedLines, c.DeletedLines)
-		if repo != nil {
-			if st, err := os.Stat(filepath.Join(repo.Dir(), c.Path)); err == nil {
-				key += fmt.Sprintf("|%d|%d", st.Size(), st.ModTime().UnixNano())
-			}
-		}
-		keys[c.Path] = key
-	}
-	return keys
 }

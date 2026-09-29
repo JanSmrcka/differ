@@ -3,11 +3,15 @@ package ui
 import (
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/charmbracelet/lipgloss"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/jansmrcka/differ/internal/git"
 	"github.com/jansmrcka/differ/internal/review"
+	"github.com/jansmrcka/differ/internal/testutil"
 )
 
 // The session history. Mid-review it is easy to lose track of what has already
@@ -174,5 +178,106 @@ func TestProgress_TheSummaryReportsChangedFiles(t *testing.T) {
 	}
 	if !strings.Contains(got, "0/2") {
 		t.Errorf("summary = %q, want the changed file to stop counting as reviewed", got)
+	}
+}
+
+// An overlay wider than the terminal is the failure the overlays were drawn
+// over the panels to avoid: the row soft-wraps, the body gains a line, and the
+// bottom rule and command bar are pushed off screen.
+func TestOverlays_RowsNeverExceedTheWidth(t *testing.T) {
+	t.Parallel()
+	m := historyModel(t)
+	m.session.RecordDelivery(review.Delivery{
+		At:       time.Date(2026, 9, 29, 16, 39, 6, 0, time.UTC),
+		Target:   "tmux",
+		Comments: []string{"c1", "c2", "c3"},
+		Files: []string{
+			"internal/api/client/transport.ts",
+			"internal/auth/login/session.ts",
+			"internal/store/reducers/user.ts",
+		},
+	})
+
+	// 60 is minWidth, the narrowest terminal differ still draws.
+	for _, width := range []int{60, 80, 120} {
+		for _, overlay := range []struct {
+			name string
+			body string
+		}{
+			{"history", m.renderHistoryOverlay(width, 12)},
+			{"help", m.renderHelpOverlay(width, 24)},
+		} {
+			for _, row := range strings.Split(overlay.body, "\n") {
+				if got := lipgloss.Width(row); got > width {
+					t.Errorf("%s overlay at width %d has a %d-column row: %q",
+						overlay.name, width, got, stripANSI(row))
+				}
+			}
+		}
+	}
+}
+
+// An overlay must not be left orphaned by something arriving in the
+// background. Opening the branch picker is asynchronous, so the mode can
+// change while the history is on screen — and the branch picker is a text
+// input, which used to mean every key went into the filter and the overlay
+// could not be closed at all.
+func TestOverlays_SurviveAModeChangeArrivingFromTheBackground(t *testing.T) {
+	t.Parallel()
+	m := historyModel(t)
+
+	updated, _ := m.routeKey(key("H"))
+	m = updated.(Model)
+	if !m.showHistory {
+		t.Fatal("H did not open the history")
+	}
+
+	// The branch list lands while the overlay is open.
+	after, _ := m.handleBranchesLoaded(branchesLoadedMsg{branches: []string{"master", "topic"}, current: "master"})
+	m = after.(Model)
+	if m.mode != modeBranchPicker {
+		t.Fatalf("mode = %v, want the branch picker", m.mode)
+	}
+	if m.showHistory {
+		t.Error("the history is still drawn over a view it has nothing to do with")
+	}
+
+	// And an overlay open over a text input still closes.
+	m.showHistory = true
+	closed, _ := m.routeKey(tea.KeyMsg{Type: tea.KeyEsc})
+	if closed.(Model).showHistory {
+		t.Error("esc did not close an overlay over the branch picker")
+	}
+}
+
+// Through View(), not the renderer: the overlay has to actually replace the
+// panels, and must not change the layout's height while it is open — the diff
+// viewport has to come back exactly where it was.
+func TestOverlays_ViewDrawsThemOverThePanelsWithoutResizing(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.ApplyFixture(testutil.Fixture(t, "multi_hunk"))
+	m := liveModel(t, tr)
+	m.mode = modeReview
+	m.session = review.NewSession()
+	m.session.RecordDelivery(review.Delivery{
+		At: time.Date(2026, 9, 29, 16, 0, 0, 0, time.UTC), Target: "clipboard",
+		Comments: []string{"c1"}, Files: []string{"src.ts"},
+	})
+
+	plain := lipgloss.Height(m.View())
+
+	m.showHistory = true
+	view := m.View()
+	if !strings.Contains(stripANSI(view), "sent this session") {
+		t.Errorf("View does not draw the history:\n%s", stripANSI(view))
+	}
+	if got := lipgloss.Height(view); got != plain {
+		t.Errorf("the history changed the layout height: %d rows, was %d", got, plain)
+	}
+
+	m.showHelp, m.showHistory = true, false
+	if got := lipgloss.Height(m.View()); got != plain {
+		t.Errorf("the help overlay changed the layout height: %d rows, was %d", got, plain)
 	}
 }

@@ -66,32 +66,38 @@ func (m Model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) routeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// The help overlay is global: it answers the same keys everywhere, and
-	// while it is open it swallows the rest so a stray j does not scroll a
-	// diff the user cannot see.
+	// An open overlay owns the keyboard, whatever it is drawn over. The check
+	// is outside the typing guard on purpose: an async message can switch the
+	// mode underneath an overlay — the branch list arriving is enough — and
+	// inside the guard every key then went into that mode's text input, which
+	// left the overlay with no way to close.
+	if m.showHelp || m.showHistory {
+		switch msg.String() {
+		case "ctrl+c":
+			return m, tea.Quit
+		case "?":
+			m.showHelp, m.showHistory = !m.showHelp, false
+			return m, nil
+		case "H":
+			m.showHistory, m.showHelp = !m.showHistory, false
+			return m, nil
+		case "esc", "q":
+			m.showHelp, m.showHistory = false, false
+			return m, nil
+		}
+		// Everything else is swallowed, so a stray j does not scroll a diff
+		// the user cannot see.
+		return m, nil
+	}
+
 	if !m.typing() {
 		switch msg.String() {
 		case "ctrl+c":
 			// Listed in the overlay as "quit immediately", so it has to work
-			// there too — the early return below used to swallow it.
+			// there too.
 			return m, tea.Quit
 		case "?":
-			m.showHelp = !m.showHelp
-			// Two overlays in the same space would draw over each other.
-			m.showHistory = false
-			return m, nil
-		case "esc", "q":
-			if m.showHelp || m.showHistory {
-				m.showHelp, m.showHistory = false, false
-				return m, nil
-			}
-		}
-		if m.showHelp {
-			return m, nil
-		}
-		// The history swallows the rest so a stray j does not scroll a diff
-		// the user cannot see — but H itself must get through to close it.
-		if m.showHistory && msg.String() != "H" {
+			m.showHelp = true
 			return m, nil
 		}
 	}
@@ -238,6 +244,9 @@ func (m Model) handleBranchesLoaded(msg branchesLoadedMsg) (tea.Model, tea.Cmd) 
 		m.statusMsg = "no branches"
 		return m, nil
 	}
+	// An overlay belongs to the view it was opened over, and this is a
+	// different view arriving in the background.
+	m.showHelp, m.showHistory = false, false
 	m.mode = modeBranchPicker
 	m.branches = msg.branches
 	m.currentBranch = msg.current

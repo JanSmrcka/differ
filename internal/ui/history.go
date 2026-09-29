@@ -19,21 +19,16 @@ import (
 func (m Model) renderHistoryOverlay(width, height int) string {
 	rows := []string{m.styles.HelpKey.Render(" sent this session"), ""}
 
-	if m.session == nil || len(m.session.History()) == 0 {
+	sent := m.deliveries(height)
+	if len(sent) == 0 {
 		rows = append(rows, m.styles.HelpDesc.Render(" nothing sent yet"))
 	}
-	for _, d := range m.deliveries(height) {
+	for _, d := range sent {
 		rows = append(rows, m.renderDelivery(d))
 	}
 
 	rows = append(rows, "", m.styles.HelpDesc.Render(" H or esc to close"))
-	for i, r := range rows {
-		rows[i] = padTo(r, width)
-	}
-	for len(rows) < height {
-		rows = append(rows, padTo("", width))
-	}
-	return strings.Join(rows[:max(height, 0)], "\n")
+	return fitOverlay(rows, width, height)
 }
 
 // deliveries is as much of the history as the overlay has room for. The oldest
@@ -67,29 +62,4 @@ func (m Model) renderDelivery(d review.Delivery) string {
 		line += m.styles.HelpDesc.Render("  " + strings.Join(d.Files, ", "))
 	}
 	return line
-}
-
-// noteChangedFiles tells the session which files moved since the last refresh.
-//
-// The file under the cursor is excluded: whatever arrives for it is what the
-// user is looking at, so it cannot be out of date to its own reader. Every
-// other file they had already read becomes "changed", and the file list says
-// so.
-func (m Model) noteChangedFiles(keys map[string]string) Model {
-	if keys == nil {
-		// A refresh that could not fingerprint anything says nothing about
-		// what changed — better silent than wrong.
-		return m
-	}
-	if m.session != nil && m.fileKeys != nil {
-		current := m.currentFilePath()
-		for path, key := range keys {
-			was, known := m.fileKeys[path]
-			if known && was != key && path != current {
-				m.session.NoteChange(path)
-			}
-		}
-	}
-	m.fileKeys = keys
-	return m
 }

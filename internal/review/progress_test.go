@@ -8,8 +8,9 @@ import (
 // Review progress: what the user has looked at, what they have sent, and what
 // the agent changed underneath them while they were reading.
 //
-// The file list and the status bar both read these states, so a wrong answer
-// here shows up as a wrong badge next to a file name.
+// The status bar's progress readout is built from these states, and the
+// changed-file list will show them per file (#52), so a wrong answer here
+// shows up as a wrong count in front of the reviewer.
 
 // A file whose every comment has gone out is done with, not merely commented.
 func TestSession_AFileWithEverythingSentReportsSent(t *testing.T) {

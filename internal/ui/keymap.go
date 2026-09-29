@@ -133,7 +133,7 @@ func diffBindings(review bool) []binding {
 			{Keys: []string{"x"}, Desc: "delete", Help: "delete the comment under the cursor"},
 			{Keys: []string{"s"}, Label: "s/S", Desc: "send", Help: "send the comment under the cursor, or S for all of them", Bar: true},
 			{Keys: []string{"S"}},
-			{Keys: []string{"H"}, Desc: "history", Help: "show what has been sent this session, and whether it arrived"},
+			{Keys: []string{"H"}, Desc: "history", Help: "what has been sent, and whether it arrived"},
 			{Keys: []string{"r"}, Desc: "exit review", Help: "go back to the plain diff", Bar: true},
 		}
 	} else {
