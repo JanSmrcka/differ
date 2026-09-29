@@ -79,6 +79,13 @@ func (m Model) routeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// mode underneath an overlay — the branch list arriving is enough — and
 	// inside the guard every key then went into that mode's text input, which
 	// left the overlay with no way to close.
+	// The theme picker owns its keys entirely, including j/k and enter, so it
+	// is answered before the overlays that only close.
+	if m.showThemes {
+		mm, cmd, _ := m.themePickerKey(msg.String())
+		return mm, cmd
+	}
+
 	if m.showHelp || m.showHistory || m.showProblem {
 		switch msg.String() {
 		case "?":
@@ -114,6 +121,8 @@ func (m Model) routeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// mode that has since been left.
 			m.showProblem = true
 			return m, nil
+		case "t":
+			return m.openThemePicker()
 		}
 	}
 
@@ -266,6 +275,7 @@ func (m Model) handleBranchesLoaded(msg branchesLoadedMsg) (tea.Model, tea.Cmd) 
 	// An overlay belongs to the view it was opened over, and this is a
 	// different view arriving in the background.
 	m.showHelp, m.showHistory, m.showProblem = false, false, false
+	m.showThemes = false
 	m.mode = modeBranchPicker
 	m.branches = msg.branches
 	m.currentBranch = msg.current

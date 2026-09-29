@@ -164,6 +164,11 @@ type Model struct {
 	// the status bar.
 	showProblem bool
 	problem     *problem
+	// showThemes draws the theme picker. themeBefore is what was in use when
+	// it opened, so cancelling can put it back.
+	showThemes  bool
+	themeCursor int
+	themeBefore theme.Theme
 
 	upstream     git.UpstreamInfo
 	pushConfirm  bool

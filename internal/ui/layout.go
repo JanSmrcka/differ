@@ -47,6 +47,8 @@ func (m Model) View() string {
 		body = m.renderHistoryOverlay(m.width, contentH)
 	case m.showProblem:
 		body = m.renderProblemOverlay(m.width, contentH)
+	case m.showThemes:
+		body = m.renderThemeOverlay(m.width, contentH)
 	default:
 		left := padLines(m.leftPanel(), contentH)
 		right := padLines(m.rightPanel(), contentH)

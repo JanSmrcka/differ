@@ -13,18 +13,35 @@ import (
 )
 
 var (
-	lexerCache    sync.Map // ext -> chroma.Lexer
-	chromaStyle   *chroma.Style
-	chromaStyleMu sync.Once
+	lexerCache sync.Map // ext -> chroma.Lexer
+
+	// chromaStyle is the style the diff is highlighted with, guarded because
+	// renderers are built inside tea.Cmd goroutines.
+	//
+	// It was a sync.Once, which meant the first theme of the session was the
+	// only one that ever took effect: switching theme at runtime changed
+	// every colour except the syntax highlighting.
+	chromaMu    sync.RWMutex
+	chromaStyle *chroma.Style
+	chromaName  string
 )
 
-// initChromaStyle initializes the chroma style (call once).
+// initChromaStyle selects the Chroma style for a theme, and is safe to call
+// again when the theme changes.
 func initChromaStyle(styleName string) {
-	chromaStyleMu.Do(func() {
+	chromaMu.Lock()
+	defer chromaMu.Unlock()
+	if styleName == chromaName {
+		return
+	}
+	chromaName = styleName
+
+	func() {
 		// theme.NoHighlight means the user asked for no colour, so leave the
 		// style nil and highlightLine returns the text untouched. An empty
 		// name is different: that is "unset", and falls back to a default.
 		if styleName == theme.NoHighlight {
+			chromaStyle = nil
 			return
 		}
 		// A registry lookup, because styles.Get never returns nil: it hands
@@ -36,7 +53,21 @@ func initChromaStyle(styleName string) {
 			styleName = "monokai"
 		}
 		chromaStyle = styles.Get(styleName)
-	})
+	}()
+}
+
+// currentChromaStyleName is the style in force, for tests.
+func currentChromaStyleName() string {
+	chromaMu.RLock()
+	defer chromaMu.RUnlock()
+	return chromaName
+}
+
+// currentChromaStyle reads the style under the lock.
+func currentChromaStyle() *chroma.Style {
+	chromaMu.RLock()
+	defer chromaMu.RUnlock()
+	return chromaStyle
 }
 
 // getLexer returns a cached Chroma lexer for the given filename.
@@ -76,7 +107,8 @@ func highlightSpan(content, filename, bgColor string, emph lipgloss.Style, s spa
 	if content == "" {
 		return content
 	}
-	if chromaStyle == nil {
+	style := currentChromaStyle()
+	if style == nil {
 		// Highlighting is off, which is also the only situation where the
 		// emphasis has no background to use. There is nothing to paint with,
 		// so the line goes out as it is — the +/- and the line's own
@@ -108,7 +140,7 @@ func highlightSpan(content, filename, bgColor string, emph lipgloss.Style, s spa
 		width := len([]rune(token.Value))
 		token.Value = strings.ReplaceAll(token.Value, "\n", "")
 		if token.Value != "" {
-			fg := tokenForeground(chromaStyle.Get(token.Type))
+			fg := tokenForeground(style.Get(token.Type))
 			for _, part := range s.split(token.Value, offset) {
 				b.WriteString(paint(part.text, fg, bgColor, emph, part.emph))
 			}

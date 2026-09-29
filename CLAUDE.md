@@ -58,6 +58,7 @@ main.go → cmd/root.go (cobra commands)
                    ├── filelist.go — path disambiguation and the file list's own arithmetic
                    ├── intraline.go — what differs *within* a pair of split-view lines
                    ├── progress.go — review progress: which files moved under the reviewer
+                   ├── themepicker.go — the t overlay: try a theme by looking at it
                    ├── log.go      — LogModel (commit log browser)
                    ├── diff.go     — diff parser + single-line rendering
                    ├── hunk.go     — hunk model, line addressing, navigation
@@ -196,6 +197,8 @@ way to the status bar rather than handing `describe` an error built by hand.
 ## Gotchas
 
 - **Chroma + lipgloss**: apply Chroma foreground colors token-by-token, keep diff background from line type. Chroma must not override background.
+- **The Chroma style is re-selectable, and guarded.** It was a `sync.Once`, so the session's first theme was the only one that ever took effect and switching theme changed everything except the syntax highlighting. `initChromaStyle` is idempotent per name and behind an `RWMutex`, because renderers are built inside `tea.Cmd` goroutines. Read it through `currentChromaStyle()`.
+- **Switching theme needs a re-render, not a recolour.** `DiffRenderer` caches every row as a finished string with its styles baked in, so `applyTheme` clears `lastDiffContent` and reloads the diff.
 - **Cut a line before highlighting it**, never after: the highlighted string is full of ANSI escapes and slicing it cuts one in half. `renderCode` is the one place a code line is cut, highlighted and marked, and both unified and split go through it — as they do through `stylesFor`, so the two views cannot drift apart again.
 - **Cut with `lipgloss`, not with a rune slice.** `clipCode` and `clipRow` use `MaxWidth`, which understands escapes and is linear. The first version dropped one rune at a time and re-measured the whole prefix: 8.8 s for an 80,000-column line, inside `Update`. Slicing runes off an already-styled row also drops the reset and bleeds colour down the screen — the same trap `fitOverlay` hit.
 - **Chroma appends a newline to its input** and coalesces it into the last token, so any token running to end of line carries one: the tail of an open block comment, an unterminated string, a CRLF line ending, a non-breaking space. Written out verbatim it turns one row of output into two — `DisplayRows` then disagrees with `Content`, and every row index below it, which is what `RowFor` and the cursor are addressed by, is off by one. `highlightSpan` strips them, which is the only place token values are written.
