@@ -213,7 +213,52 @@ func extractHunkContext(line string) string {
 	return line
 }
 
+// lineNumWidth is the minimum width of one line-number column. A file whose
+// numbers do not fit gets wider columns — see geometry.
 const lineNumWidth = 4
+
+// geometry is the per-diff column arithmetic every row shares: how wide the
+// line-number columns have to be for this particular file, and how much room
+// the panel gives.
+//
+// It is one value rather than two parameters because the row renderers already
+// take four, and every new piece of layout would otherwise add another int to
+// five signatures.
+type geometry struct {
+	// numW is the width of each line-number column, the same on both sides so
+	// the two stay aligned with each other.
+	numW int
+	// width is the space the row has: the whole diff panel in unified view,
+	// one side of it in split.
+	width int
+}
+
+// numbersWidth is the space the line-number block occupies: both columns and
+// the space between them.
+func (g geometry) numbersWidth() int { return g.numW*2 + 1 }
+
+// diffGeometry sizes the line-number columns to the largest number the diff
+// actually mentions, never below lineNumWidth so narrow diffs do not shuffle
+// as the user moves between files.
+func diffGeometry(p ParsedDiff, width int) geometry {
+	highest := 0
+	for _, l := range p.Lines {
+		highest = max(highest, l.OldNum, l.NewNum)
+	}
+	return geometry{numW: max(lineNumWidth, digits(highest)), width: width}
+}
+
+func digits(n int) int {
+	if n <= 0 {
+		return 1
+	}
+	d := 0
+	for n > 0 {
+		d++
+		n /= 10
+	}
+	return d
+}
 
 // cursorMarker flags the current line. The gutter it lives in is always
 // reserved, so lines do not shift horizontally as the cursor moves.
@@ -260,12 +305,12 @@ const commentBar = "▏"
 // diff they were written against.
 const staleMarker = "!"
 
-func renderDiffLineGutter(dl DiffLine, filename string, styles Styles, t theme.Theme, width int, gutter string) string {
+func renderDiffLineGutter(dl DiffLine, filename string, styles Styles, t theme.Theme, g geometry, gutter string) string {
 	switch dl.Type {
 	case LineHunkHeader:
-		return renderHunkLine(dl, styles, width, gutter)
+		return renderHunkLine(dl, styles, g, gutter)
 	default:
-		return renderCodeLine(dl, filename, styles, t, width, gutter)
+		return renderCodeLine(dl, filename, styles, t, g, gutter)
 	}
 }
 
@@ -279,65 +324,164 @@ func commentGutter(styles Styles) string {
 	return styles.CommentBar.Render(commentMarker) + " "
 }
 
-func renderHunkLine(dl DiffLine, styles Styles, width int, gutter string) string {
-	prefix := gutter + styles.DiffLineNum.Render("    ···  ")
-	text := dl.Content
+// renderHunkLine is the break between hunks as well as the header of the next
+// one: the context text, then a rule out to the edge of the panel.
+//
+// Without the rule two hunks forty lines apart read as one continuous stretch
+// of code — the "···" prefix alone was not a visible boundary.
+func renderHunkLine(dl DiffLine, styles Styles, g geometry, gutter string) string {
+	marker := hunkMarker(g)
+	room := g.width - gutterWidth - lipgloss.Width(marker)
+
+	// The rule has to survive, so the text is cut to leave room for it.
+	text := truncateCode(dl.Content, max(room-hunkRuleWidth-1, 0))
 	if text != "" {
-		text = " " + text
+		text += " "
 	}
-	return prefix + styles.DiffHunkHeader.Render(text)
+	rule := strings.Repeat(horizontalRule, max(room-lipgloss.Width(text), 0))
+
+	return gutter + styles.DiffLineNum.Render(marker) +
+		styles.DiffHunkHeader.Render(text) + styles.Chrome.Render(rule)
 }
 
-func renderCodeLine(dl DiffLine, filename string, styles Styles, t theme.Theme, width int, gutter string) string {
-	oldNum := fmtLineNum(dl.OldNum)
-	newNum := fmtLineNum(dl.NewNum)
+// hunkRuleWidth is the shortest rule that still reads as a break rather than
+// as punctuation.
+const hunkRuleWidth = 8
 
-	indicator := " "
-	var bgColor string
-	var numStyle lipgloss.Style
-	var indStyle lipgloss.Style
-	var bgStyle lipgloss.Style
+// hunkMarker stands in for a hunk header's line numbers, right-aligned in the
+// number block and padded so the header's text begins in the same column as
+// code does. Unified and split share it, so the gutter reads the same in both.
+func hunkMarker(g geometry) string {
+	const dots = "···"
+	pad := max(g.numbersWidth()-lipgloss.Width(dots), 0)
+	// Three trailing columns: the space after the numbers, plus the two the
+	// +/- indicator occupies on a code line.
+	return strings.Repeat(" ", pad) + dots + "   "
+}
+
+// lineStyles is how a line of one type is drawn. Unified and split view used
+// to build this twice from two copies of the same switch, which is how the two
+// views drifted apart; they now share it, and so share their conventions.
+type lineStyles struct {
+	// indicator is the +/- in the column before the code.
+	indicator string
+	// bgColor is the line's background, which Chroma must not override — it
+	// is what says added or removed, and is applied per token.
+	bgColor string
+	num     lipgloss.Style
+	ind     lipgloss.Style
+	// bg pads the rest of the row so the background reaches the edge.
+	bg lipgloss.Style
+	// ws draws trailing whitespace, which is otherwise invisible.
+	ws lipgloss.Style
+}
+
+func stylesFor(dl DiffLine, styles Styles, t theme.Theme) lineStyles {
 	switch dl.Type {
 	case LineAdded:
-		indicator = "+"
-		bgColor = t.AddedBg
-		numStyle = styles.DiffLineNumAdded
-		indStyle = styles.DiffAdded
-		bgStyle = styles.DiffAddedBg
+		return lineStyles{
+			indicator: "+", bgColor: t.AddedBg,
+			num: styles.DiffLineNumAdded, ind: styles.DiffAdded,
+			bg: styles.DiffAddedBg, ws: styles.WhitespaceAdded,
+		}
 	case LineRemoved:
-		indicator = "-"
-		bgColor = t.RemovedBg
-		numStyle = styles.DiffLineNumRemoved
-		indStyle = styles.DiffRemoved
-		bgStyle = styles.DiffRemovedBg
+		return lineStyles{
+			indicator: "-", bgColor: t.RemovedBg,
+			num: styles.DiffLineNumRemoved, ind: styles.DiffRemoved,
+			bg: styles.DiffRemovedBg, ws: styles.WhitespaceRemoved,
+		}
 	default:
-		numStyle = styles.DiffLineNum
-		indStyle = styles.DiffContext
-		bgStyle = lipgloss.NewStyle()
+		return lineStyles{
+			indicator: " ",
+			num:       styles.DiffLineNum, ind: styles.DiffContext,
+			bg: lipgloss.NewStyle(),
+		}
 	}
-
-	nums := numStyle.Render(oldNum + " " + newNum)
-
-	// Syntax highlight the content
-	highlighted := highlightLine(dl.Content, filename, bgColor)
-
-	// Build: colored indicator + highlighted content + bg padding to fill width
-	codeWidth := width - gutterWidth - lineNumWidth*2 - 3 // gutter + nums + spaces
-	prefix := indStyle.Render(indicator + " ")
-	contentWidth := lipgloss.Width(prefix) + lipgloss.Width(highlighted)
-	padding := ""
-	if pad := codeWidth - contentWidth; pad > 0 {
-		padding = bgStyle.Render(strings.Repeat(" ", pad))
-	}
-
-	return gutter + nums + " " + prefix + highlighted + padding
 }
 
-func fmtLineNum(n int) string {
-	if n < 0 {
-		return "    "
+func renderCodeLine(dl DiffLine, filename string, styles Styles, t theme.Theme, g geometry, gutter string) string {
+	ls := stylesFor(dl, styles, t)
+	nums := ls.num.Render(fmtLineNum(dl.OldNum, g.numW) + " " + fmtLineNum(dl.NewNum, g.numW))
+
+	codeWidth := g.width - gutterWidth - g.numbersWidth() - 1 // gutter, numbers, one space
+	prefix := ls.ind.Render(ls.indicator + " ")
+
+	code := renderCode(dl, filename, ls, codeWidth-lipgloss.Width(prefix))
+	padding := ""
+	if pad := codeWidth - lipgloss.Width(prefix) - lipgloss.Width(code); pad > 0 {
+		padding = ls.bg.Render(strings.Repeat(" ", pad))
 	}
-	return fmt.Sprintf("%4d", n)
+
+	return gutter + nums + " " + prefix + code + padding
+}
+
+// renderCode is the code half of a row: cut to fit, syntax highlighted, with
+// trailing whitespace made visible.
+//
+// The cut happens before highlighting — slicing the highlighted string would
+// cut through an ANSI escape — and leaving the line long makes the terminal
+// wrap the row, which shifts every row below it, the line-number column
+// included.
+func renderCode(dl DiffLine, filename string, ls lineStyles, maxW int) string {
+	text := truncateCode(dl.Content, maxW)
+
+	// Only on a line the change touched. A context line carries whatever the
+	// file already had, and marking those would flag the whole file rather
+	// than the change.
+	body, trailing := text, ""
+	if dl.Type == LineAdded || dl.Type == LineRemoved {
+		body, trailing = splitTrailing(text)
+	}
+
+	out := highlightLine(body, filename, ls.bgColor)
+	if trailing != "" {
+		out += ls.ws.Render(strings.Repeat(whitespaceMarker, lipgloss.Width(trailing)))
+	}
+	return out
+}
+
+// whitespaceMarker stands in for a trailing space or tab, which is invisible
+// in a diff and exactly the sort of thing a reviewer is expected to catch.
+const whitespaceMarker = "·"
+
+// splitTrailing separates a line's trailing whitespace from its body. Tabs
+// have already been expanded by then, so the trailing run measures in columns.
+func splitTrailing(s string) (body, trailing string) {
+	body = strings.TrimRight(s, " \t")
+	return body, s[len(body):]
+}
+
+func fmtLineNum(n, w int) string {
+	if n < 0 {
+		return strings.Repeat(" ", max(w, 0))
+	}
+	return fmt.Sprintf("%*d", w, n)
+}
+
+// truncationMarker ends a line that was too long for the panel. A silent cut
+// would be worse than wrapping: the reader has to know the line continues.
+const truncationMarker = "›"
+
+// truncateCode cuts a code line to maxW display columns.
+//
+// It counts columns rather than bytes or runes, so a line of CJK or emoji is
+// cut where it actually reaches the edge, and it never cuts mid-rune.
+func truncateCode(s string, maxW int) string {
+	if maxW <= 0 {
+		return ""
+	}
+	if lipgloss.Width(s) <= maxW {
+		return s
+	}
+	marker := lipgloss.Width(truncationMarker)
+	if maxW <= marker {
+		return truncationMarker
+	}
+	runes := []rune(s)
+	for len(runes) > 0 && lipgloss.Width(string(runes))+marker > maxW {
+		runes = runes[:len(runes)-1]
+	}
+	return string(runes) + truncationMarker
 }
 
 // RenderBinaryFile renders a placeholder for binary files.
@@ -404,59 +548,30 @@ func pairLinesIndexed(lines []DiffLine) []splitRow {
 	return rows
 }
 
-const splitLineNumWidth = 4
-
-func renderSplitSide(dl *DiffLine, filename string, styles Styles, t theme.Theme, panelW int, isLeft bool) string {
+func renderSplitSide(dl *DiffLine, filename string, styles Styles, t theme.Theme, g geometry, isLeft bool) string {
 	if dl == nil {
-		if panelW > 0 {
-			return strings.Repeat(" ", panelW)
+		if g.width > 0 {
+			return strings.Repeat(" ", g.width)
 		}
 		return ""
 	}
 
-	// Pick line number
+	// The left side shows the old numbering, the right the new.
 	num := dl.OldNum
 	if !isLeft {
 		num = dl.NewNum
 	}
-	numStr := fmtLineNum(num)
 
-	// Style selection
-	indicator := " "
-	var bgColor string
-	var numStyle lipgloss.Style
-	var indStyle lipgloss.Style
-	var bgStyle lipgloss.Style
+	ls := stylesFor(*dl, styles, t)
+	nums := ls.num.Render(fmtLineNum(num, g.numW))
+	prefix := ls.ind.Render(ls.indicator + " ")
 
-	switch dl.Type {
-	case LineAdded:
-		indicator = "+"
-		bgColor = t.AddedBg
-		numStyle = styles.DiffLineNumAdded
-		indStyle = styles.DiffAdded
-		bgStyle = styles.DiffAddedBg
-	case LineRemoved:
-		indicator = "-"
-		bgColor = t.RemovedBg
-		numStyle = styles.DiffLineNumRemoved
-		indStyle = styles.DiffRemoved
-		bgStyle = styles.DiffRemovedBg
-	default:
-		numStyle = styles.DiffLineNum
-		indStyle = styles.DiffContext
-		bgStyle = lipgloss.NewStyle()
-	}
-
-	nums := numStyle.Render(numStr)
-	highlighted := highlightLine(dl.Content, filename, bgColor)
-	prefix := indStyle.Render(indicator + " ")
-
-	codeWidth := max(0, panelW-splitLineNumWidth-3)
-	contentWidth := lipgloss.Width(prefix) + lipgloss.Width(highlighted)
+	codeWidth := max(0, g.width-g.numW-1)
+	code := renderCode(*dl, filename, ls, codeWidth-lipgloss.Width(prefix))
 	padding := ""
-	if pad := codeWidth - contentWidth; pad > 0 {
-		padding = bgStyle.Render(strings.Repeat(" ", pad))
+	if pad := codeWidth - lipgloss.Width(prefix) - lipgloss.Width(code); pad > 0 {
+		padding = ls.bg.Render(strings.Repeat(" ", pad))
 	}
 
-	return nums + " " + prefix + highlighted + padding
+	return nums + " " + prefix + code + padding
 }

@@ -29,6 +29,10 @@ type Styles struct {
 	DiffLineNum        lipgloss.Style
 	DiffLineNumAdded   lipgloss.Style
 	DiffLineNumRemoved lipgloss.Style
+	// Trailing whitespace on a changed line, one variant per line background
+	// so the marker sits on the line rather than over it.
+	WhitespaceAdded   lipgloss.Style
+	WhitespaceRemoved lipgloss.Style
 
 	// Chrome — dim structure, so content stands out against it.
 	Chrome          lipgloss.Style
@@ -104,6 +108,12 @@ func NewStyles(t theme.Theme) Styles {
 			Background(lipgloss.Color(t.AddedBg)),
 		DiffLineNumRemoved: lipgloss.NewStyle().
 			Foreground(lipgloss.Color(t.LineNumRemovedFg)).
+			Background(lipgloss.Color(t.RemovedBg)),
+		WhitespaceAdded: lipgloss.NewStyle().
+			Foreground(lipgloss.Color(t.WhitespaceFg)).
+			Background(lipgloss.Color(t.AddedBg)),
+		WhitespaceRemoved: lipgloss.NewStyle().
+			Foreground(lipgloss.Color(t.WhitespaceFg)).
 			Background(lipgloss.Color(t.RemovedBg)),
 
 		Chrome: lipgloss.NewStyle().

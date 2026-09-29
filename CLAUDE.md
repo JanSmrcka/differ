@@ -162,6 +162,8 @@ github.com/spf13/cobra                # CLI
 ## Gotchas
 
 - **Chroma + lipgloss**: apply Chroma foreground colors token-by-token, keep diff background from line type. Chroma must not override background.
+- **Cut a line before highlighting it**, never after: the highlighted string is full of ANSI escapes and slicing it cuts one in half. `renderCode` is the one place a code line is cut, highlighted and marked, and both unified and split go through it — as they do through `stylesFor`, so the two views cannot drift apart again.
+- **Line-number width is per diff, not constant.** `geometry` carries it (sized from the largest number the diff mentions, never below `lineNumWidth`) along with the room the row has. Row renderers take it as one value so the next piece of layout does not add another int to five signatures.
 - **Terminal width**: always respect `tea.WindowSizeMsg`. File list panel fixed ~35 chars (`fileListWidth`), diff gets the rest.
 - **Viewport**: call `viewport.SetContent()` on content change, `viewport.GotoTop()` on file switch.
 - **Unicode width**: use `lipgloss.Width()` not `len()`. In a test, `strings.Index` gives a *byte* offset — measuring a column means `lipgloss.Width(row[:i])`, because the gutter glyphs are multi-byte.

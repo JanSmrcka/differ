@@ -13,6 +13,10 @@ type Theme struct {
 	RemovedBg string
 	HunkFg    string
 
+	// WhitespaceFg draws the marker standing in for trailing whitespace on a
+	// changed line. It has to be legible against both diff backgrounds.
+	WhitespaceFg string
+
 	// Line numbers
 	LineNumFg        string
 	LineNumAddedFg   string
@@ -83,6 +87,8 @@ func DarkTheme() Theme {
 		RemovedBg: "#3b1d2e",
 		HunkFg:    "#6c5ce7",
 
+		WhitespaceFg: "#f38ba8",
+
 		LineNumFg:        "#585b70",
 		LineNumAddedFg:   "#a6e3a1",
 		LineNumRemovedFg: "#f38ba8",
@@ -136,6 +142,8 @@ func LightTheme() Theme {
 		RemovedFg: "#d20f39",
 		RemovedBg: "#fde4e8",
 		HunkFg:    "#1e66f5",
+
+		WhitespaceFg: "#d20f39",
 
 		LineNumFg:        "#9ca0b0",
 		LineNumAddedFg:   "#1a7f2a",
