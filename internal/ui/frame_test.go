@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/jansmrcka/differ/internal/testutil"
 )
 
@@ -203,5 +204,162 @@ func TestResponsive_TheWallIsExactlyWhereTheMinimumSays(t *testing.T) {
 		if got := strings.Contains(m.View(), wall); got != tc.blocked {
 			t.Errorf("%dx%d: blocked=%v, want %v", tc.w, tc.h, got, tc.blocked)
 		}
+	}
+}
+
+// The frame's other dimension. The guard above only counted rows, so the width
+// analogue of the same bug went unnoticed: the comment textarea is sized once,
+// when the editor opens, and handleResize rebuilt the viewport and the branch
+// filter but never it. lipgloss.JoinVertical pads every row of the frame to the
+// widest one, so a 149-column textarea made all thirty rows 149 columns wide in
+// a 120-column terminal.
+func TestFrame_NarrowingWithTheCommentEditorOpenKeepsTheFrameInside(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("src.ts", "one\ntwo\n", "first")
+	tr.Modify("src.ts", "one\nchanged\n")
+
+	for _, tc := range []struct{ from, to [2]int }{
+		{[2]int{200, 50}, [2]int{120, 30}},
+		{[2]int{200, 50}, [2]int{80, 24}},
+		{[2]int{120, 30}, [2]int{80, 24}},
+		{[2]int{80, 24}, [2]int{40, 8}},
+	} {
+		m := liveModel(t, tr)
+		m = settle(t, m, tea.WindowSizeMsg{Width: tc.from[0], Height: tc.from[1]})
+		m.mode = modeReview
+		updated, _ := m.startComment()
+		m = updated.(Model)
+		m = settle(t, m, tea.WindowSizeMsg{Width: tc.to[0], Height: tc.to[1]})
+
+		for i, row := range strings.Split(m.View(), "\n") {
+			if w := lipgloss.Width(row); w > tc.to[0] {
+				t.Errorf("%v -> %v: row %d is %d wide", tc.from, tc.to, i, w)
+				break
+			}
+		}
+	}
+}
+
+// minSplitWidth has to be enforced, not merely declared — which is what the
+// issue says went wrong the first time. The monotonicity test cannot see this:
+// dropping the width floor leaves the predicate monotone in width, so split
+// would engage on a 45-column diff panel (two 22-column halves) and every test
+// would still pass.
+func TestResponsive_SplitNeedsAHalfWideEnoughToRead(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("src.ts", "one\ntwo\n", "first")
+	tr.Modify("src.ts", "one\nchanged\n")
+
+	for _, tc := range []struct {
+		width int
+		split bool
+	}{
+		{72, false}, // two panels, but a 45-column diff
+		{86, false}, // still under the floor
+		{87, true},  // 87 - 24 - 3 = 60, exactly minSplitWidth
+		{120, true},
+	} {
+		m := liveModel(t, tr)
+		m.splitDiff = true
+		m = settle(t, m, tea.WindowSizeMsg{Width: tc.width, Height: 24})
+		m = settle(t, m, key("enter"))
+
+		if m.renderer == nil {
+			t.Fatalf("%d cols: no renderer", tc.width)
+		}
+		if got := m.renderer.split; got != tc.split {
+			t.Errorf("%d cols: diff panel is %d wide, split=%v, want %v",
+				tc.width, m.diffWidth(), got, tc.split)
+		}
+	}
+}
+
+// The panel can change width without the terminal changing size at all: with
+// no files the layout is one panel, so the last file going away widens the
+// diff. fitViewport only watched the height, so the viewport kept the old
+// width and every row rendered to the wrong size.
+func TestResponsive_TheViewportFollowsAWidthChangeWithoutAResize(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("src.ts", "one\n", "first")
+	tr.Modify("src.ts", "two\n")
+
+	m := settle(t, liveModel(t, tr), tea.WindowSizeMsg{Width: 120, Height: 24})
+	narrow := m.viewport.Width
+	if narrow != m.diffWidth() {
+		t.Fatalf("viewport is %d but the panel is %d", narrow, m.diffWidth())
+	}
+
+	// The changeset empties with no resize at all.
+	m.files = nil
+	m = m.fitViewport()
+
+	if m.viewport.Width == narrow {
+		t.Errorf("the viewport stayed %d wide after the panel became %d", narrow, m.diffWidth())
+	}
+	if m.viewport.Width != m.diffWidth() {
+		t.Errorf("viewport is %d, panel is %d", m.viewport.Width, m.diffWidth())
+	}
+}
+
+// The picker has to be drawn in a collapsed layout too, at the width it
+// actually has.
+func TestThemePicker_IsDrawnWhenTheLayoutHasCollapsed(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("src.ts", "one\n", "first")
+	tr.Modify("src.ts", "two\n")
+
+	m := settle(t, liveModel(t, tr), tea.WindowSizeMsg{Width: 64, Height: 24})
+	if !m.onePanel() {
+		t.Fatal("64 columns should be a collapsed layout")
+	}
+	m, _ = m.openThemePicker()
+	view := m.View()
+
+	if !strings.Contains(view, "theme") {
+		t.Errorf("the picker is not drawn when collapsed:\n%s", view)
+	}
+	// It has the whole panel, so the rows should use it rather than a slice.
+	widest := 0
+	for _, row := range strings.Split(view, "\n") {
+		if w := lipgloss.Width(row); w > widest {
+			widest = w
+		}
+	}
+	if widest != m.width {
+		t.Errorf("the collapsed picker is %d wide in a %d-column terminal", widest, m.width)
+	}
+}
+
+// listWidth() depends on the file count, so the panels can change width with
+// no WindowSizeMsg at all — and the branch filter, sized once, then wrapped
+// onto a second row and ate a row of the branch list.
+func TestResponsive_TheBranchFilterFollowsTheChangesetToo(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("src.ts", "one\n", "first")
+
+	// A clean tree: one panel, so the list is the whole terminal.
+	m := settle(t, liveModel(t, tr), tea.WindowSizeMsg{Width: 120, Height: 24})
+	if len(m.files) != 0 {
+		t.Fatalf("expected a clean tree, got %d files", len(m.files))
+	}
+	wide := m.branchFilter.Width
+
+	// A file appears, with no resize: the layout becomes two panels.
+	tr.Modify("src.ts", "two\n")
+	m = settle(t, m, m.refreshFilesCmd()())
+	if len(m.files) == 0 {
+		t.Fatal("the refresh found no files")
+	}
+
+	if m.branchFilter.Width == wide {
+		t.Errorf("the filter stayed %d wide after the list became %d", wide, m.listWidth())
+	}
+	if got, want := m.branchFilter.Width, m.listWidth()-8; got != want {
+		t.Errorf("filter is %d, want %d", got, want)
 	}
 }

@@ -242,10 +242,24 @@ func TestResponsive_NoColorReallyRemovesTheColour(t *testing.T) {
 	if plain != stripANSI(plain) {
 		t.Errorf("--no-color still emitted escapes:\n%q", plain)
 	}
-	// And the distinctions survive as glyphs.
+	// And the distinctions survive as glyphs — on the code rows. Asserting over
+	// the whole diff is satisfied by the hunk header's "-1,2 +1,2", which is
+	// exactly the defect this test was written to replace; I reproduced it.
+	var code []string
+	for _, row := range strings.Split(plain, "\n") {
+		if !strings.Contains(row, strings.Repeat(horizontalRule, hunkRuleWidth)) && strings.TrimSpace(row) != "" {
+			code = append(code, row)
+		}
+	}
 	for _, want := range []string{"+", "-"} {
-		if !strings.Contains(plain, want) {
-			t.Errorf("without colour the diff does not mark %q:\n%s", want, plain)
+		found := false
+		for _, row := range code {
+			if strings.Contains(row, want) {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("without colour no code row marks %q:\n%s", want, strings.Join(code, "\n"))
 		}
 	}
 }
