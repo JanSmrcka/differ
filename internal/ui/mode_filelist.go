@@ -7,6 +7,9 @@ import tea "github.com/charmbracelet/bubbletea"
 func (m Model) updateFileListMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m.statusMsg = ""
 	if msg.String() == "P" {
+		// Disarm the other one here, not below: this block returns before
+		// reaching the shared resets, so F, P, F used to pull.
+		m.pullConfirm = false
 		if m.pushConfirm {
 			m.pushConfirm = false
 			m.statusMsg = "pushing..."
@@ -32,6 +35,7 @@ func (m Model) updateFileListMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// same way push does. It used to go straight through, while the help said
 	// it would ask — the keymap now marks both, and a test holds them to it.
 	if msg.String() == "F" {
+		m.pushConfirm = false
 		if m.pullConfirm {
 			m.pullConfirm = false
 			m.statusMsg = "pulling..."

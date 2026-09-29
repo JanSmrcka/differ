@@ -1,9 +1,11 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"runtime/debug"
+	"strings"
 
 	"github.com/jansmrcka/differ/internal/config"
 	"github.com/jansmrcka/differ/internal/git"
@@ -18,7 +20,13 @@ var version = "dev"
 
 // usageError marks a failure that is the command line's fault rather than the
 // repository's, so Execute can exit 2 for it and 1 for everything else.
-type usageError struct{ err error }
+//
+// It carries the command that failed: a bad flag on `differ log` has to print
+// log's usage, not the root's, which lists flags log does not accept.
+type usageError struct {
+	cmd *cobra.Command
+	err error
+}
 
 func (e usageError) Error() string { return e.err.Error() }
 func (e usageError) Unwrap() error { return e.err }
@@ -121,7 +129,7 @@ func init() {
 // code: 0 success, 1 a runtime problem, 2 a bad command line.
 func Execute() {
 	rootCmd.SetFlagErrorFunc(func(c *cobra.Command, err error) error {
-		return usageError{err}
+		return usageError{cmd: c, err: err}
 	})
 
 	err := rootCmd.Execute()
@@ -130,21 +138,39 @@ func Execute() {
 	}
 
 	var ue usageError
-	if asUsageError(err, &ue) {
-		fmt.Fprintf(os.Stderr, "differ: %v\n\n", ue.err)
-		_ = rootCmd.Usage()
-		os.Exit(exitUsage)
+	switch {
+	case errors.As(err, &ue):
+		reportUsage(ue.cmd, ue.err)
+	case isUnknownCommand(err):
+		// Cobra reports this itself rather than through FlagErrorFunc, but a
+		// command that does not exist is still a bad command line, not a
+		// problem with the repository.
+		reportUsage(rootCmd, err)
+	default:
+		fmt.Fprintf(os.Stderr, "differ: %v\n", err)
+		os.Exit(exitRuntime)
 	}
-	fmt.Fprintf(os.Stderr, "differ: %v\n", err)
-	os.Exit(exitRuntime)
 }
 
-func asUsageError(err error, target *usageError) bool {
-	ue, ok := err.(usageError)
-	if ok {
-		*target = ue
+// reportUsage prints the concise line, then the usage of the command that
+// actually failed.
+func reportUsage(c *cobra.Command, err error) {
+	if c == nil {
+		c = rootCmd
 	}
-	return ok
+	fmt.Fprintf(os.Stderr, "differ: %v\n\n", err)
+	c.SetOut(os.Stderr)
+	_ = c.Usage()
+	os.Exit(exitUsage)
+}
+
+// isUnknownCommand spots cobra's own wording for a command it does not have.
+// There is no sentinel error to match on, which is why this reads the text.
+func isUnknownCommand(err error) bool {
+	msg := err.Error()
+	return strings.HasPrefix(msg, "unknown command") ||
+		strings.HasPrefix(msg, "unknown flag") ||
+		strings.HasPrefix(msg, "unknown shorthand flag")
 }
 
 func resolveTheme(cfg config.Config) theme.Theme {

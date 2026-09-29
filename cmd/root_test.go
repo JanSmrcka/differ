@@ -188,3 +188,38 @@ func TestCLI_NothingIsPrintedBeforeTheTUI(t *testing.T) {
 		t.Errorf("stdout before the TUI: %q", got.stdout)
 	}
 }
+
+// A flag error on a subcommand must show that subcommand's usage. It used to
+// print the root's, including flags the subcommand does not accept.
+func TestCLI_ASubcommandsFlagErrorShowsItsOwnUsage(t *testing.T) {
+	t.Parallel()
+	got := runCLI(t, notARepo(t), "log", "--bogus")
+
+	if got.code != 2 {
+		t.Errorf("exited %d, want 2", got.code)
+	}
+	if !strings.Contains(got.stderr, "differ log") {
+		t.Errorf("usage is not the subcommand's:\n%s", got.stderr)
+	}
+	for _, unwanted := range []string{"--commit", "--staged"} {
+		if strings.Contains(got.stderr, unwanted) {
+			t.Errorf("usage offers %q, which log does not accept:\n%s", unwanted, got.stderr)
+		}
+	}
+}
+
+// An unknown subcommand is a bad command line, so it exits 2 like any other.
+func TestCLI_AnUnknownSubcommandIsAUsageError(t *testing.T) {
+	t.Parallel()
+	got := runCLI(t, notARepo(t), "lgo")
+
+	if got.code != 2 {
+		t.Errorf("exited %d, want 2 for an unknown command", got.code)
+	}
+	if !strings.Contains(got.stderr, "lgo") {
+		t.Errorf("the error does not name the command:\n%s", got.stderr)
+	}
+	if !strings.Contains(got.stderr, "Usage:") {
+		t.Errorf("an unknown command should show usage:\n%s", got.stderr)
+	}
+}

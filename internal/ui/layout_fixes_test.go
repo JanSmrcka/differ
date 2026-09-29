@@ -371,8 +371,11 @@ func TestCommandBar_TruncatesRatherThanWrapping(t *testing.T) {
 					t.Errorf("mode %d at width %d: a row is %d columns:\n%s", mode, width, w, bar)
 				}
 			}
-			if !strings.Contains(bar, "quit") {
-				t.Errorf("mode %d at width %d dropped quit:\n%s", mode, width, bar)
+			// Every bar keeps a way out, whatever the width. In the branch
+			// picker that is esc rather than quit: q there is a character
+			// typed into the filter, so the bar does not offer it.
+			if !strings.Contains(bar, "quit") && !strings.Contains(bar, "close") {
+				t.Errorf("mode %d at width %d offers no way out:\n%s", mode, width, bar)
 			}
 		}
 	}

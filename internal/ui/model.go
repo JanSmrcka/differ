@@ -273,6 +273,9 @@ func filesEqual(a, b []fileItem) bool {
 // StartInReviewMode opens straight into review, for `differ review`.
 func (m *Model) StartInReviewMode() {
 	if len(m.files) == 0 {
+		// Falling back to the file list silently leaves no sign that review
+		// was asked for at all. enterReviewMode says the same thing.
+		m.statusMsg = "nothing to review"
 		return
 	}
 	m.mode = modeReview

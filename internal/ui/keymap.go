@@ -73,7 +73,10 @@ func keymapFor(mode viewMode) []binding {
 		return []binding{
 			// No key of its own: any printable character goes to the filter.
 			{Label: "type", Desc: "filter", Help: "type to narrow the list", Bar: true},
-			{Keys: []string{"enter"}, Desc: "switch", Help: "check out the selected branch", Bar: true, Confirm: true},
+			// Not marked as asking twice: git refuses a checkout that would
+			// overwrite local changes, so there is nothing to lose to a
+			// single press. The overlay said it asked again, and it did not.
+			{Keys: []string{"enter"}, Desc: "switch", Help: "check out the selected branch", Bar: true},
 			{Keys: []string{"up", "ctrl+k"}, Label: "↑/^k", Desc: "up", Help: "move up the list", Bar: true},
 			{Keys: []string{"down", "ctrl+j"}, Label: "↓/^j", Desc: "down", Help: "move down the list", Bar: true},
 			{Keys: []string{"ctrl+n"}, Label: "^n", Desc: "new", Help: "create a branch from the current HEAD", Bar: true},

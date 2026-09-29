@@ -1,6 +1,7 @@
 package ui
 
 import (
+	tea "github.com/charmbracelet/bubbletea"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -255,7 +256,7 @@ func TestKeymap_EveryModeOffersAnExit(t *testing.T) {
 func TestKeymap_ConfirmedCommandsReallyAskTwice(t *testing.T) {
 	for mode, fn := range handlerFor {
 		for _, b := range keymapFor(mode) {
-			if !b.Confirm || len(b.Keys) == 0 || b.Keys[0] == "enter" {
+			if !b.Confirm || len(b.Keys) == 0 {
 				continue
 			}
 			k := b.Keys[0]
@@ -354,4 +355,27 @@ func sectionTable(t *testing.T, readme, heading string) []string {
 		}
 	}
 	return keys
+}
+
+// Confirmation flags must not leave each other armed: a destructive action
+// firing after a different key was pressed in between is exactly what the
+// two-press pattern exists to prevent.
+func TestKeymap_ConfirmationsDisarmEachOther(t *testing.T) {
+	base := func() Model {
+		m := newTestModel(t, []fileItem{{change: git.FileChange{Path: "a.go", Status: git.StatusModified}}})
+		m.upstream = git.UpstreamInfo{Upstream: "origin/master"}
+		return m
+	}
+	for _, seq := range [][]string{{"P", "F", "P"}, {"F", "P", "F"}, {"P", "j", "P"}, {"F", "j", "F"}} {
+		m := base()
+		var cmd tea.Cmd
+		for _, k := range seq {
+			var u tea.Model
+			u, cmd = m.updateFileListMode(key(k))
+			m = u.(Model)
+		}
+		if cmd != nil {
+			t.Errorf("%v acted on the last press; another key should have disarmed it", seq)
+		}
+	}
 }

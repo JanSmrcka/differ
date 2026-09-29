@@ -156,3 +156,69 @@ func TestCommandBar_ShowsWhatTheKeymapMarksForIt(t *testing.T) {
 		}
 	}
 }
+
+// The overlay swallowed every key it did not handle, ctrl+c included — while
+// printing "quit immediately" next to it.
+func TestHelpOverlay_CtrlCStillQuits(t *testing.T) {
+	m := barModel(t, 120)
+	m.mode = modeFileList
+	m.showHelp = true
+
+	// Not key("ctrl+c"): that helper only builds single runes and silently
+	// returns KeyDown for anything longer, which is how I first "confirmed"
+	// this bug while actually sending the wrong key.
+	_, cmd := m.routeKey(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if cmd == nil {
+		t.Fatal("ctrl+c did nothing with the overlay open")
+	}
+	if _, ok := cmd().(tea.QuitMsg); !ok {
+		t.Error("ctrl+c should quit with the overlay open")
+	}
+}
+
+// Where keys go into an input, ? and q are characters, not commands — so the
+// bar must not offer them.
+func TestCommandBar_DoesNotOfferKeysThatGoIntoAnInput(t *testing.T) {
+	m := barModel(t, 120)
+	m.mode = modeBranchPicker
+
+	bar := m.renderCommandBar()
+	for _, unwanted := range []string{"help", "quit"} {
+		if strings.Contains(bar, unwanted) {
+			t.Errorf("the branch picker bar offers %q, which types into the filter:\n%s", unwanted, bar)
+		}
+	}
+	// It still has to say how to get out.
+	if !strings.Contains(bar, "close") {
+		t.Errorf("the branch picker bar offers no way out:\n%s", bar)
+	}
+}
+
+// The bar hides commands that would do nothing; the overlay was still listing
+// them.
+func TestHelpOverlay_HidesCommandsThatWouldDoNothing(t *testing.T) {
+	m := barModel(t, 120)
+	m.mode = modeFileList
+	m.stagedOnly = true
+
+	overlay := m.renderHelpOverlay(m.width, 30)
+	for _, unwanted := range []string{"stage every change", "stage or unstage"} {
+		if strings.Contains(overlay, unwanted) {
+			t.Errorf("the overlay offers %q while looking at the index:\n%s", unwanted, overlay)
+		}
+	}
+}
+
+// A bar with nothing pinned renders nothing once the terminal is narrow
+// enough, which is how the first fix for the branch picker left it.
+func TestCommandBar_NeverRendersEmpty(t *testing.T) {
+	for _, width := range []int{40, 50, 60, 80} {
+		m := barModel(t, width)
+		for _, mode := range []viewMode{modeFileList, modeDiff, modeReview, modeBranchPicker, modeCommit} {
+			m.mode = mode
+			if bar := strings.TrimSpace(stripANSI(m.renderCommandBar())); bar == "" {
+				t.Errorf("width %d mode %v: the bar is empty", width, mode)
+			}
+		}
+	}
+}

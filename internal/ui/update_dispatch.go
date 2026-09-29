@@ -71,6 +71,10 @@ func (m Model) routeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// diff the user cannot see.
 	if !m.typing() {
 		switch msg.String() {
+		case "ctrl+c":
+			// Listed in the overlay as "quit immediately", so it has to work
+			// there too — the early return below used to swallow it.
+			return m, tea.Quit
 		case "?":
 			m.showHelp = !m.showHelp
 			return m, nil

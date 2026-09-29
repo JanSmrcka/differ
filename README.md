@@ -50,9 +50,11 @@ A runtime failure prints one line and no usage block.
 
 ## Keyboard Shortcuts
 
-Press `?` in any view for the full list of its keys. The bar along the bottom
-shows the common ones for wherever you are, and hides what would not do
-anything — `send` only appears once a comment is waiting.
+Press `?` for the full list of the current view's keys — anywhere except the
+branch filter and the commit message, where every character is text rather
+than a command. The bar along the bottom shows the common ones for wherever
+you are, and hides what would not do anything: `send` appears only once a
+comment is waiting, `stage` disappears under `-s` or `-r`.
 
 The tables below are checked against the code: a test fails if a key here has
 no handler, or a handler is missing from here.

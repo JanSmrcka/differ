@@ -39,8 +39,10 @@ func (m Model) View() string {
 	// The help overlay takes the panel area rather than sitting under it, so
 	// the layout's height does not change while it is open and the diff
 	// viewport is exactly where it was when it closes.
-	body := m.renderHelpOverlay(m.width, contentH)
-	if !m.showHelp {
+	var body string
+	if m.showHelp {
+		body = m.renderHelpOverlay(m.width, contentH)
+	} else {
 		left := padLines(m.leftPanel(), contentH)
 		right := padLines(m.rightPanel(), contentH)
 		rows := make([]string, contentH)

@@ -165,3 +165,24 @@ func TestTruncateEnd(t *testing.T) {
 		})
 	}
 }
+
+// `differ review` in a clean repository used to open the plain file list with
+// no sign that review had been asked for and skipped. enterReviewMode says
+// "nothing to review"; this has to as well.
+func TestStartInReviewMode_SaysSoWhenThereIsNothingToReview(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("a.txt", "one\n", "only commit")
+	m := liveModel(t, tr)
+	if len(m.files) != 0 {
+		t.Skipf("expected a clean repo, got %d files", len(m.files))
+	}
+
+	m.StartInReviewMode()
+	if m.mode == modeReview {
+		t.Error("review mode opened with nothing to review")
+	}
+	if m.statusMsg == "" {
+		t.Error("nothing was said about review being skipped")
+	}
+}

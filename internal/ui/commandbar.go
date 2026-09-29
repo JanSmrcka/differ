@@ -62,37 +62,63 @@ func (m Model) bindingApplies(b binding) bool {
 // renderCommandBar is the one-line footer of available commands.
 //
 // It is always exactly one row. Where it does not fit, items are dropped from
-// the middle rather than wrapped, and the two that get the user out — help and
-// quit — are kept whatever the width.
+// the end of the list rather than wrapped, so the most important survive; the
+// pinned tail — help and quit — is kept whatever the width.
 func (m Model) renderCommandBar() string {
 	if m.width <= 0 {
 		return ""
 	}
 	items := m.barBindings()
 
-	// Help and quit are pinned to the end and never dropped.
+	// Help and quit are pinned to the end and never dropped — but only where
+	// they are keys at all. In the branch picker and the commit input every
+	// character goes into the field, so advertising ? and q there would be
+	// advertising two ways to type a letter.
 	var head, tail []string
 	for _, b := range items {
-		if b.Desc == "quit" {
-			continue
+		switch {
+		case b.Desc == "quit":
+			// Pinned below rather than dropped with the rest.
+		case m.typing() && isExit(b):
+			// This mode's way out is what gets pinned instead.
+		default:
+			head = append(head, m.renderBarItem(b))
 		}
-		head = append(head, m.renderBarItem(b))
 	}
-	for _, b := range globalBindings() {
-		if b.Bar {
-			tail = append(tail, m.renderBarItem(b))
+	if m.typing() {
+		// ? and q are characters here, so the pinned item is whatever closes
+		// the input. Something has to be pinned: a bar with an empty tail
+		// renders nothing at all once the terminal is narrow enough.
+		for _, b := range items {
+			if isExit(b) {
+				tail = append(tail, m.renderBarItem(b))
+				break
+			}
 		}
+	} else {
+		for _, b := range globalBindings() {
+			if b.Bar {
+				tail = append(tail, m.renderBarItem(b))
+			}
+		}
+		tail = append(tail, m.renderBarItem(binding{Keys: []string{"q"}, Desc: "quit"}))
 	}
-	tail = append(tail, m.renderBarItem(binding{Keys: []string{"q"}, Desc: "quit"}))
 
 	return m.renderBar(lipgloss.NewStyle(), " "+fitBarItems(head, tail, m.width-1))
+}
+
+// isExit spots the binding that leaves the current view, which is the one the
+// bar must never drop.
+func isExit(b binding) bool {
+	return len(b.Keys) > 0 && b.Keys[0] == "esc"
 }
 
 func (m Model) renderBarItem(b binding) string {
 	return m.styles.HelpKey.Render(b.label()) + " " + m.styles.HelpDesc.Render(b.Desc)
 }
 
-// fitBarItems joins as many head items as fit, always keeping the tail.
+// fitBarItems joins as many leading head items as fit, always keeping the
+// tail. The keymap's order is therefore its priority order.
 func fitBarItems(head, tail []string, width int) string {
 	fixed := strings.Join(tail, barSeparator)
 	for n := len(head); n > 0; n-- {
@@ -117,6 +143,12 @@ func (m Model) renderHelpOverlay(width, height int) string {
 	for _, b := range append(keymapFor(m.mode), globalBindings()...) {
 		if b.Desc == "" && b.Help == "" {
 			continue // an alias row, already covered by its label
+		}
+		// The same filter the bar uses. Listing a command here that would
+		// return early is the dead control the bar exists to avoid, just
+		// moved somewhere less visible.
+		if !m.bindingApplies(b) {
+			continue
 		}
 		key := m.styles.HelpKey.Render(padTo(" "+b.label(), 14))
 		text := b.help()
