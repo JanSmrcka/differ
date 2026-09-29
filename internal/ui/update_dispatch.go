@@ -47,6 +47,8 @@ func (m Model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleBranchSwitched(msg)
 	case branchCreatedMsg:
 		return m.handleBranchCreated(msg)
+	case repoProbedMsg:
+		return m.handleRepoProbed(msg)
 	case upstreamStatusMsg:
 		m.upstream = msg.info
 		return m, nil

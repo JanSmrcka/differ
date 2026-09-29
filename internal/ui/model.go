@@ -29,7 +29,12 @@ const (
 )
 
 const fileListWidth = 35
-const pollInterval = 2 * time.Second
+
+// How often the repository is probed. It used to be two seconds because each
+// tick cost eight git processes; the probe costs one, so asking twice as often
+// is still four times cheaper than what it replaced — and a change now shows up
+// in about a second rather than two.
+const pollInterval = 1 * time.Second
 
 const (
 	minWidth  = 60
@@ -91,6 +96,12 @@ type branchesLoadedMsg struct {
 type branchSwitchedMsg struct{ err error }
 
 type upstreamStatusMsg struct{ info git.UpstreamInfo }
+
+// repoProbedMsg carries the answer to "did anything move?".
+type repoProbedMsg struct {
+	fingerprint string
+	err         error
+}
 type pushDoneMsg struct{ err error }
 type pullDoneMsg struct{ err error }
 type savePrefDoneMsg struct{ err error }
@@ -109,6 +120,9 @@ type Model struct {
 	// a rewritten file from an untouched one.
 	files    []fileItem
 	fileKeys map[string]string
+	// The last probe's fingerprint. An equal one means the tick can stop
+	// without asking git anything else.
+	repoFingerprint string
 	// fileOffset is the first file on screen. The list is taller than the
 	// panel in any real agent changeset, so without it the files past the
 	// panel height were unreachable.

@@ -114,7 +114,42 @@ func (m Model) handleTick() (tea.Model, tea.Cmd) {
 	if m.mode == modeCommit || m.mode == modeBranchPicker || m.generatingMsg {
 		return m, tickCmd()
 	}
-	return m, tea.Batch(m.refreshFilesCmd(), m.fetchUpstreamStatusCmd(), tickCmd())
+	// One question — "did anything move?" — instead of eight answers nobody
+	// asked for. The refresh happens in handleRepoProbed, and only if it did.
+	return m, tea.Batch(m.probeCmd(), tickCmd())
+}
+
+// probeCmd asks git for the repository's fingerprint, off the update loop.
+func (m Model) probeCmd() tea.Cmd {
+	repo := m.repo
+	return func() tea.Msg {
+		fingerprint, err := repo.Probe()
+		return repoProbedMsg{fingerprint: fingerprint, err: err}
+	}
+}
+
+// handleRepoProbed does the expensive work, but only when the probe says the
+// repository actually moved.
+//
+// A burst of writes is coalesced by the interval itself: whatever an agent does
+// between two probes becomes one refresh, however many files it touched.
+func (m Model) handleRepoProbed(msg repoProbedMsg) (tea.Model, tea.Cmd) {
+	if msg.err != nil {
+		// The probe is an optimisation, never a gate. A repository mid-rebase,
+		// a vanished git binary or an unreadable index must cost the user a
+		// wasted refresh, not a screen that has quietly stopped updating.
+		return m, m.refreshEverythingCmd()
+	}
+	if msg.fingerprint == m.repoFingerprint {
+		return m, nil
+	}
+	m.repoFingerprint = msg.fingerprint
+	return m, m.refreshEverythingCmd()
+}
+
+// refreshEverythingCmd is what a tick used to do unconditionally.
+func (m Model) refreshEverythingCmd() tea.Cmd {
+	return tea.Batch(m.refreshFilesCmd(), m.fetchUpstreamStatusCmd())
 }
 
 func (m Model) handlePushDone(msg pushDoneMsg) (tea.Model, tea.Cmd) {

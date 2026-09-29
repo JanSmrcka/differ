@@ -207,6 +207,25 @@ way to the status bar rather than handing `describe` an error built by hand.
 - **An underline breaks a grapheme cluster's width.** Lipgloss re-styles run by run when `Underline` is set, which puts an escape between the runes of a ZWJ emoji or a flag — `lipgloss.Width` then measures it as two glyphs instead of one and the row overshoots its budget. `UnderlineSpaces(false)` does not help. Use a background for emphasis inside a line.
 - **Every row ends at the panel width.** `clipRow` is the last guard in all three row renderers, because the column budget cannot be satisfied at every width — the line-number block alone is wider than a 10-column panel. A test sweeps widths 1-120 in both views.
 - **Line-number width is per diff, not constant.** `geometry` carries it (sized from the largest number the diff mentions, never below `lineNumWidth`) along with the room the row has. Row renderers take it as one value so the next piece of layout does not add another int to five signatures.
+- **The poll asks before it acts.** `Repo.Probe` is one `git status
+  --porcelain=v2 --branch --untracked-files=all -z`, and the tick does nothing
+  else unless its fingerprint moved. It used to rebuild everything every two
+  seconds — eight git processes, whatever had happened. Two things make the
+  probe complete: `--branch` carries `branch.oid`, `branch.head` and
+  `branch.ab`, so a commit, a checkout and a fetch move it without anyone
+  asking about the upstream separately; and each named path is `lstat`ed,
+  because status reports a modified file's *index* and *HEAD* object ids and
+  never hashes the working tree — so editing an already-modified file produces
+  byte-identical output. `--untracked-files=all` is not optional either: the
+  default collapses an untracked directory to one entry, and an edit inside it
+  would move neither the output nor the directory's mtime.
+- **Not a filesystem watcher, and this was measured.** `git --version` costs
+  13.6 ms on this machine against `git status`'s 15.6, so ~14 of every 16 ms is
+  starting the process, not doing the work. A watcher removes the ~2 ms and
+  keeps the ~14 for every refresh that does happen, in exchange for a
+  dependency, an fd per directory under kqueue on macOS, and a walk of the
+  whole tree to install the watches. The cost is processes; the fix is fewer of
+  them.
 - **Terminal width**: always respect `tea.WindowSizeMsg`. File list panel fixed ~35 chars (`fileListWidth`), diff gets the rest.
 - **Viewport**: call `viewport.SetContent()` on content change, `viewport.GotoTop()` on file switch.
 - **Unicode width**: use `lipgloss.Width()` not `len()`. In a test, `strings.Index` gives a *byte* offset — measuring a column means `lipgloss.Width(row[:i])`, because the gutter glyphs are multi-byte.
