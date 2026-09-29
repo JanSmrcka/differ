@@ -69,6 +69,17 @@ func highlightLine(content, filename, bgColor string) string {
 
 	var b strings.Builder
 	for _, token := range iterator.Tokens() {
+		// Chroma appends a newline to its input and coalesces it into the last
+		// token, so any token running to end of line carries one — the tail of
+		// an open block comment, an unterminated string, a CRLF line ending, a
+		// non-breaking space. Written out verbatim it makes one row of output
+		// into two, and the renderer addresses rows by index: DisplayRows then
+		// disagrees with Content, and RowFor points at the wrong row for
+		// everything below.
+		token.Value = strings.ReplaceAll(token.Value, "\n", "")
+		if token.Value == "" {
+			continue
+		}
 		entry := chromaStyle.Get(token.Type)
 		fg := tokenForeground(entry)
 		if fg != "" {

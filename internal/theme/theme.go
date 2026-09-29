@@ -13,6 +13,13 @@ type Theme struct {
 	RemovedBg string
 	HunkFg    string
 
+	// MarkFg draws the marks differ adds inside the code column: the stand-in
+	// for trailing whitespace, and the sign that a line was cut to fit. It is
+	// deliberately neutral — these are notes about the line, not part of the
+	// add/remove language — and has to be legible against both diff
+	// backgrounds.
+	MarkFg string
+
 	// Line numbers
 	LineNumFg        string
 	LineNumAddedFg   string
@@ -83,6 +90,8 @@ func DarkTheme() Theme {
 		RemovedBg: "#3b1d2e",
 		HunkFg:    "#6c5ce7",
 
+		MarkFg: "#9399b2",
+
 		LineNumFg:        "#585b70",
 		LineNumAddedFg:   "#a6e3a1",
 		LineNumRemovedFg: "#f38ba8",
@@ -136,6 +145,8 @@ func LightTheme() Theme {
 		RemovedFg: "#d20f39",
 		RemovedBg: "#fde4e8",
 		HunkFg:    "#1e66f5",
+
+		MarkFg: "#6c6f85",
 
 		LineNumFg:        "#9ca0b0",
 		LineNumAddedFg:   "#1a7f2a",

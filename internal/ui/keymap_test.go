@@ -335,16 +335,36 @@ func sectionTable(t *testing.T, readme, heading string) []string {
 		rest = rest[:j]
 	}
 
-	// Only the first column of a table row. Prose in the same section is full
-	// of backticks — `claude`, `--set-upstream`, the cursor glyph — and none
-	// of those are keys.
+	// Only the first column of a table headed "Key". Prose in the same section
+	// is full of backticks — `claude`, `--set-upstream` — and a section may
+	// hold other tables entirely, such as the diff view's two mark legends,
+	// whose first column is glyphs rather than keys.
 	var keys []string
-	for _, line := range strings.Split(rest, "\n") {
+	inKeyTable := false
+	lines := strings.Split(rest, "\n")
+	for i, line := range lines {
 		if !strings.HasPrefix(strings.TrimSpace(line), "|") {
+			inKeyTable = false
 			continue
 		}
 		cells := strings.Split(strings.Trim(strings.TrimSpace(line), "|"), "|")
 		if len(cells) < 2 {
+			continue
+		}
+		first := strings.TrimSpace(cells[0])
+		if isSeparatorRow(line) {
+			continue
+		}
+		// A header row is the one directly above the |---|---| separator, and
+		// its first cell decides whether the rows under it are keys. Spotting
+		// it by "no backticks in the first cell" looked equivalent and was
+		// not: the branch picker's first *data* row is `| type | filter |`,
+		// which silently turned that whole table off.
+		if i+1 < len(lines) && isSeparatorRow(lines[i+1]) {
+			inKeyTable = first == "Key"
+			continue
+		}
+		if !inKeyTable {
 			continue
 		}
 		for _, cell := range regexp.MustCompile("`([^`]+)`").FindAllStringSubmatch(cells[0], -1) {
@@ -420,6 +440,52 @@ func TestKeymap_TheGlobalKeysWorkInEveryMode(t *testing.T) {
 		}
 		if _, quit := cmd().(tea.QuitMsg); !quit {
 			t.Errorf("%s: ctrl+c did not quit", s.name)
+		}
+	}
+}
+
+// isSeparatorRow spots the |---|---| line under a markdown table's header.
+func isSeparatorRow(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	if !strings.HasPrefix(trimmed, "|") {
+		return false
+	}
+	cells := strings.Split(strings.Trim(trimmed, "|"), "|")
+	return len(cells) >= 2 && regexp.MustCompile(`^[-: ]+$`).MatchString(strings.TrimSpace(cells[0]))
+}
+
+// The README check is only as good as its parser, and a parser that reads a
+// section as zero keys passes every assertion in it. This pins what each
+// section actually yields.
+func TestKeymap_TheREADMEParserReadsEverySection(t *testing.T) {
+	t.Parallel()
+	readme, err := os.ReadFile(filepath.Join("..", "..", "README.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, section := range []struct {
+		heading string
+		want    string
+	}{
+		{"### File List", "tab"},
+		{"### Diff View", "}"},
+		{"### Review Mode", "C"},
+		{"### Commit Mode", "enter"},
+		{"### Branch Picker", "ctrl+n"},
+	} {
+		keys := sectionTable(t, string(readme), section.heading)
+		if len(keys) == 0 {
+			t.Errorf("%s reads as no keys at all — the parser is blind there", section.heading)
+			continue
+		}
+		found := false
+		for _, k := range keys {
+			if k == section.want {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("%s: parsed %v, which does not include %q", section.heading, keys, section.want)
 		}
 	}
 }

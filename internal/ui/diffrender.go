@@ -29,7 +29,10 @@ type DiffRenderer struct {
 	theme    theme.Theme
 	width    int
 
-	split    bool
+	split bool
+	// geom is the column arithmetic for this diff, sized once from its
+	// largest line number.
+	geom     geometry
 	tabWidth int
 	comments []review.Comment
 
@@ -65,6 +68,7 @@ func NewDiffRenderer(parsed ParsedDiff, filename string, styles Styles, t theme.
 	r := &DiffRenderer{
 		parsed: parsed, filename: filename, styles: styles,
 		theme: t, width: width, tabWidth: defaultTabWidth,
+		geom: diffGeometry(parsed, width),
 	}
 	r.render()
 	return r
@@ -125,12 +129,16 @@ func (r *DiffRenderer) render() {
 	byLine := r.byLine
 	r.rows = r.rows[:0]
 
+	// The number block is one column per side in split view and two in
+	// unified, and the comment indent is measured from it.
+	r.geom.split = r.split
+
 	if !r.split {
 		r.pairs = nil
 		for i, dl := range r.parsed.Lines {
 			r.rowOf[i] = len(r.rows)
 			r.rows = append(r.rows, displayRow{
-				text: renderDiffLineGutter(r.displayLine(dl), r.filename, r.styles, r.theme, r.width, r.gutterFor(byLine, i)),
+				text: renderDiffLineGutter(r.displayLine(dl), r.filename, r.styles, r.theme, r.geom, r.gutterFor(byLine, i)),
 				line: i, pair: -1,
 			})
 			r.appendCommentRows(byLine[i])
@@ -163,7 +171,10 @@ func (r *DiffRenderer) hasComment(byLine map[int][]review.Comment, idx int) bool
 func (r *DiffRenderer) appendCommentRows(cs []review.Comment) {
 	for _, c := range cs {
 		for _, text := range r.renderComment(c) {
-			r.rows = append(r.rows, displayRow{text: text, line: -1, pair: -1})
+			// A comment body is text the user typed, so it needs the same
+			// guard the code rows have: a long one wrapped and shifted every
+			// row below it.
+			r.rows = append(r.rows, displayRow{text: clipRow(text, r.width), line: -1, pair: -1})
 		}
 	}
 }
@@ -200,7 +211,7 @@ func (r *DiffRenderer) anchorIndex(c review.Comment) (int, bool) {
 
 // renderComment lays a comment out as indented rows under its anchor.
 func (r *DiffRenderer) renderComment(c review.Comment) []string {
-	indent := strings.Repeat(" ", gutterWidth+lineNumWidth*2+1)
+	indent := strings.Repeat(" ", gutterWidth+r.geom.numbersWidth())
 	bar := r.styles.CommentBar.Render(commentBar)
 
 	label := fmt.Sprintf("line %d", c.StartLine)
@@ -250,14 +261,25 @@ func (r *DiffRenderer) rowGutters(row splitRow, cursor int) (left, right string)
 }
 
 func (r *DiffRenderer) renderRow(row splitRow, leftGutter, rightGutter string) string {
+	// Two gutters and the separator between them come out of the panel, and
+	// the odd column left over goes to the right side — halving and doubling
+	// left a column of the panel unused at every even width, which then made
+	// the hunk rule one column longer than the code rows.
+	room := max(r.width-2*gutterWidth-verticalDividerWidth, 0)
+	leftG := geometry{numW: r.geom.numW, width: room / 2, split: true}
+	rightG := geometry{numW: r.geom.numW, width: room - room/2, split: true}
+
 	if row.left != nil && row.left.Type == LineHunkHeader {
-		return renderHunkLine(r.displayLine(*row.left), r.styles, r.width, leftGutter)
+		// The header spans the whole row, but its line-number stand-in has to
+		// match what a split row carries — one column of numbers, not two — or
+		// its text sits several columns right of the code it heads.
+		span := geometry{numW: r.geom.numW, width: r.width, split: true}
+		return renderHunkLine(r.displayLine(*row.left), r.styles, span, leftGutter)
 	}
-	panelW := (r.width - 2*gutterWidth - 1) / 2
-	left := renderSplitSide(r.displaySide(row.left), r.filename, r.styles, r.theme, panelW, true)
-	right := renderSplitSide(r.displaySide(row.right), r.filename, r.styles, r.theme, panelW, false)
-	sep := lipgloss.NewStyle().Foreground(lipgloss.Color(r.theme.BorderFg)).Render("│")
-	return leftGutter + left + sep + rightGutter + right
+	left := renderSplitSide(r.displaySide(row.left), r.filename, r.styles, r.theme, leftG, true)
+	right := renderSplitSide(r.displaySide(row.right), r.filename, r.styles, r.theme, rightG, false)
+	sep := lipgloss.NewStyle().Foreground(lipgloss.Color(r.theme.BorderFg)).Render(verticalDivider)
+	return clipRow(leftGutter+left+sep+rightGutter+right, r.width)
 }
 
 // displaySide expands tabs on one side of a split row, preserving nil.
@@ -293,7 +315,7 @@ func (r *DiffRenderer) renderCursorRow(row displayRow, cursor int) string {
 		lg, rg := r.rowGutters(r.pairs[row.pair], cursor)
 		return r.renderRow(r.pairs[row.pair], lg, rg)
 	case row.line >= 0:
-		return renderDiffLineGutter(r.displayLine(r.parsed.Lines[row.line]), r.filename, r.styles, r.theme, r.width, cursorGutter(r.styles))
+		return renderDiffLineGutter(r.displayLine(r.parsed.Lines[row.line]), r.filename, r.styles, r.theme, r.geom, cursorGutter(r.styles))
 	default:
 		return row.text
 	}

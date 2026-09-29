@@ -162,6 +162,11 @@ github.com/spf13/cobra                # CLI
 ## Gotchas
 
 - **Chroma + lipgloss**: apply Chroma foreground colors token-by-token, keep diff background from line type. Chroma must not override background.
+- **Cut a line before highlighting it**, never after: the highlighted string is full of ANSI escapes and slicing it cuts one in half. `renderCode` is the one place a code line is cut, highlighted and marked, and both unified and split go through it — as they do through `stylesFor`, so the two views cannot drift apart again.
+- **Cut with `lipgloss`, not with a rune slice.** `clipCode` and `clipRow` use `MaxWidth`, which understands escapes and is linear. The first version dropped one rune at a time and re-measured the whole prefix: 8.8 s for an 80,000-column line, inside `Update`. Slicing runes off an already-styled row also drops the reset and bleeds colour down the screen — the same trap `fitOverlay` hit.
+- **Never hand trailing whitespace to Chroma.** It lexes the run as a token with a synthetic `\n` appended, `highlightLine` writes token values verbatim, and the row comes back as *two* rows — so `DisplayRows` disagrees with `Content`, and every row index below it, which is what `RowFor` and the cursor are addressed by, is off by one. `renderCode` always splits it off; whether it is *marked* is a separate decision.
+- **Every row ends at the panel width.** `clipRow` is the last guard in all three row renderers, because the column budget cannot be satisfied at every width — the line-number block alone is wider than a 10-column panel. A test sweeps widths 1-120 in both views.
+- **Line-number width is per diff, not constant.** `geometry` carries it (sized from the largest number the diff mentions, never below `lineNumWidth`) along with the room the row has. Row renderers take it as one value so the next piece of layout does not add another int to five signatures.
 - **Terminal width**: always respect `tea.WindowSizeMsg`. File list panel fixed ~35 chars (`fileListWidth`), diff gets the rest.
 - **Viewport**: call `viewport.SetContent()` on content change, `viewport.GotoTop()` on file switch.
 - **Unicode width**: use `lipgloss.Width()` not `len()`. In a test, `strings.Index` gives a *byte* offset — measuring a column means `lipgloss.Width(row[:i])`, because the gutter glyphs are multi-byte.
