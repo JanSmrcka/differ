@@ -364,3 +364,29 @@ func TestDiffRender_ACommentBodyIsClippedToThePanel(t *testing.T) {
 		}
 	}
 }
+
+// clipRow exists because cutting an already-styled row with a rune slice drops
+// the reset and bleeds colour down the screen. Under `go test` there is no TTY,
+// so lipgloss emits no escapes and nothing in the suite exercised that claim —
+// the row here is built the way a terminal receives one.
+func TestDiffRender_ClippingAStyledRowLeavesTheTerminalClean(t *testing.T) {
+	t.Parallel()
+	row := "\x1b[38;2;166;227;161m+ const a = 1;\x1b[0m" +
+		"\x1b[38;2;147;153;178m  // and a trailing comment that runs on\x1b[0m"
+
+	for _, width := range []int{10, 20, 40, 55, 56} {
+		got := clipRow(row, width)
+
+		if w := lipgloss.Width(got); w > width {
+			t.Errorf("width %d: clipped row is %d columns", width, w)
+		}
+		if i := strings.LastIndex(got, "\x1b"); i >= 0 && !strings.Contains(got[i:], "m") {
+			t.Errorf("width %d: truncated escape sequence: %q", width, got[i:])
+		}
+		// The last sequence has to be the reset, or whatever colour was set
+		// after it is still in effect when the row ends.
+		if last := lastEscape(got); last != "" && last != "\x1b[0m" {
+			t.Errorf("width %d: row ends with %q in effect: %q", width, last, got)
+		}
+	}
+}
