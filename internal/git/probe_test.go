@@ -615,3 +615,84 @@ func TestProbe_NoticesALengthChangeThatKeptItsTimestamp(t *testing.T) {
 		t.Error("a file grew with its timestamp unchanged and the probe did not move")
 	}
 }
+
+// Reading the submodule's HEAD must cost no processes: it is per submodule per
+// tick, and `git rev-parse` there measured 184 ms against 11 ms with ten dirty
+// submodules — where "dirty" includes one that merely has an untracked file
+// inside, so the cost would be permanent rather than transient.
+func TestProbe_ReadingASubmodulesHeadStartsNoProcess(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	gitdir := filepath.Join(dir, ".git")
+	if err := os.MkdirAll(filepath.Join(gitdir, "refs", "heads"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write := func(rel, body string) {
+		if err := os.WriteFile(filepath.Join(gitdir, rel), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// On a branch, loose ref.
+	write("HEAD", "ref: refs/heads/main\n")
+	write(filepath.Join("refs", "heads", "main"), "aaaa1111\n")
+	onBranch := submoduleHead(dir)
+	if !strings.Contains(onBranch, "aaaa1111") {
+		t.Errorf("did not read the branch's object id: %q", onBranch)
+	}
+
+	// The branch moves.
+	write(filepath.Join("refs", "heads", "main"), "bbbb2222\n")
+	if moved := submoduleHead(dir); moved == onBranch {
+		t.Error("the submodule's branch moved and the reading did not")
+	}
+
+	// Detached: HEAD is the object id.
+	write("HEAD", "cccc3333\n")
+	if got := submoduleHead(dir); got != "cccc3333" {
+		t.Errorf("detached HEAD read as %q", got)
+	}
+
+	// A packed ref has no file; the answer must be stable rather than noisy.
+	write("HEAD", "ref: refs/heads/packed\n")
+	first, second := submoduleHead(dir), submoduleHead(dir)
+	if first != second {
+		t.Errorf("a packed ref gave two answers: %q and %q", first, second)
+	}
+	if first == "" {
+		t.Error("a packed ref read as nothing at all")
+	}
+}
+
+// A .git file pointing elsewhere is how submodules are cloned now, and how
+// worktrees are laid out.
+func TestProbe_FollowsAGitdirPointerFile(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	sub := filepath.Join(root, "sub")
+	real := filepath.Join(root, "modules", "sub")
+	if err := os.MkdirAll(filepath.Join(real, "refs", "heads"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(real, "HEAD"), []byte("ref: refs/heads/main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(real, "refs", "heads", "main"), []byte("dddd4444\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Relative, the way git writes it.
+	if err := os.WriteFile(filepath.Join(sub, ".git"), []byte("gitdir: ../modules/sub\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := submoduleHead(sub); !strings.Contains(got, "dddd4444") {
+		t.Errorf("did not follow the gitdir pointer: %q", got)
+	}
+	// And an absent one is stable, not an error.
+	if got := submoduleHead(filepath.Join(root, "nothing")); got != "absent" {
+		t.Errorf("a missing submodule read as %q", got)
+	}
+}

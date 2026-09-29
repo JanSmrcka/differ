@@ -73,6 +73,15 @@ type diffLoadedMsg struct {
 // not be read — an empty file list then means "unknown", not "nothing
 // changed", which matters because review comments are staled off this.
 type filesRefreshedMsg struct {
+	// The fingerprint the repository had when this refresh was asked for, and
+	// a sequence number. The fingerprint is stored only when the refresh
+	// lands, so a failed one is retried rather than assumed; the sequence
+	// drops a refresh that is older than one already installed, which would
+	// otherwise leave the screen behind with a fingerprint claiming it was
+	// current — and no probe would ever correct it.
+	fingerprint string
+	seq         int
+
 	files []fileItem
 	// keys fingerprints each file's content, so a refresh can say which files
 	// moved rather than only that the changeset did. The file list is
@@ -138,10 +147,15 @@ type Model struct {
 	// The last probe's fingerprint. An equal one means the tick can stop
 	// without asking git anything else.
 	repoFingerprint string
-	// Whether a probe is out. tea.Tick does not wait for the previous one.
-	probing bool
+	// Whether a probe is out, and for how many ticks. tea.Tick does not wait
+	// for the previous one, and git can block rather than fail.
+	probing     bool
+	probeWaited int
 	// Ticks since the last full rebuild, so a burst coalesces.
 	ticksSinceRefresh int
+	// The last refresh asked for, and the newest one installed.
+	refreshSeq   int
+	installedSeq int
 	// fileOffset is the first file on screen. The list is taller than the
 	// panel in any real agent changeset, so without it the files past the
 	// panel height were unreachable.

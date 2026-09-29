@@ -213,7 +213,25 @@ func (m Model) handleFilesRefreshed(msg filesRefreshedMsg) (tea.Model, tea.Cmd) 
 		// "everything was committed", so nothing may be staled off it — a held
 		// index.lock while the agent stages files would otherwise demote the
 		// whole review with no way back.
+		//
+		// The fingerprint is not stored either, so the next probe still finds
+		// a difference and tries again. It used to be stored when the refresh
+		// was asked for, which turned one unreadable moment into a screen that
+		// never updated again.
 		return m.fail("refresh", msg.err), nil
+	}
+	// Two refreshes can be out at once — a probe's and one from staging a file
+	// — and they can land in either order. The older one must not win: it
+	// would install state the repository has moved past, and its fingerprint
+	// would then claim the screen was current. m.fileKeys is the worse half of
+	// that: #43 would mark files as changed under the reviewer purely because
+	// an older set of hashes arrived last.
+	if msg.seq < m.installedSeq {
+		return m, nil
+	}
+	m.installedSeq = msg.seq
+	if msg.fingerprint != "" {
+		m.repoFingerprint = msg.fingerprint
 	}
 	m = m.noteChangedFiles(msg.keys)
 	if filesEqual(m.files, msg.files) {

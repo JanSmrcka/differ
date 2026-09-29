@@ -2,7 +2,6 @@ package git
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -82,14 +81,10 @@ func (r *Repo) Probe(ref string) (string, error) {
 			// A submodule's stat says nothing: committing inside it changes
 			// neither the directory's mtime nor the gitlink oids status
 			// reports, which are the superproject's *recorded* commit and stay
-			// put. Only the second and later moves are invisible, which is
-			// worse than never noticing at all. Ask it where its HEAD is.
-			head, err := runIn(full, "rev-parse", "HEAD")
-			if err != nil {
-				head = "unreadable"
-			}
+			// put. Only the second and later moves were invisible, which is
+			// worse than never noticing at all.
 			b.WriteString("\x00sub:")
-			b.WriteString(strings.TrimSpace(head))
+			b.WriteString(submoduleHead(full))
 			continue
 		}
 
@@ -115,12 +110,61 @@ func (r *Repo) Probe(ref string) (string, error) {
 	return b.String(), nil
 }
 
-// runIn runs git in a directory that is not this repository — a submodule.
-func runIn(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", append([]string{"--no-optional-locks"}, args...)...)
-	cmd.Dir = dir
-	out, err := cmd.Output()
-	return string(out), err
+// submoduleHead reads where a submodule's HEAD points, without starting a
+// process.
+//
+// `git -C <sub> rev-parse HEAD` is the obvious way and it was the first one,
+// but it is a fork per submodule per tick: ten dirty submodules measured 184 ms
+// against 11 ms, every second, and "dirty" includes one that merely has an
+// untracked file inside — so the cost is permanent rather than transient. The
+// files it would read are two small ones, and reading them directly costs
+// nothing.
+//
+// The exact value does not matter, only that it moves when the submodule does.
+// An unreadable layout returns a constant, which is stable rather than noisy.
+func submoduleHead(dir string) string {
+	gitdir := filepath.Join(dir, ".git")
+	info, err := os.Stat(gitdir)
+	if err != nil {
+		return "absent"
+	}
+	if !info.IsDir() {
+		// A worktree or a submodule cloned the modern way: .git is a file
+		// holding "gitdir: <path>", relative to the submodule.
+		raw, err := os.ReadFile(gitdir)
+		if err != nil {
+			return "unreadable"
+		}
+		pointer := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(string(raw)), "gitdir:"))
+		if pointer == "" {
+			return "unreadable"
+		}
+		if !filepath.IsAbs(pointer) {
+			pointer = filepath.Join(dir, pointer)
+		}
+		gitdir = pointer
+	}
+
+	head, err := os.ReadFile(filepath.Join(gitdir, "HEAD"))
+	if err != nil {
+		return "unreadable"
+	}
+	text := strings.TrimSpace(string(head))
+	ref, isSymbolic := strings.CutPrefix(text, "ref:")
+	if !isSymbolic {
+		return text // detached: HEAD is the object id itself
+	}
+	ref = strings.TrimSpace(ref)
+
+	// A loose ref is a file holding the object id. A packed one is not, and
+	// rather than parse packed-refs the file's absence is folded in with the
+	// branch name — which still moves on a branch switch, and packed refs do
+	// not move under a working session.
+	oid, err := os.ReadFile(filepath.Join(gitdir, filepath.FromSlash(ref)))
+	if err != nil {
+		return "packed:" + ref
+	}
+	return ref + ":" + strings.TrimSpace(string(oid))
 }
 
 // probedPath is a path status named, and whether it is a submodule.
@@ -158,8 +202,12 @@ func probedPaths(status string) []probedPath {
 		if len(parts) != n+1 {
 			continue
 		}
-		// The worktree file mode is field 5 on the records that carry one.
 		// 160000 is a gitlink: a submodule, whose contents no stat describes.
+		//
+		// Field 5 is the worktree mode on "1" and "2" records. On "u" it is
+		// the stage-3 mode — the worktree mode is field 6 there — but a
+		// conflicted submodule carries 160000 in both, so one index reads all
+		// three record types. Nothing here needs the mode for anything else.
 		gitlink := n > 5 && parts[5] == "160000"
 		paths = append(paths, probedPath{path: parts[n], gitlink: gitlink})
 		skipNext = rec[0] == '2'

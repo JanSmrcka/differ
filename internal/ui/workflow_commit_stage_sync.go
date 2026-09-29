@@ -123,9 +123,18 @@ func (m Model) handleTick() (tea.Model, tea.Cmd) {
 	// with the last.
 	m.ticksSinceRefresh++
 	if m.probing {
-		return m, tickCmd()
+		// A probe that never comes back would otherwise wedge the poll loop
+		// for good — git status on a hung mount does not error, it blocks —
+		// and nothing on screen would say so. After staleProbeTicks the flag
+		// is dropped and a fresh one goes out; the stale answer is harmless
+		// when it eventually lands, because it is only a fingerprint.
+		m.probeWaited++
+		if m.probeWaited < staleProbeTicks {
+			return m, tickCmd()
+		}
 	}
 	m.probing = true
+	m.probeWaited = 0
 	return m, tea.Batch(m.probeCmd(), tickCmd())
 }
 
@@ -138,6 +147,9 @@ func (m Model) handleTick() (tea.Model, tea.Cmd) {
 // the burst the issue is about. This is the coalescing it asks for: many
 // writes in quick succession become one refresh, not twenty.
 const refreshEvery = 2
+
+// staleProbeTicks is how long a probe may be out before another is sent.
+const staleProbeTicks = 10
 
 // probeCmd asks git for the repository's fingerprint, off the update loop.
 func (m Model) probeCmd() tea.Cmd {
@@ -160,7 +172,24 @@ func (m Model) handleRepoProbed(msg repoProbedMsg) (tea.Model, tea.Cmd) {
 		// The probe is an optimisation, never a gate. A repository mid-rebase,
 		// a vanished git binary or an unreadable index must cost the user a
 		// wasted refresh, not a screen that has quietly stopped updating.
-		return m, m.refreshEverythingCmd()
+		//
+		// Rate-limited like any other refresh, though: a repository where the
+		// probe reliably fails would otherwise rebuild every tick — nine
+		// processes a second, in exactly the degraded state where that is
+		// least welcome.
+		if m.ticksSinceRefresh < refreshEvery {
+			return m, nil
+		}
+		m.ticksSinceRefresh = 0
+		m.refreshSeq++
+		return m, tea.Batch(m.refreshFilesAs("", m.refreshSeq), m.fetchUpstreamStatusCmd())
+	}
+	// A refresh must not land under an open input. The tick already declines
+	// to probe in those modes, but a probe dispatched a moment earlier can
+	// arrive after the user has pressed c or b — and handleFilesRefreshed
+	// reorders the file list, moves the cursor and reloads the diff.
+	if m.mode == modeCommit || m.mode == modeBranchPicker || m.generatingMsg {
+		return m, nil
 	}
 	if msg.fingerprint == m.repoFingerprint {
 		return m, nil
@@ -171,9 +200,15 @@ func (m Model) handleRepoProbed(msg repoProbedMsg) (tea.Model, tea.Cmd) {
 		// would be dropped rather than delayed.
 		return m, nil
 	}
-	m.repoFingerprint = msg.fingerprint
+	// Still not stored here. It is a claim that the screen matches the
+	// repository, and nothing on screen has changed yet — handleFilesRefreshed
+	// stores it when the rebuild actually lands. Storing it on dispatch made a
+	// failed or out-of-order refresh permanent: the screen kept its old state
+	// while the fingerprint said it was current, so no later probe would ever
+	// disagree.
 	m.ticksSinceRefresh = 0
-	return m, m.refreshEverythingCmd()
+	m.refreshSeq++
+	return m, tea.Batch(m.refreshFilesAs(msg.fingerprint, m.refreshSeq), m.fetchUpstreamStatusCmd())
 }
 
 // refreshEverythingCmd is what a tick used to do unconditionally.
@@ -252,23 +287,41 @@ func (m Model) loadDiffCmd(resetScroll bool) tea.Cmd {
 }
 
 func (m Model) refreshFilesCmd() tea.Cmd {
+	return m.refreshFilesAs("", m.refreshSeq)
+}
+
+// refreshFilesAs rebuilds the file list, tagged with the fingerprint the
+// repository had when it was asked for and with its place in the queue.
+//
+// An explicit refresh — staging, committing, switching branch — passes an
+// empty fingerprint: it knows the repository changed but not what it looks
+// like now, so it installs its files without claiming the screen is current.
+func (m Model) refreshFilesAs(fingerprint string, seq int) tea.Cmd {
 	repo := m.repo
 	stagedOnly := m.stagedOnly
 	ref := m.ref
 	return func() tea.Msg {
+		fail := func(err error) tea.Msg {
+			return filesRefreshedMsg{err: err, seq: seq}
+		}
 		files, err := repo.ChangedFiles(stagedOnly, ref)
 		if err != nil {
-			return filesRefreshedMsg{err: err}
+			return fail(err)
 		}
 		var untracked []string
 		if !stagedOnly && ref == "" {
 			untracked, err = repo.UntrackedFiles()
 			if err != nil {
-				return filesRefreshedMsg{err: err}
+				return fail(err)
 			}
 		}
 		items := buildFileItems(repo, files, untracked)
-		return filesRefreshedMsg{files: items, keys: fileKeysOf(repo, items, stagedOnly)}
+		return filesRefreshedMsg{
+			files:       items,
+			keys:        fileKeysOf(repo, items, stagedOnly),
+			fingerprint: fingerprint,
+			seq:         seq,
+		}
 	}
 }
 
