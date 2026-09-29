@@ -98,14 +98,19 @@ The diff view has a line cursor (`▌`) marking the current line. It is the
 anchor review comments attach to, and it keeps the same position when you
 toggle between unified and split view.
 
-Reading the gutter:
+In the gutter, before the line numbers:
+
+| Mark | Meaning                                   |
+| ---- | ----------------------------------------- |
+| `▌`  | the line cursor                           |
+| `●`  | the line carries a review comment         |
+| `!`  | a comment here no longer matches the diff |
+
+At the end of the code itself:
 
 | Mark | Meaning                                                      |
 | ---- | ------------------------------------------------------------ |
-| `▌`  | the line cursor                                              |
-| `●`  | the line carries a review comment                            |
-| `!`  | a comment here no longer matches the diff                    |
-| `›`  | the line was longer than the panel and is cut — `e` to open it in your editor |
+| `›`  | the line was longer than the panel and is cut — `e` opens it in your editor |
 | `·`  | trailing whitespace on an added or removed line              |
 
 Line-number columns widen to fit the file, so a 5-digit diff stays aligned.

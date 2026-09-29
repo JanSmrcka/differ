@@ -126,6 +126,10 @@ func checkContrast(t *testing.T, th Theme, label string) {
 		{th.StatusBarFg, th.StatusBarBg, 3.0, "StatusBarFg/StatusBarBg"},
 		{th.Fg, th.CardBg, 4.5, "Fg/CardBg"},
 		{th.HelpKeyFg, th.Bg, 3.0, "HelpKeyFg/Bg"},
+		// The marks inside the code column sit on a diff background, not on
+		// the page background.
+		{th.MarkFg, th.AddedBg, 3.0, "MarkFg/AddedBg"},
+		{th.MarkFg, th.RemovedBg, 3.0, "MarkFg/RemovedBg"},
 	}
 	for _, p := range pairs {
 		ratio := contrastRatio(p.fg, p.bg)

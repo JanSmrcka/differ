@@ -337,10 +337,11 @@ func sectionTable(t *testing.T, readme, heading string) []string {
 
 	// Only the first column of a table headed "Key". Prose in the same section
 	// is full of backticks — `claude`, `--set-upstream` — and a section may
-	// hold another table entirely, such as the diff view's gutter legend,
+	// hold other tables entirely, such as the diff view's two mark legends,
 	// whose first column is glyphs rather than keys.
 	var keys []string
 	inKeyTable := false
+	separator := regexp.MustCompile(`^[-: ]+$`)
 	for _, line := range strings.Split(rest, "\n") {
 		if !strings.HasPrefix(strings.TrimSpace(line), "|") {
 			inKeyTable = false
@@ -350,8 +351,15 @@ func sectionTable(t *testing.T, readme, heading string) []string {
 		if len(cells) < 2 {
 			continue
 		}
-		if strings.TrimSpace(cells[0]) == "Key" {
-			inKeyTable = true
+		first := strings.TrimSpace(cells[0])
+		if separator.MatchString(first) {
+			continue
+		}
+		// A header row — no backticks in the first cell — decides whether the
+		// rows under it are keys. Relying on a blank line to end the table
+		// leaked between two tables that sit next to each other.
+		if !strings.Contains(first, "`") {
+			inKeyTable = first == "Key"
 			continue
 		}
 		if !inKeyTable {

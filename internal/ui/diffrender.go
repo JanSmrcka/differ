@@ -254,15 +254,25 @@ func (r *DiffRenderer) rowGutters(row splitRow, cursor int) (left, right string)
 }
 
 func (r *DiffRenderer) renderRow(row splitRow, leftGutter, rightGutter string) string {
+	// Two gutters and the separator between them come out of the panel, and
+	// the odd column left over goes to the right side — halving and doubling
+	// left a column of the panel unused at every even width, which then made
+	// the hunk rule one column longer than the code rows.
+	room := max(r.width-2*gutterWidth-verticalDividerWidth, 0)
+	leftG := geometry{numW: r.geom.numW, width: room / 2, split: true}
+	rightG := geometry{numW: r.geom.numW, width: room - room/2, split: true}
+
 	if row.left != nil && row.left.Type == LineHunkHeader {
-		return renderHunkLine(r.displayLine(*row.left), r.styles, r.geom, leftGutter)
+		// The header spans the whole row, but its line-number stand-in has to
+		// match what a split row carries — one column of numbers, not two — or
+		// its text sits several columns right of the code it heads.
+		span := geometry{numW: r.geom.numW, width: r.width, split: true}
+		return renderHunkLine(r.displayLine(*row.left), r.styles, span, leftGutter)
 	}
-	// Each side gets its own geometry: the same number width, half the room.
-	side := geometry{numW: r.geom.numW, width: (r.width - 2*gutterWidth - 1) / 2}
-	left := renderSplitSide(r.displaySide(row.left), r.filename, r.styles, r.theme, side, true)
-	right := renderSplitSide(r.displaySide(row.right), r.filename, r.styles, r.theme, side, false)
-	sep := lipgloss.NewStyle().Foreground(lipgloss.Color(r.theme.BorderFg)).Render("│")
-	return leftGutter + left + sep + rightGutter + right
+	left := renderSplitSide(r.displaySide(row.left), r.filename, r.styles, r.theme, leftG, true)
+	right := renderSplitSide(r.displaySide(row.right), r.filename, r.styles, r.theme, rightG, false)
+	sep := lipgloss.NewStyle().Foreground(lipgloss.Color(r.theme.BorderFg)).Render(verticalDivider)
+	return clipRow(leftGutter+left+sep+rightGutter+right, r.width)
 }
 
 // displaySide expands tabs on one side of a split row, preserving nil.

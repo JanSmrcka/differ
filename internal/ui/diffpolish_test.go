@@ -3,6 +3,7 @@ package ui
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/jansmrcka/differ/internal/theme"
@@ -16,8 +17,16 @@ import (
 // colour stripped, which is how a row's real column count is measured.
 func renderedRows(t *testing.T, parsed ParsedDiff, width int) []string {
 	t.Helper()
+	return renderedRowsIn(t, parsed, width, false)
+}
+
+// renderedRowsIn does the same in either view. Split was the half with no
+// tests at all, which is how the two views drifted apart before.
+func renderedRowsIn(t *testing.T, parsed ParsedDiff, width int, split bool) []string {
+	t.Helper()
 	th := theme.Themes["dark"]
 	r := NewDiffRenderer(parsed, "src.ts", NewStyles(th), th, width)
+	r.SetSplit(split)
 	return strings.Split(r.Content(-1), "\n")
 }
 
@@ -59,14 +68,11 @@ func TestDiffRender_TheCodeColumnSurvivesFiveDigitLineNumbers(t *testing.T) {
 	rows := renderedRows(t, ParseDiff(raw), 100)
 
 	at := func(needle string) int {
-		for _, row := range rows {
-			plain := stripANSI(row)
-			if i := strings.Index(plain, needle); i >= 0 {
-				return i
-			}
+		col := columnOf(rows, needle)
+		if col < 0 {
+			t.Fatalf("no row contains %q:\n%s", needle, strings.Join(rows, "\n"))
 		}
-		t.Fatalf("no row contains %q:\n%s", needle, strings.Join(rows, "\n"))
-		return -1
+		return col
 	}
 
 	if a, b := at("AAA"), at("BBB"); a != b {
@@ -145,5 +151,137 @@ func TestDiffRender_OnlyChangedLinesAreMarkedForWhitespace(t *testing.T) {
 	}
 	if !strings.Contains(body, "changed"+strings.Repeat(whitespaceMarker, 3)) {
 		t.Errorf("the changed line was not marked:\n%s", body)
+	}
+}
+
+// columnOf is where needle starts, measured in display columns. strings.Index
+// gives a byte offset, and the gutter contains multi-byte glyphs — "···" is
+// two bytes a rune — so a byte offset reads three columns too far.
+func columnOf(rows []string, needle string) int {
+	for _, row := range rows {
+		plain := stripANSI(row)
+		if i := strings.Index(plain, needle); i >= 0 {
+			return lipgloss.Width(plain[:i])
+		}
+	}
+	return -1
+}
+
+// A width sweep, not three sample widths. Every renderer had a floor it
+// silently exceeded — the line-number block alone is wider than a 10-column
+// panel — and the three values the first test checked all sat above it.
+func TestDiffRender_NoRowExceedsThePanelAtAnyWidth(t *testing.T) {
+	t.Parallel()
+	raw := "@@ -9998,3 +9999,3 @@ func handler() {\n" +
+		" context AAA\n" +
+		"-old   \n" +
+		"+" + strings.Repeat("wide", 200) + "\n" +
+		" 日本語のテキストはここにあります\n"
+	parsed := ParseDiff(raw)
+
+	for _, split := range []bool{false, true} {
+		for width := 1; width <= 120; width++ {
+			for _, row := range renderedRowsIn(t, parsed, width, split) {
+				if got := lipgloss.Width(row); got > width {
+					t.Fatalf("split=%v width=%d: row is %d columns: %q",
+						split, width, got, stripANSI(row))
+				}
+			}
+		}
+	}
+}
+
+// The renderer addresses rows by index: DisplayRows, rowOf and RowFor all
+// assume one entry per row of output. A row that secretly contains a newline
+// breaks that for every row below it, and the cursor then highlights the wrong
+// line.
+//
+// Chroma is what produced one: it appends a newline to a trailing-whitespace
+// token, and a context line ending in spaces was handed to it whole.
+func TestDiffRender_EveryRowIsOneRow(t *testing.T) {
+	t.Parallel()
+	raw := "@@ -1,4 +1,4 @@\n untouched   \n+changed   \n-gone   \n context2\n"
+
+	for _, split := range []bool{false, true} {
+		th := theme.Themes["dark"]
+		r := NewDiffRenderer(ParseDiff(raw), "src.ts", NewStyles(th), th, 80)
+		r.SetSplit(split)
+
+		rows := strings.Split(r.Content(-1), "\n")
+		if r.DisplayRows() != len(rows) {
+			t.Errorf("split=%v: DisplayRows() = %d but Content() has %d rows",
+				split, r.DisplayRows(), len(rows))
+		}
+		for i, row := range rows {
+			if strings.Contains(row, "\n") {
+				t.Errorf("split=%v: row %d contains a newline: %q", split, i, stripANSI(row))
+			}
+			if got := lipgloss.Width(row); got != 80 {
+				t.Errorf("split=%v: row %d is %d columns, want 80: %q", split, i, got, stripANSI(row))
+			}
+		}
+	}
+}
+
+// Split view has to cut long lines and mark trailing whitespace exactly as
+// unified does — that shared behaviour is the whole point of stylesFor and
+// renderCode, and it had no test.
+func TestDiffRender_SplitViewCutsAndMarksLikeUnified(t *testing.T) {
+	t.Parallel()
+	raw := "@@ -1,2 +1,2 @@\n-short   \n+" + strings.Repeat("y", 300) + "\n"
+	body := stripANSI(strings.Join(renderedRowsIn(t, ParseDiff(raw), 100, true), "\n"))
+
+	if !strings.Contains(body, truncationMarker) {
+		t.Errorf("split view did not mark the cut line:\n%s", body)
+	}
+	if !strings.Contains(body, "short"+strings.Repeat(whitespaceMarker, 3)) {
+		t.Errorf("split view did not mark trailing whitespace:\n%s", body)
+	}
+}
+
+// A hunk header spans the row in both views, so its text has to start where
+// that view's code starts — five columns off in split, which is what made it
+// look like a header for the wrong line.
+func TestDiffRender_TheHunkHeaderAlignsWithTheCodeInBothViews(t *testing.T) {
+	t.Parallel()
+	// The marker is the whole content of the context line, so its column is
+	// where the code column starts — locating text *inside* the line would
+	// measure the wrong thing.
+	raw := "@@ -1,2 +1,2 @@ func handler() {\n MARKER\n"
+
+	for _, split := range []bool{false, true} {
+		rows := renderedRowsIn(t, ParseDiff(raw), 100, split)
+		header, code := columnOf(rows, "func handler()"), columnOf(rows, "MARKER")
+		if header < 0 || code < 0 {
+			t.Fatalf("split=%v: header at %d, code at %d:\n%s", split, header, code, strings.Join(rows, "\n"))
+		}
+		if header != code {
+			t.Errorf("split=%v: hunk text starts at column %d, code at %d", split, header, code)
+		}
+	}
+}
+
+// The first version cut a line by dropping one rune at a time and re-measuring
+// the whole prefix: 8.8 seconds for an 80,000-column line. Content() and
+// SetSplit both re-render from inside Update, so a single j onto a minified
+// line blocked the event loop for seconds.
+func TestDiffRender_ALongLineRendersQuickly(t *testing.T) {
+	t.Parallel()
+	parsed := ParseDiff("@@ -1,1 +1,1 @@\n+" + strings.Repeat("x", 150_000) + "\n")
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		th := theme.Themes["dark"]
+		r := NewDiffRenderer(parsed, "bundle.js", NewStyles(th), th, 120)
+		_ = r.Content(1)
+		r.SetSplit(true)
+		_ = r.Content(1)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("rendering one 150,000-column line took over 2s")
 	}
 }
