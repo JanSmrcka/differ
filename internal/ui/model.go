@@ -61,6 +61,8 @@ type diffLoadedMsg struct {
 	errContent  string
 	index       int
 	resetScroll bool
+	// themeGen is the theme this renderer was built under.
+	themeGen int
 }
 
 // filesRefreshedMsg carries the current changeset. err is set when git could
@@ -180,6 +182,16 @@ type Model struct {
 	// the status bar.
 	showProblem bool
 	problem     *problem
+	// showThemes draws the theme picker. themeBefore is what was in use when
+	// it opened, so cancelling can put it back.
+	showThemes  bool
+	themeCursor int
+	themeBefore theme.Theme
+	// themeGen counts theme changes. A diff loaded under an older theme is
+	// dropped rather than installed: two git diffs can be in flight and they
+	// do not finish in order, so cancelling a preview could otherwise leave
+	// the screen painted in the theme that was cancelled.
+	themeGen int
 
 	upstream     git.UpstreamInfo
 	pushConfirm  bool

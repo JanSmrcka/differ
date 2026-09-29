@@ -306,6 +306,24 @@ user's own words and gets the body-text bar rather than the accent one.
 An unknown `--theme` is refused and the choices are listed; a stale name in the
 config falls back quietly rather than stopping differ from opening.
 
+`t` opens the picker, anywhere a key is a command:
+
+```
+ theme
+
+  mocha   in use   + added  - removed  context
+  latte   + added  - removed  context
+▍ gruvbox   + added  - removed  context
+  tokyonight   + added  - removed  context
+  github   + added  - removed  context
+
+ j/k to try · enter to keep · esc to cancel
+```
+
+Moving the selection repaints the screen in that theme, so you are choosing by
+looking rather than by name. `enter` keeps it and writes it to the config;
+`esc` puts back what was there and writes nothing.
+
 Config file: `~/.config/differ/config.json`
 
 ```json

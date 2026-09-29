@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/alecthomas/chroma/v2"
+
 	"github.com/charmbracelet/lipgloss"
 	"github.com/jansmrcka/differ/internal/review"
 	"github.com/jansmrcka/differ/internal/theme"
@@ -30,6 +32,10 @@ type DiffRenderer struct {
 	width    int
 
 	split bool
+	// chroma is this renderer's syntax palette, resolved once from the theme
+	// it was built with. Per renderer rather than global: two renderers can be
+	// in flight at different themes.
+	chroma *chroma.Style
 	// geom is the column arithmetic for this diff, sized once from its
 	// largest line number.
 	geom     geometry
@@ -61,14 +67,10 @@ type displayRow struct {
 
 // NewDiffRenderer renders every line up front.
 func NewDiffRenderer(parsed ParsedDiff, filename string, styles Styles, t theme.Theme, width int) *DiffRenderer {
-	// Without this the Chroma style stays nil and every line renders
-	// unhighlighted.
-	initChromaStyle(t.ChromaStyle)
-
 	r := &DiffRenderer{
 		parsed: parsed, filename: filename, styles: styles,
 		theme: t, width: width, tabWidth: defaultTabWidth,
-		geom: diffGeometry(parsed, width),
+		geom: diffGeometry(parsed, width), chroma: chromaStyleFor(t.ChromaStyle),
 	}
 	r.render()
 	return r
@@ -142,7 +144,7 @@ func (r *DiffRenderer) render() {
 		for i, dl := range r.parsed.Lines {
 			r.rowOf[i] = len(r.rows)
 			r.rows = append(r.rows, displayRow{
-				text: renderDiffLineGutter(r.displayLine(dl), r.filename, r.styles, r.theme, r.geom, r.gutterFor(byLine, i)),
+				text: renderDiffLineGutter(r.displayLine(dl), r.filename, r.styles, r.theme, r.geom, r.gutterFor(byLine, i), r.chroma),
 				line: i, pair: -1,
 			})
 			r.appendCommentRows(byLine[i])
@@ -282,8 +284,8 @@ func (r *DiffRenderer) renderRow(row splitRow, leftGutter, rightGutter string) s
 	}
 	l, rr := r.displaySide(row.left), r.displaySide(row.right)
 	oldSpan, newSpan := r.changedSpans(l, rr)
-	left := renderSplitSide(l, r.filename, r.styles, r.theme, leftG, true, oldSpan)
-	right := renderSplitSide(rr, r.filename, r.styles, r.theme, rightG, false, newSpan)
+	left := renderSplitSide(l, r.filename, r.styles, r.theme, leftG, true, oldSpan, r.chroma)
+	right := renderSplitSide(rr, r.filename, r.styles, r.theme, rightG, false, newSpan, r.chroma)
 	sep := lipgloss.NewStyle().Foreground(lipgloss.Color(r.theme.BorderFg)).Render(verticalDivider)
 	return clipRow(leftGutter+left+sep+rightGutter+right, r.width)
 }
@@ -321,7 +323,7 @@ func (r *DiffRenderer) renderCursorRow(row displayRow, cursor int) string {
 		lg, rg := r.rowGutters(r.pairs[row.pair], cursor)
 		return r.renderRow(r.pairs[row.pair], lg, rg)
 	case row.line >= 0:
-		return renderDiffLineGutter(r.displayLine(r.parsed.Lines[row.line]), r.filename, r.styles, r.theme, r.geom, cursorGutter(r.styles))
+		return renderDiffLineGutter(r.displayLine(r.parsed.Lines[row.line]), r.filename, r.styles, r.theme, r.geom, cursorGutter(r.styles), r.chroma)
 	default:
 		return row.text
 	}

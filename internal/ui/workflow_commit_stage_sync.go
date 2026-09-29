@@ -148,12 +148,14 @@ func (m Model) loadDiffCmd(resetScroll bool) tea.Cmd {
 	filename := f.change.Path
 	splitMode := m.splitDiff && diffW >= minSplitWidth
 	tabWidth := m.cfg.TabWidth
+	gen := m.themeGen
 	return func() tea.Msg {
 		fail := func(err error) tea.Msg {
 			return diffLoadedMsg{
 				errContent:  styles.DiffHunkHeader.Render("Error: " + err.Error()),
 				index:       idx,
 				resetScroll: resetScroll,
+				themeGen:    gen,
 			}
 		}
 
@@ -175,7 +177,7 @@ func (m Model) loadDiffCmd(resetScroll bool) tea.Cmd {
 		r := NewDiffRenderer(parsed, filename, styles, t, diffW)
 		r.SetTabWidth(tabWidth)
 		r.SetSplit(splitMode)
-		return diffLoadedMsg{renderer: r, index: idx, resetScroll: resetScroll}
+		return diffLoadedMsg{renderer: r, index: idx, resetScroll: resetScroll, themeGen: gen}
 	}
 }
 
@@ -216,13 +218,15 @@ func (m Model) buildRefreshedFiles() filesRefreshedMsg {
 	return filesRefreshedMsg{files: items, keys: fileKeysOf(m.repo, items, m.stagedOnly)}
 }
 
+// saveSplitPrefCmd persists the split preference.
+//
+// m.cfg is the one copy that gets written, by this and by the theme picker.
+// This used to mutate a local copy instead, so m.cfg.SplitDiff kept its
+// startup value for the whole session and the next whole-config write — a
+// theme change — silently put the old value back.
 func (m Model) saveSplitPrefCmd() tea.Cmd {
 	cfg := m.cfg
-	split := m.splitDiff
-	return func() tea.Msg {
-		cfg.SplitDiff = split
-		return savePrefDoneMsg{err: config.Save(cfg)}
-	}
+	return func() tea.Msg { return savePrefDoneMsg{err: config.Save(cfg)} }
 }
 
 func (m Model) commitCmd(message string) tea.Cmd {
