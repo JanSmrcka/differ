@@ -136,8 +136,9 @@ var handlerFor = map[viewMode]string{
 	modeBranchPicker: "updateBranchMode",
 }
 
-// Keys shared by every mode, handled centrally rather than per mode.
-var globalKeys = map[string]bool{"ctrl+c": true}
+// Keys handled centrally in routeKey or dispatch rather than per mode, so a
+// mode's handler is not expected to carry them.
+var globalKeys = map[string]bool{"ctrl+c": true, "?": true, "!": true}
 
 func TestKeymap_EveryHandledKeyIsDocumented(t *testing.T) {
 	t.Parallel()
@@ -440,6 +441,37 @@ func TestKeymap_TheGlobalKeysWorkInEveryMode(t *testing.T) {
 		}
 		if _, quit := cmd().(tea.QuitMsg); !quit {
 			t.Errorf("%s: ctrl+c did not quit", s.name)
+		}
+	}
+
+	// ? and ! are global in the same sense the command bar is: everywhere a
+	// key is a command rather than a character. Where the user is typing they
+	// are text, which is why they are not answered before the mode dispatch
+	// the way ctrl+c is.
+	for _, s := range states {
+		base := newTestModel(t, []fileItem{{change: git.FileChange{Path: "a.go", Status: git.StatusModified}}})
+		m := s.setup(base)
+		// What is under test is whether the key opens the overlay from this
+		// mode, so the states that start with one open are cleared first —
+		// there ? would toggle it shut, which is its own test.
+		m.showHelp, m.showHistory, m.showProblem = false, false, false
+		typing := m.typing()
+
+		for _, c := range []struct {
+			key  string
+			open func(Model) bool
+		}{
+			{"?", func(m Model) bool { return m.showHelp }},
+			{"!", func(m Model) bool { return m.showProblem }},
+		} {
+			updated, _ := m.routeKey(key(c.key))
+			got := c.open(updated.(Model))
+			// An overlay is already open in two of the states, where these
+			// keys switch between them rather than being swallowed.
+			if want := !typing; got != want {
+				t.Errorf("%s: %q opened the overlay = %v, want %v (typing = %v)",
+					s.name, c.key, got, want, typing)
+			}
 		}
 	}
 }

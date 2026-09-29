@@ -16,7 +16,9 @@ import (
 // enterReviewMode switches into review, creating the session on first use.
 func (m Model) enterReviewMode() (tea.Model, tea.Cmd) {
 	if len(m.files) == 0 {
-		m.statusMsg = "nothing to review"
+		// Nothing to review, but the panel says that better than the status
+		// bar can — and it says it in the same place the file list would.
+		m.mode = modeReview
 		return m, nil
 	}
 	if m.session == nil {

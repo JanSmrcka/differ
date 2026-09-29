@@ -226,11 +226,13 @@ stale because its file left the diff.
 Failures get one line in differ's own voice, with what to do about it:
 
 ```
-push failed — check your access to the remote  ·  ! for details
+push failed  ·  ! details  ·  the remote has commits you do not — pull with F first
 ```
 
 `!` shows the failure in full, including what git (or tmux, or the clipboard
-helper) actually said. That text is never put in the status bar, and it is
+helper) actually said. It comes before the hint in the line because the bar is
+one row and cuts what does not fit — with the hint first, a long one took the
+`!` with it. That text is never put in the status bar, and it is
 never thrown away either — for the failures nobody anticipated it is the only
 useful thing there is.
 

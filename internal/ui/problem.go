@@ -28,13 +28,18 @@ type problem struct {
 }
 
 // line is the one-line form for the status bar.
+//
+// The affordance comes before the hint on purpose. The bar is one row and cuts
+// whatever does not fit, silently — so with the hint first, any failure whose
+// hint ran long lost the "!" and the user was never told the detail existed,
+// which is exactly when they needed it most.
 func (p problem) line() string {
 	out := p.summary
-	if p.hint != "" {
-		out += " — " + p.hint
-	}
 	if p.detail != "" {
-		out += "  ·  ! for details"
+		out += "  ·  ! details"
+	}
+	if p.hint != "" {
+		out += "  ·  " + p.hint
 	}
 	return out
 }
@@ -56,22 +61,33 @@ var remedies = []remedy{
 	{"not a git repository", "differ has to run inside a git repository"},
 	{"unknown revision", "no branch, tag or commit by that name"},
 	{"ambiguous argument", "no branch, tag or commit by that name"},
-	{"no upstream branch", "push with P first to set the upstream"},
-	{"no tracking information", "push with P first to set the upstream"},
-	{"not possible to fast-forward", "the branch has diverged — differ only pulls fast-forward"},
-	{"would be overwritten", "commit or stash your changes first"},
-	{"local changes", "commit or stash your changes first"},
 	{"nothing to commit", "nothing is staged — stage something with tab or a"},
+	{"no changes added to commit", "nothing is staged — stage something with tab or a"},
 	{"already exists", "a branch by that name already exists"},
+	// Push and pull. "no upstream branch" comes from a plain push, where
+	// suggesting P would be circular — the user just pressed it.
+	{"no upstream branch", "this branch has no upstream — P offers to set one"},
+	{"no tracking information", "push with P first to set the upstream"},
+	{"non-fast-forward", "the remote has commits you do not — pull with F first"},
+	{"fetch first", "the remote has commits you do not — pull with F first"},
+	{"failed to push some refs", "the push was rejected — pull with F first"},
+	{"not possible to fast-forward", "the branch has diverged — differ only pulls fast-forward"},
+	{"your local changes", "commit or stash your changes first"},
+	{"would be overwritten", "commit or stash your changes first"},
+	{"fix conflicts", "resolve the conflict, then try again"},
+	{"conflict (", "resolve the conflict, then try again"},
+	// The remote refusing, in each of the three shapes it comes in. These are
+	// before the generic permission fragment so a bare file-permission error
+	// does not get told to check its credentials.
 	{"could not read from remote", "check your access to the remote"},
-	{"permission denied", "check your access to the remote"},
+	{"permission denied (publickey", "check your access to the remote"},
+	{"permission to ", "check your access to the remote"},
 	{"authentication failed", "check your access to the remote"},
-	{"conflict", "resolve the conflict, then try again"},
+	{"permission denied", "check the permissions on that path"},
 	// The tools other than git.
 	{"can't find pane", "the tmux target is gone — check tmux_target"},
 	{"can't find session", "the tmux target is gone — check tmux_target"},
 	{"no server running", "tmux is not running — check feedback_target"},
-	{"tmux is not installed", "set feedback_target to clipboard or stdout"},
 	{"executable file not found", "the command is not on PATH"},
 }
 
@@ -96,10 +112,31 @@ func describe(action string, err error) problem {
 
 	// Nothing recognised. The first line is usually the sentence that matters,
 	// and the rest is kept for the details view.
-	if first := firstLine(raw); first != "" {
-		p.hint = trimGitPrefix(first)
+	//
+	// "usually": git push opens with "To <url>", which is never the sentence
+	// that matters, so a bare remote path became the hint. That line is
+	// skipped, and what is left is capped — an uncapped hint pushed the "!"
+	// off the end of the bar.
+	if first := firstUsefulLine(raw); first != "" {
+		p.hint = truncateEnd(trimGitPrefix(first), maxHintWidth)
 	}
 	return p
+}
+
+// maxHintWidth keeps a fallback hint from crowding out the rest of the bar.
+const maxHintWidth = 70
+
+// firstUsefulLine is the first line that says something, skipping git push's
+// "To <url>" banner.
+func firstUsefulLine(s string) string {
+	for line := range strings.SplitSeq(s, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "To ") {
+			continue
+		}
+		return line
+	}
+	return firstLine(s)
 }
 
 // firstLine is the first non-empty line of a tool's output.
@@ -166,7 +203,10 @@ func (m Model) emptyState() []string {
 	case m.stagedOnly:
 		return []string{"Nothing staged", "Stage something, or run differ without -s."}
 	case m.mode == modeReview:
-		return []string{"Nothing to review", "No uncommitted changes yet."}
+		// Reached two ways: opening `differ review` on a clean tree, and the
+		// changeset emptying while a review is open. "yet" would be wrong for
+		// the second — everything was just committed.
+		return []string{"Nothing to review", "No changes to review."}
 	default:
 		return []string{"No changes", "Your working tree is clean."}
 	}
@@ -175,10 +215,16 @@ func (m Model) emptyState() []string {
 // renderEmptyState draws the empty state into the file list's panel.
 func (m Model) renderEmptyState() string {
 	lines := m.emptyState()
-	rows := []string{
-		"",
-		" " + m.styles.PanelLabelFocus.Render(lines[0]),
-		"",
+	var rows []string
+	// The blank lines are breathing room, and the first thing to go: at the
+	// smallest terminal with a status message the panel is five rows, and the
+	// padding used to push the explanation off the bottom.
+	if m.listHeight() > len(lines)+2 {
+		rows = append(rows, "")
+	}
+	rows = append(rows, " "+m.styles.PanelLabelFocus.Render(lines[0]))
+	if m.listHeight() > len(lines) {
+		rows = append(rows, "")
 	}
 	for _, l := range lines[1:] {
 		rows = append(rows, " "+m.styles.HelpDesc.Render(l))

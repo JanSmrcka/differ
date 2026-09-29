@@ -2,12 +2,15 @@ package ui
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/jansmrcka/differ/internal/git"
+	"github.com/jansmrcka/differ/internal/testutil"
 )
 
 // Failures used to be git's stderr concatenated into the status bar:
@@ -142,8 +145,13 @@ func TestProblem_AFailureLeavesTheReviewAlone(t *testing.T) {
 	}
 }
 
-// ! shows what the tool actually said. It is global: a failure can come from
-// any mode, including one that swallows ordinary keys.
+// ! shows what the tool actually said.
+//
+// It is global in the same sense the command bar is: everywhere a key is a
+// command rather than a character. Where the user is typing — a commit
+// message, a branch name, a comment — it is text, exactly as ? is.
+// TestKeymap_TheGlobalKeysWorkInEveryMode holds it to that in all nine
+// states.
 func TestProblem_BangShowsTheDetail(t *testing.T) {
 	t.Parallel()
 	m := newTestModel(t, []fileItem{{change: git.FileChange{Path: "a.ts", Status: git.StatusModified}}})
@@ -228,5 +236,89 @@ func TestEmptyState_NotShownWhenThereAreFiles(t *testing.T) {
 	m := newTestModel(t, []fileItem{{change: git.FileChange{Path: "a.ts", Status: git.StatusModified}}})
 	if got := stripANSI(m.renderFileList()); strings.Contains(got, "No changes") {
 		t.Errorf("an empty state was drawn over a real changeset:\n%s", got)
+	}
+}
+
+// Every case above hands describe an error built by hand, which is how the
+// whole hint table came to be dead in production without a single test
+// failing: git's words never reached it. `cmd.Output()` returns an
+// *exec.ExitError whose Error() is only "exit status 1".
+//
+// This drives real failing git commands through Repo → fail → the status bar.
+func TestProblem_RealGitFailuresReachTheHintTable(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name     string
+		fail     func(t *testing.T, tr *testutil.Repo, repo *git.Repo) error
+		action   string
+		wantHint string
+	}{
+		{
+			name:   "committing with nothing staged",
+			action: "commit",
+			fail: func(t *testing.T, tr *testutil.Repo, repo *git.Repo) error {
+				return repo.Commit("nothing here")
+			},
+			wantHint: "nothing is staged",
+		},
+		{
+			name:   "a branch that already exists",
+			action: "creating the branch",
+			fail: func(t *testing.T, tr *testutil.Repo, repo *git.Repo) error {
+				return repo.CreateBranch("master")
+			},
+			wantHint: "already exists",
+		},
+		{
+			name:   "a ref that does not exist",
+			action: "refresh",
+			fail: func(t *testing.T, tr *testutil.Repo, repo *git.Repo) error {
+				_, err := repo.ChangedFiles(false, "no-such-ref")
+				return err
+			},
+			wantHint: "no branch, tag or commit",
+		},
+		{
+			name:   "an index held by another git",
+			action: "commit",
+			fail: func(t *testing.T, tr *testutil.Repo, repo *git.Repo) error {
+				tr.Write("dummy.txt", "x")
+				tr.Stage("dummy.txt")
+				if err := os.WriteFile(filepath.Join(tr.Dir, ".git", "index.lock"), []byte(""), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				return repo.Commit("blocked")
+			},
+			wantHint: "another git process",
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			tr := testutil.NewRepo(t)
+			tr.CommitFile("a.ts", "one\n", "init")
+			repo, err := git.NewRepo(tr.Dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			gitErr := c.fail(t, tr, repo)
+			if gitErr == nil {
+				t.Fatal("the git command was expected to fail and did not")
+			}
+
+			m := newTestModel(t, nil).fail(c.action, gitErr)
+			if !strings.Contains(m.statusMsg, c.wantHint) {
+				t.Errorf("status bar = %q, want it to mention %q\n(git said: %q)",
+					m.statusMsg, c.wantHint, gitErr)
+			}
+			if m.problem == nil || strings.TrimSpace(m.problem.detail) == "" {
+				t.Error("no detail kept, so ! would show nothing")
+			}
+			if strings.HasPrefix(m.problem.detail, "exit status") {
+				t.Errorf("the detail is just an exit code: %q", m.problem.detail)
+			}
+		})
 	}
 }

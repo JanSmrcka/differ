@@ -174,6 +174,14 @@ message degrades to "no hint" rather than to something wrong.
 must never cost the user their place in the diff or a comment they have
 written.
 
+`Repo.run` captures stdout and stderr separately and, on failure, returns
+whichever said something — stderr first, then stdout, because `git commit`
+writes "no changes added to commit" to stdout. `cmd.Output()` looks like it
+does this and does not: it puts stderr on `ExitError.Stderr`, whose `Error()`
+renders only "exit status 1". Every hint in the table depends on git's actual
+words reaching `describe`, so a test drives real failing git commands all the
+way to the status bar rather than handing `describe` an error built by hand.
+
 ## Gotchas
 
 - **Chroma + lipgloss**: apply Chroma foreground colors token-by-token, keep diff background from line type. Chroma must not override background.

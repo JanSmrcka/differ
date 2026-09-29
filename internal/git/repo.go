@@ -2,6 +2,7 @@ package git
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -320,11 +321,25 @@ func (r *Repo) run(args ...string) (string, error) {
 	// quoted, so the parsers are no worse off than before.
 	cmd := exec.Command("git", append([]string{"-c", "core.quotepath=false"}, args...)...)
 	cmd.Dir = r.dir
-	out, err := cmd.Output()
-	if err != nil {
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Run(); err != nil {
+		// git's own words, not "exit status 1". cmd.Output() discards them —
+		// it puts stderr on ExitError.Stderr, whose Error() renders only the
+		// exit code — and the whole point of reading them is to tell the user
+		// what to do about it.
+		//
+		// stdout is the fallback because a few messages go there instead:
+		// `git commit` writes "no changes added to commit" to stdout.
+		for _, said := range []string{stderr.String(), stdout.String()} {
+			if said = strings.TrimSpace(said); said != "" {
+				return "", errors.New(said)
+			}
+		}
 		return "", err
 	}
-	return string(out), nil
+	return stdout.String(), nil
 }
 
 // runWithStderr executes a git command and returns stdout.
