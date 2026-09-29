@@ -118,3 +118,32 @@ func (m Model) noteChangedFiles(keys map[string]string) Model {
 	m.fileKeys = keys
 	return m
 }
+
+// holdsTheDiff reports whether the content on screen belongs to someone who
+// would rather be asked before it changes.
+//
+// Reviewing is close reading with comments attached to particular lines, so a
+// silent swap can leave a pending comment describing something that is no
+// longer there. Outside review mode differ stays live, which is the point of
+// the poll.
+func (m Model) holdsTheDiff() bool {
+	return m.mode == modeReview && m.renderer != nil
+}
+
+// currentFileMoved reports whether the file under the cursor has different
+// content from the one the diff on screen was built from.
+func (m Model) currentFileMoved(keys map[string]string) bool {
+	path := m.currentFilePath()
+	if path == "" {
+		return false
+	}
+	was, knew := m.fileKeys[path]
+	now, know := keys[path]
+	if !knew || !know {
+		// One side has never seen it. Appearing or vanishing is a change to
+		// the file list rather than to the diff on screen, and the list is
+		// refreshed either way.
+		return false
+	}
+	return was != now
+}

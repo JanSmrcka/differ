@@ -175,6 +175,7 @@ It never changes git state — staging and committing stay explicit actions.
 | `s`       | send comment under cursor       |
 | `S`       | send all pending comments       |
 | `H`       | what has been sent this session |
+| `R`       | reload after the file changed   |
 | `r`       | toggle review mode              |
 | `e`       | open in editor at the cursor's line |
 | `tab`     | stage/unstage                   |
@@ -182,6 +183,15 @@ It never changes git state — staging and committing stay explicit actions.
 | `b`       | open branch picker              |
 | `esc`     | back to file list               |
 | `q`       | quit                            |
+
+While you are reviewing, differ does not swap the diff out from under you. If
+the file changes — an agent rewriting it while you read — the file list and its
+marks update as usual, but the diff you are looking at stays put and the bar
+says `diff moved — R to reload`. `R` re-reads it, keeping your cursor where it
+was and re-anchoring your comments: each one follows its line or is marked
+stale, never left pointing at whatever now occupies its old line number. A
+comment you are in the middle of writing is never touched, and `R` is an
+ordinary letter while the editor is open.
 
 In the comment editor: `ctrl+s` saves, `esc` cancels. Comments are multiline,
 shown inline under the line they refer to, and marked `pending` until sent.

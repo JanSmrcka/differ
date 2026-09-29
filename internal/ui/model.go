@@ -153,6 +153,14 @@ type Model struct {
 	probeWaited int
 	// Ticks since the last full rebuild, so a burst coalesces.
 	ticksSinceRefresh int
+	// Whether the diff on screen is older than the repository.
+	//
+	// Only set in review mode: everywhere else a refresh lands straight away,
+	// which is what makes differ feel live. A reviewer is reading one diff
+	// closely and may have a comment half-written against it, so the content
+	// is held and they are told, rather than swapped and left to notice.
+	diffStale bool
+
 	// The last refresh asked for, and the newest one installed.
 	refreshSeq   int
 	installedSeq int

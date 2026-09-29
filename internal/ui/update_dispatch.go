@@ -233,8 +233,22 @@ func (m Model) handleFilesRefreshed(msg filesRefreshedMsg) (tea.Model, tea.Cmd) 
 	if msg.fingerprint != "" {
 		m.repoFingerprint = msg.fingerprint
 	}
+	// The file on screen moved under a reviewer. The refresh itself still
+	// lands — the list, its marks and the review counts are all current — but
+	// the diff they are reading is not swapped out from under them, and a
+	// half-written comment against it keeps its anchor. They are told instead;
+	// reloading is theirs to ask for.
+	//
+	// Asked before noteChangedFiles, which installs the new keys: after it the
+	// comparison is the new keys against themselves.
+	if m.holdsTheDiff() && m.currentFileMoved(msg.keys) {
+		m.diffStale = true
+	}
 	m = m.noteChangedFiles(msg.keys)
 	if filesEqual(m.files, msg.files) {
+		if m.diffStale {
+			return m, nil
+		}
 		return m, m.loadDiffCmd(false)
 	}
 	m.files = msg.files
