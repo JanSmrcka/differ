@@ -124,7 +124,7 @@ func worktreeKey(repo *git.Repo, path string) string {
 //
 // The result is read by the status bar's progress readout. The per-file badge
 // in the changed-file list is #52.
-func (m Model) noteChangedFiles(keys map[string]string) Model {
+func (m Model) noteChangedFiles(keys map[string]string, holding bool) Model {
 	if keys == nil {
 		// Nothing was fingerprinted, so nothing is known about what moved.
 		// Adopting an empty map would make every file look new on the next
@@ -132,9 +132,25 @@ func (m Model) noteChangedFiles(keys map[string]string) Model {
 		return m
 	}
 	if m.session != nil && m.fileKeys != nil {
-		current := m.currentFilePath()
+		// The file on screen used to be excluded, on the reasoning that
+		// whatever arrives for it is what the reviewer is looking at, so it
+		// cannot be out of date to its own reader. Holding the diff made that
+		// false: the held file is precisely the one that *is* out of date, and
+		// excluding it meant a file rewritten under the reviewer still counted
+		// as read — and moving on without reloading laundered the signal away
+		// entirely.
+		//
+		// It is only excluded while the diff on screen is current, which is
+		// when the old reasoning still applies.
+		// holding rather than diffStale(): this runs before the new keys are
+		// installed, so diffStale() would still be comparing the old ones and
+		// always say the diff is current.
+		exempt := ""
+		if !holding {
+			exempt = m.currentFilePath()
+		}
 		for path, key := range keys {
-			if m.fileKeys[path] != key && path != current {
+			if m.fileKeys[path] != key && path != exempt {
 				m.session.NoteChange(path)
 			}
 		}

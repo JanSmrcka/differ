@@ -173,6 +173,14 @@ func (m Model) handleResize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleDiffLoaded(msg diffLoadedMsg) (tea.Model, tea.Cmd) {
+	// Matched by path, with the index as a tiebreak for the two entries a
+	// staged-and-unstaged file has. The index alone identified nothing: it
+	// addresses m.files, which every refresh replaces — so a load in flight
+	// when the changeset reordered was installed against whatever had taken
+	// its slot, and the panel showed one file's diff under another's name.
+	if msg.path != "" && msg.path != m.currentFilePath() {
+		return m, nil
+	}
 	if msg.index != m.cursor {
 		return m, nil
 	}
@@ -292,7 +300,7 @@ func (m Model) handleFilesRefreshed(msg filesRefreshedMsg) (tea.Model, tea.Cmd) 
 		wasStaged = m.files[m.cursor].change.Staged
 		wasPath = m.files[m.cursor].change.Path
 	}
-	m = m.noteChangedFiles(msg.keys)
+	m = m.noteChangedFiles(msg.keys, hold)
 	if filesEqual(m.files, msg.files) {
 		// Re-anchoring happens whether or not the display is held. It is what
 		// marks a comment stale, and #44 refuses to send a stale comment
@@ -378,7 +386,8 @@ func (m Model) handleCommitDone(msg commitDoneMsg) (tea.Model, tea.Cmd) {
 	}
 	m.statusMsg = "committed!"
 	m.commitInput.Reset()
-	return m, m.refreshFilesCmd()
+	refresh := m.nextRefresh()
+	return m, refresh
 }
 
 func (m Model) handleCommitMsgGenerated(msg commitMsgGeneratedMsg) (tea.Model, tea.Cmd) {
@@ -439,11 +448,15 @@ func (m Model) handleBranchSwitched(msg branchSwitchedMsg) (tea.Model, tea.Cmd) 
 	if msg.err != nil {
 		return m.fail("switch", msg.err), nil
 	}
-	m.statusMsg = "switched to " + m.repo.BranchName()
+	// The header reads currentBranch rather than asking git on every frame, so
+	// the one place that knows the branch moved has to say so.
+	m.currentBranch = m.repo.BranchName()
+	m.statusMsg = "switched to " + m.currentBranch
 	m.prevCurs = -1
 	m.cursor = 0
 	m = m.clampFileScroll()
-	return m, m.refreshFilesCmd()
+	refresh := m.nextRefresh()
+	return m, refresh
 }
 
 func (m Model) handleBranchCreated(msg branchCreatedMsg) (tea.Model, tea.Cmd) {
@@ -453,11 +466,13 @@ func (m Model) handleBranchCreated(msg branchCreatedMsg) (tea.Model, tea.Cmd) {
 		return m.fail("creating the branch", msg.err), nil
 	}
 	m.mode = modeFileList
+	m.currentBranch = msg.name
 	m.statusMsg = "created & switched to " + msg.name
 	m.prevCurs = -1
 	m.cursor = 0
 	m = m.clampFileScroll()
-	return m, m.refreshFilesCmd()
+	refresh := m.nextRefresh()
+	return m, refresh
 }
 
 // fitInputsToPanels sizes the two text inputs from the panels they sit in.

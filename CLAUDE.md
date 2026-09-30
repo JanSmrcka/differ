@@ -237,13 +237,21 @@ way to the status bar rather than handing `describe` an error built by hand.
   nine git processes a second — more churn than the two-second rebuild it
   replaced. A fingerprint is only stored once the refresh actually happens, so
   a change held back is delayed, never dropped.
-- **Not a filesystem watcher, and this was measured.** `git --version` costs
-  13.6 ms on this machine against `git status`'s 15.6, so ~14 of every 16 ms is
-  starting the process, not doing the work. A watcher removes the ~2 ms and
-  keeps the ~14 for every refresh that does happen, in exchange for a
-  dependency, an fd per directory under kqueue on macOS, and a walk of the
-  whole tree to install the watches. The cost is processes; the fix is fewer of
-  them.
+- **Not a filesystem watcher.** Process startup is most of what a git call
+  costs — over 200 iterations, `git --version` is 8.5 ms against the probe's
+  13.2, and a bare `true` is 1.5 — so the fix for a polling loop is fewer
+  processes, not cheaper ones. That is *not* the argument against a watcher,
+  though: a watcher's point is the idle ticks, where it would cost nothing
+  against one process a second. It is rejected for a dependency CLAUDE.md
+  restricts, an fd per directory under kqueue on macOS (fsnotify does not watch
+  recursively), and the install walk the issue asks us to avoid.
+- **Nothing in `View` may ask git anything.** `renderHeader` called
+  `BranchName()`, a synchronous `rev-parse`, so every frame started a process
+  and blocked ~8 ms on it — about one per keypress, and the reason #45's "idle
+  sessions issue approximately no git subprocesses" did not hold however cheap
+  the probe got. The branch is read once at construction and refreshed by the
+  handlers that change it. `View` is a pure function of the model; a test takes
+  the repo away and renders.
 - **Terminal width**: always respect `tea.WindowSizeMsg`. The file list takes `m.listWidth()` — a quarter of the terminal, clamped to `[minListWidth, maxListWidth]` — and the diff gets the rest. It is a method, not a constant: below `twoPanelWidth` the layout collapses to one panel and the width belongs entirely to whichever it is. Ask the model, never assume.
 - **Colour is never the only channel.** Every distinction carries a mark or a word as well as a hue: `+`/`-`, the cursor bar, the staged dot, the status letter, the focus bar, and review state as a word. `TestResponsive_EveryDistinctionSurvivesWithoutColour` strips the colour and checks each one is still there.
 - **Viewport**: call `viewport.SetContent()` on content change, `viewport.GotoTop()` on file switch.

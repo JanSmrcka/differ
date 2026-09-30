@@ -109,10 +109,27 @@ func TestVisual_TheSelectionIsVisibleWithoutColour(t *testing.T) {
 	plain := NewStyles(theme.NoColorTheme())
 	lm.styles = plain
 
-	first := lm.renderCommitLine(lm.commits[0], true)
-	second := lm.renderCommitLine(lm.commits[1], false)
-	if stripANSI(first) == stripANSI(second) {
-		t.Errorf("selected and unselected rows are identical without colour:\n%q\n%q", first, second)
+	// The *same* commit, rendered both ways. It used to compare commits[0]
+	// selected against commits[1] unselected — two different commits, so the
+	// plain text differed whatever the styling did, and the assertion could
+	// not fail.
+	selected := stripANSI(lm.renderCommitLine(lm.commits[0], true))
+	plainRow := stripANSI(lm.renderCommitLine(lm.commits[0], false))
+	if selected == plainRow {
+		t.Errorf("selected and unselected rows are identical without colour:\n%q\n%q",
+			selected, plainRow)
+	}
+	if !strings.Contains(selected, cursorMarker) {
+		t.Errorf("the selected row carries no marker: %q", selected)
+	}
+	if strings.Contains(plainRow, cursorMarker) {
+		t.Errorf("an unselected row carries the marker: %q", plainRow)
+	}
+	// And the two must be the same width, or the list jitters as the cursor
+	// moves.
+	if lipgloss.Width(selected) != lipgloss.Width(plainRow) {
+		t.Errorf("selected row is %d wide, unselected %d",
+			lipgloss.Width(selected), lipgloss.Width(plainRow))
 	}
 }
 

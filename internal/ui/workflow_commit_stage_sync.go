@@ -39,13 +39,15 @@ func (m Model) toggleStage() (tea.Model, tea.Cmd) {
 	f := m.files[m.cursor]
 	repo := m.repo
 	path := f.change.Path
+	m.refreshSeq++
+	seq := m.refreshSeq
 	return m, func() tea.Msg {
 		if f.change.Staged {
 			_ = repo.UnstageFile(path)
 		} else {
 			_ = repo.StageFile(path)
 		}
-		return m.buildRefreshedFiles()
+		return m.buildRefreshedFilesAs(seq)
 	}
 }
 
@@ -54,9 +56,11 @@ func (m Model) stageAll() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	repo := m.repo
+	m.refreshSeq++
+	seq := m.refreshSeq
 	return m, func() tea.Msg {
 		_ = repo.StageAll()
-		return m.buildRefreshedFiles()
+		return m.buildRefreshedFilesAs(seq)
 	}
 }
 
@@ -181,8 +185,8 @@ func (m Model) handleRepoProbed(msg repoProbedMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.ticksSinceRefresh = 0
-		m.refreshSeq++
-		return m, tea.Batch(m.refreshFilesAs("", m.refreshSeq), m.fetchUpstreamStatusCmd())
+		refresh := m.refreshEverythingCmd()
+		return m, refresh
 	}
 	// A refresh must not land under an open input. The tick already declines
 	// to probe in those modes, but a probe dispatched a moment earlier can
@@ -212,8 +216,11 @@ func (m Model) handleRepoProbed(msg repoProbedMsg) (tea.Model, tea.Cmd) {
 }
 
 // refreshEverythingCmd is what a tick used to do unconditionally.
-func (m Model) refreshEverythingCmd() tea.Cmd {
-	return tea.Batch(m.refreshFilesCmd(), m.fetchUpstreamStatusCmd())
+//
+// A pointer receiver so the refresh it issues gets a sequence of its own, like
+// every other one.
+func (m *Model) refreshEverythingCmd() tea.Cmd {
+	return tea.Batch(m.nextRefresh(), m.fetchUpstreamStatusCmd())
 }
 
 func (m Model) handlePushDone(msg pushDoneMsg) (tea.Model, tea.Cmd) {
@@ -229,7 +236,8 @@ func (m Model) handlePullDone(msg pullDoneMsg) (tea.Model, tea.Cmd) {
 		return m.fail("pull", msg.err), nil
 	}
 	m.statusMsg = "pulled!"
-	return m, tea.Batch(m.refreshFilesCmd(), m.fetchUpstreamStatusCmd())
+	refresh := m.nextRefresh()
+	return m, tea.Batch(refresh, m.fetchUpstreamStatusCmd())
 }
 
 func (m Model) loadDiffCmd(resetScroll bool) tea.Cmd {
@@ -260,6 +268,7 @@ func (m Model) loadDiffCmd(resetScroll bool) tea.Cmd {
 			return diffLoadedMsg{
 				errContent:  styles.DiffHunkHeader.Render("Error: " + err.Error()),
 				index:       idx,
+				path:        filename,
 				resetScroll: resetScroll,
 				themeGen:    gen,
 			}
@@ -286,6 +295,7 @@ func (m Model) loadDiffCmd(resetScroll bool) tea.Cmd {
 		return diffLoadedMsg{
 			renderer:    r,
 			index:       idx,
+			path:        filename,
 			resetScroll: resetScroll,
 			themeGen:    gen,
 			// Read here, next to the content, rather than looked up from the
@@ -299,6 +309,26 @@ func (m Model) loadDiffCmd(resetScroll bool) tea.Cmd {
 }
 
 func (m Model) refreshFilesCmd() tea.Cmd {
+	return m.refreshFilesAs("", m.refreshSeq)
+}
+
+// nextRefresh stamps a refresh with a sequence of its own and returns its
+// command.
+//
+// Every refresh needs one. The explicit ones — staging, committing, switching
+// branch, returning from the editor — reused whatever number the last probe
+// had been given, so neither was older than the other by the guard's test and
+// the last to land won, stale fingerprint included. Worse, buildRefreshedFiles
+// left the number at zero, so once any probe had landed the guard dropped
+// every `tab` and `a` refresh outright: staging stopped updating the list
+// until the next probe noticed, turning the most-pressed key in the file list
+// from instant into a one-to-two-second lag.
+//
+// A pointer receiver, and callers must take the command into a variable before
+// returning the model: in `return m, m.nextRefresh()` Go evaluates m first, so
+// the increment would be lost.
+func (m *Model) nextRefresh() tea.Cmd {
+	m.refreshSeq++
 	return m.refreshFilesAs("", m.refreshSeq)
 }
 
@@ -338,19 +368,27 @@ func (m Model) refreshFilesAs(fingerprint string, seq int) tea.Cmd {
 }
 
 func (m Model) buildRefreshedFiles() filesRefreshedMsg {
+	return m.buildRefreshedFilesAs(m.refreshSeq)
+}
+
+func (m Model) buildRefreshedFilesAs(seq int) filesRefreshedMsg {
 	files, err := m.repo.ChangedFiles(m.stagedOnly, m.ref)
 	if err != nil {
-		return filesRefreshedMsg{err: err}
+		return filesRefreshedMsg{err: err, seq: seq}
 	}
 	var untracked []string
 	if !m.stagedOnly && m.ref == "" {
 		untracked, err = m.repo.UntrackedFiles()
 		if err != nil {
-			return filesRefreshedMsg{err: err}
+			return filesRefreshedMsg{err: err, seq: seq}
 		}
 	}
 	items := buildFileItems(m.repo, files, untracked)
-	return filesRefreshedMsg{files: items, keys: fileKeysOf(m.repo, items, m.stagedOnly)}
+	return filesRefreshedMsg{
+		files: items,
+		keys:  fileKeysOf(m.repo, items, m.stagedOnly),
+		seq:   seq,
+	}
 }
 
 // saveSplitPrefCmd persists the split preference.
@@ -436,7 +474,7 @@ func (m Model) rerenderCmd() tea.Cmd {
 		r.SetTabWidth(tabWidth)
 		r.SetSplit(splitMode)
 		return diffLoadedMsg{
-			renderer: r, index: idx, resetScroll: false,
+			renderer: r, index: idx, path: filename, resetScroll: false,
 			key: key, themeGen: gen, rerender: true,
 		}
 	}

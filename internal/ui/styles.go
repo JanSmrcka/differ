@@ -79,13 +79,18 @@ type Styles struct {
 // NewStyles creates styles from a theme.
 func NewStyles(t theme.Theme) Styles {
 	return Styles{
+		// The one column of left padding is where the selection marker goes.
+		// It used to be padding on both, so the only difference between a
+		// selected row and an unselected one was bold and a foreground — and
+		// stripped of colour the two were byte-identical. Every other
+		// distinction in differ carries a glyph as well as a hue; this one
+		// carries cursorMarker, the same one the diff uses, so it means the
+		// same thing in both places.
 		FileItem: lipgloss.NewStyle().
-			Foreground(lipgloss.Color(t.Fg)).
-			PaddingLeft(1),
+			Foreground(lipgloss.Color(t.Fg)),
 		FileSelected: lipgloss.NewStyle().
 			Foreground(lipgloss.Color(t.SelectedFg)).
-			Bold(true).
-			PaddingLeft(1),
+			Bold(true),
 		StagedIcon: lipgloss.NewStyle().
 			Foreground(lipgloss.Color(t.StagedFg)).
 			Bold(true),

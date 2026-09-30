@@ -12,11 +12,16 @@ import (
 
 // View composition and all rendering helpers.
 
+// branchName is the branch on the model, never a question for git.
+//
+// It used to call repo.BranchName(), which is a synchronous `git rev-parse` —
+// inside View, so every rendered frame started a process and blocked ~8 ms on
+// it. That is one per keypress, and it is why #45's "idle sessions issue
+// approximately no git subprocesses" did not hold however cheap the probe got.
+// The name changes about once a session; it is read when the session starts and
+// whenever a branch is switched or created.
 func (m Model) branchName() string {
-	if m.repo == nil {
-		return ""
-	}
-	return m.repo.BranchName()
+	return m.currentBranch
 }
 
 // renderFileList draws the visible window of the changeset.
@@ -65,7 +70,7 @@ func (m Model) renderFileItem(f fileItem, selected bool, short map[string]string
 	name := padTo(truncatePath(m.displayName(f, short), nameW), nameW)
 
 	if selected {
-		return m.styles.FileSelected.Width(m.listWidth()).Render(fmt.Sprintf("%s%s %s %s", stagedRaw, status, name, right.text))
+		return m.styles.FileSelected.Width(m.listWidth()).Render(fmt.Sprintf("%s%s%s %s %s", cursorMarker, stagedRaw, status, name, right.text))
 	}
 
 	staged := stagedRaw
@@ -73,7 +78,7 @@ func (m Model) renderFileItem(f fileItem, selected bool, short map[string]string
 		staged = m.styles.StagedIcon.Render("● ")
 	}
 	line := fmt.Sprintf("%s%s %s %s", staged, m.styleStatus(status, f.change.Status), name, right.render(m.styles))
-	return m.styles.FileItem.Width(m.listWidth()).Render(line)
+	return m.styles.FileItem.Width(m.listWidth()).Render(" " + line)
 }
 
 // displayName is how a file is named in the list: enough of its path to tell
@@ -198,7 +203,7 @@ func (m Model) renderBranchList(height int) string {
 	list := m.activeBranches()
 	itemH := height - 1
 	if len(list) == 0 {
-		b.WriteString(m.styles.FileItem.Width(m.listWidth()).Render(m.styles.HelpDesc.Render("  no matches")))
+		b.WriteString(m.styles.FileItem.Width(m.listWidth()).Render(m.styles.HelpDesc.Render("   no matches")))
 		return b.String()
 	}
 	end := m.branchOffset + itemH
@@ -232,9 +237,9 @@ func (m Model) renderBranchItem(name string, selected, current bool) string {
 	}
 	line := prefix + truncatePath(name, m.listWidth()-4)
 	if selected {
-		return m.styles.FileSelected.Width(m.listWidth()).Render(line)
+		return m.styles.FileSelected.Width(m.listWidth()).Render(cursorMarker + line)
 	}
-	return m.styles.FileItem.Width(m.listWidth()).Render(line)
+	return m.styles.FileItem.Width(m.listWidth()).Render(" " + line)
 }
 
 // truncateEnd shortens text to maxW columns, marking the cut with an ellipsis.

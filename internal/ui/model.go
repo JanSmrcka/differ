@@ -59,6 +59,15 @@ const (
 type tickMsg time.Time
 
 type diffLoadedMsg struct {
+	// The file this diff was read for.
+	//
+	// index alone could not identify it: it indexes m.files, which the next
+	// refresh replaces, so a load in flight when the changeset reordered was
+	// installed against whatever had taken its slot. The panel then showed one
+	// file's diff under another's name, drew that file's comments on it, and
+	// re-anchored them against the wrong parse — marking valid comments stale.
+	path string
+
 	// The content key this diff was built from, read at the same moment as the
 	// content itself rather than looked up afterwards.
 	key string
@@ -317,10 +326,17 @@ func NewModel(repo *git.Repo, cfg config.Config, changes []git.FileChange, untra
 	ca.ShowLineNumbers = false
 	ca.SetHeight(commentEditorHeight)
 
+	// Read once, here, rather than on every frame from inside View.
+	branch := ""
+	if repo != nil {
+		branch = repo.BranchName()
+	}
+
 	return Model{
 		// Open, so a change arriving in the first seconds refreshes at once
 		// rather than waiting for the rate limit to fill.
 		ticksSinceRefresh: refreshEvery,
+		currentBranch:     branch,
 
 		repo:         repo,
 		cfg:          cfg,

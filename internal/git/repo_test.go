@@ -705,3 +705,47 @@ func readFileIn(t *testing.T, repo *Repo, name string) string {
 	}
 	return string(raw)
 }
+
+// The first thing anyone does in a new project: git init, git add, differ.
+//
+// It failed with "fatal: bad object 4b825dc642cb6eb9a060e54bf899d69f82c6b18f".
+// The empty-tree hash in diffNameStatusEmptyTree diverged from git's after 26
+// of its 40 hex digits, so listing staged files before the first commit always
+// errored and differ exited rather than starting.
+//
+// TestUnstageFile_NoCommits already walked this path and discarded the error
+// (`files, _ :=`) before asserting the list was empty — which a failure
+// satisfies, so it passed either way.
+func TestChangedFiles_WorksBeforeTheFirstCommit(t *testing.T) {
+	t.Parallel()
+	repo := setupTestRepo(t)
+	writeFile(t, repo, "new.ts", "hello\n")
+	if err := repo.StageFile("new.ts"); err != nil {
+		t.Fatal(err)
+	}
+
+	files, err := repo.ChangedFiles(false, "")
+	if err != nil {
+		t.Fatalf("ChangedFiles in a repo with no commits: %v", err)
+	}
+	var staged []string
+	for _, f := range files {
+		if f.Staged {
+			staged = append(staged, f.Path)
+		}
+	}
+	if len(staged) != 1 || staged[0] != "new.ts" {
+		t.Errorf("staged files = %v, want [new.ts]", staged)
+	}
+}
+
+// The constant itself, against git's own answer. A hash that is wrong in one
+// digit reads as right.
+func TestEmptyTreeHash_IsGitsOwn(t *testing.T) {
+	t.Parallel()
+	repo := setupTestRepo(t)
+	got := testutil.GitIn(t, repo.Dir(), "hash-object", "-t", "tree", "/dev/null")
+	if got != emptyTreeHash {
+		t.Errorf("emptyTreeHash = %q, git says %q", emptyTreeHash, got)
+	}
+}

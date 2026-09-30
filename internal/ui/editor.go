@@ -110,8 +110,11 @@ func (m Model) editorLine() int {
 
 func (m Model) handleEditorPlan(msg editorPlanMsg) (tea.Model, tea.Cmd) {
 	if msg.err != nil {
-		m.statusMsg = msg.err.Error()
-		return m, nil
+		// Through fail, like every other failure. It was assigned raw, so a
+		// tmux error — which internal/editor deliberately appends stderr to —
+		// arrived in the one-line bar verbatim, three lines of it, with
+		// m.problem left nil so `!` said nothing had gone wrong.
+		return m.fail("opening the editor", msg.err), nil
 	}
 	plan := msg.plan
 	if plan.Kind == editor.KindDetached {
@@ -144,5 +147,6 @@ func (m Model) handleEditorDone(msg editorDoneMsg) (tea.Model, tea.Cmd) {
 	// differ had given up the terminal, so the file may already have been
 	// edited and closed. Reload without resetting, so the reviewer comes back
 	// to the file and position they left.
-	return m, tea.Batch(m.refreshFilesCmd(), m.loadDiffCmd(false))
+	refresh := m.nextRefresh()
+	return m, tea.Batch(refresh, m.loadDiffCmd(false))
 }

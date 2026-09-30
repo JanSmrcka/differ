@@ -360,10 +360,18 @@ func (r *Repo) runWithStderr(args ...string) (string, error) {
 	return stdout.String(), nil
 }
 
+// emptyTreeHash is git's empty tree object, the thing a first commit's staged
+// content is diffed against.
+//
+// Checked against `git hash-object -t tree /dev/null` by a test, because the
+// value written here before was wrong from its 27th hex digit — which looks
+// exactly like the real one — and every `git init && git add . && differ`
+// failed with "fatal: bad object".
+const emptyTreeHash = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
 // diffNameStatusEmptyTree lists staged files when there are no commits yet.
 func (r *Repo) diffNameStatusEmptyTree() ([]FileChange, error) {
-	// 4b825dc... is git's well-known empty tree hash
-	out, err := r.run("diff-index", "--name-status", "--cached", "4b825dc642cb6eb9a060e54bf899d69f82c6b18f")
+	out, err := r.run("diff-index", "--name-status", "--cached", emptyTreeHash)
 	if err != nil {
 		return nil, err
 	}
