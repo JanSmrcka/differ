@@ -27,7 +27,7 @@ brews:
       token: "{{ .Env.TAP_GITHUB_TOKEN }}"
     directory: Formula
     homepage: https://github.com/jansmrcka/differ
-    description: Terminal UI git diff viewer
+    description: Terminal-native review interface for Git changes
     license: MIT
     install: |
       bin.install "differ"
