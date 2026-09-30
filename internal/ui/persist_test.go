@@ -352,3 +352,145 @@ func TestPersist_AReviewThatCannotBeWrittenSaysSo(t *testing.T) {
 		t.Errorf("the comment was lost with the write: %d on src.ts", n)
 	}
 }
+
+// A comment must survive differ being reopened in another mode.
+//
+// The key that decides "has this file moved" was the mode-dependent one:
+// a worktree hash normally, a staged object id under -s. So a review written
+// with `differ` and reopened with `differ -s` found no comparable key, dropped
+// every pending comment, and then overwrote the file on the next change —
+// losing them for good rather than merely not showing them.
+//
+// The question persistence asks is not the one change detection asks. Change
+// detection asks whether the diff on screen is out of date, which depends on
+// what is being diffed. Persistence asks whether the file the reviewer read
+// has been re-saved since, and that is the working tree whatever mode differ
+// was started in.
+func TestPersist_CommentsSurviveAModeChange(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("src.ts", "one\ntwo\n", "first")
+	tr.Modify("src.ts", "one\nCHANGED\n")
+	tr.Stage("src.ts")
+
+	// Written in plain mode.
+	m := liveModelMode(t, tr, false)
+	m = settle(t, m, key("r"))
+	updated, _ := m.startComment()
+	m = updated.(Model)
+	m.commentInput.SetValue("this needs a second look")
+	updated, _ = m.saveComment()
+	m = updated.(Model)
+	if m.session.CountFor("src.ts") != 1 {
+		t.Fatalf("the comment was not saved (%d)", m.session.CountFor("src.ts"))
+	}
+
+	// Reopened with -s, the file untouched in between.
+	staged := liveModelMode(t, tr, true)
+	if staged.session == nil {
+		t.Fatal("no session was restored at all")
+	}
+	if got := staged.session.CountFor("src.ts"); got != 1 {
+		t.Errorf("%d comments survived reopening with -s, want 1", got)
+	}
+}
+
+// And the other direction, which is the one the write side gets wrong.
+//
+// Under -s the keys the refresh measured are index object ids. Writing those
+// as the stored key means a later plain run compares a worktree hash against
+// an index oid, never matches, and drops the comment — so persistence has to
+// measure the working tree even when change detection is not.
+func TestPersist_CommentsWrittenUnderStagedModeSurvivePlainMode(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("src.ts", "one\ntwo\n", "first")
+	tr.Modify("src.ts", "one\nCHANGED\n")
+	tr.Stage("src.ts")
+
+	m := liveModelMode(t, tr, true)
+	if len(m.files) == 0 {
+		t.Skip("nothing staged in this fixture")
+	}
+	m = settle(t, m, key("r"))
+	updated, _ := m.startComment()
+	m = updated.(Model)
+	m.commentInput.SetValue("written while reviewing the index")
+	updated, _ = m.saveComment()
+	m = updated.(Model)
+	path := m.currentFilePath()
+	if m.session.CountFor(path) != 1 {
+		t.Fatalf("the comment was not saved (%d)", m.session.CountFor(path))
+	}
+
+	plain := liveModelMode(t, tr, false)
+	if plain.session == nil {
+		t.Fatal("no session was restored at all")
+	}
+	if got := plain.session.CountFor(path); got != 1 {
+		t.Errorf("%d comments survived reopening without -s, want 1", got)
+	}
+}
+
+// And the rule still holds across the mode change: a file the agent re-saved
+// loses its comments.
+func TestPersist_AReSavedFileLosesItsCommentsInEitherMode(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("src.ts", "one\ntwo\n", "first")
+	tr.Modify("src.ts", "one\nCHANGED\n")
+
+	m := liveModelMode(t, tr, false)
+	m = settle(t, m, key("r"))
+	updated, _ := m.startComment()
+	m = updated.(Model)
+	m.commentInput.SetValue("about the old content")
+	updated, _ = m.saveComment()
+	m = updated.(Model)
+
+	// The agent rewrites it while differ is closed.
+	tr.Modify("src.ts", "one\nREWRITTEN BY THE AGENT\n")
+
+	for _, stagedOnly := range []bool{false, true} {
+		reopened := liveModelMode(t, tr, stagedOnly)
+		if reopened.session == nil {
+			continue // nothing restored at all is also "the comment is gone"
+		}
+		if got := reopened.session.CountFor("src.ts"); got != 0 {
+			t.Errorf("stagedOnly=%v: %d comments survived the file being rewritten",
+				stagedOnly, got)
+		}
+	}
+}
+
+func liveModelMode(t *testing.T, tr *testutil.Repo, stagedOnly bool) Model {
+	t.Helper()
+	repo, err := git.NewRepo(tr.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changes, err := repo.ChangedFiles(stagedOnly, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var untracked []string
+	if !stagedOnly {
+		if untracked, err = repo.UntrackedFiles(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	th := theme.Themes["dark"]
+	m := NewModel(repo, config.Default(), changes, untracked, NewStyles(th), th, stagedOnly, "")
+	m = settle(t, m, tea.WindowSizeMsg{Width: 120, Height: 30})
+	// A refresh, as the first tick does — it is what fills m.fileKeys, and
+	// under -s those are index oids. Without it nothing here exercises the
+	// question of which key persistence may reuse.
+	m = settle(t, m, m.refreshFilesCmd()())
+	if len(m.files) > 0 && len(m.fileKeys) == 0 {
+		t.Fatal("the refresh recorded no file keys")
+	}
+	if cmd := m.loadDiffCmd(true); cmd != nil {
+		m = settle(t, m, cmd())
+	}
+	return m
+}

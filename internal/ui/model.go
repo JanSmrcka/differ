@@ -340,7 +340,7 @@ func NewModel(repo *git.Repo, cfg config.Config, changes []git.FileChange, untra
 	// asked "restore 3 saved comments?" on every start is a question with one
 	// answer, and the comments that do come back are only the ones whose file
 	// is still what it was.
-	store, session := openReviewStore(repo, stagedOnly)
+	store, session := openReviewStore(repo)
 
 	return Model{
 		// Open, so a change arriving in the first seconds refreshes at once

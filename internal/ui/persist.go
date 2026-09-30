@@ -21,7 +21,7 @@ import (
 // whatever was left there. Both results are nil when there is nowhere to keep
 // it, which is a review that works and does not survive, not a failure worth
 // saying anything about.
-func openReviewStore(repo *git.Repo, stagedOnly bool) (*review.Store, *review.Session) {
+func openReviewStore(repo *git.Repo) (*review.Store, *review.Session) {
 	if repo == nil {
 		return nil, nil
 	}
@@ -30,27 +30,35 @@ func openReviewStore(repo *git.Repo, stagedOnly bool) (*review.Store, *review.Se
 		return nil, nil
 	}
 	store := review.NewStore(gitDir)
-	return store, store.Load(freshKeys(repo, stagedOnly))
+	return store, store.Load(freshKeys(repo))
 }
 
-// freshKeys measures the named files now, in one pass.
-//
 // It goes through fileKeysOf, the same function the change detector uses, so
 // "the file moved" cannot come to mean two different things — and so staging,
 // or a formatter writing the same bytes back, is not mistaken for a rewrite
 // here either.
-func freshKeys(repo *git.Repo, stagedOnly bool) review.Keys {
+// freshKeys fingerprints files on disk, whatever mode differ is in.
+//
+// Deliberately not the mode-dependent key that change detection uses. That one
+// answers "is the diff on screen out of date", which depends on what is being
+// diffed — the index under -s, a ref under -r. Persistence asks a different
+// question: has the file the reviewer read been re-saved since? That is the
+// working tree in every mode.
+//
+// Using the change-detection key here meant a review written with `differ` and
+// reopened with `differ -s` found no comparable key, dropped every pending
+// comment, and then overwrote the file on the next change — losing them for
+// good rather than merely not showing them.
+func freshKeys(repo *git.Repo) review.Keys {
 	return func(paths []string) map[string]string {
 		if len(paths) == 0 {
-			// Under -s a key comes from a git call for the whole index, and
-			// asking for nothing would still pay for the process.
 			return nil
 		}
-		items := make([]fileItem, 0, len(paths))
+		keys := make(map[string]string, len(paths))
 		for _, p := range paths {
-			items = append(items, fileItem{change: git.FileChange{Path: p}})
+			keys[p] = worktreeKey(repo, p)
 		}
-		return fileKeysOf(repo, items, stagedOnly)
+		return keys
 	}
 }
 
@@ -79,12 +87,15 @@ func (m Model) persistReview() Model {
 // comment would come back on the next start attached to a version of the file
 // its author never saw.
 func (m Model) reviewKeys() review.Keys {
-	fresh := freshKeys(m.repo, m.stagedOnly)
+	fresh := freshKeys(m.repo)
 	return func(paths []string) map[string]string {
 		out := make(map[string]string, len(paths))
 		var unknown []string
 		for _, p := range paths {
-			if key, ok := m.fileKeys[p]; ok {
+			// m.fileKeys is only comparable when it is measuring the same
+			// thing: under -s and -r it holds index oids and ref hashes, which
+			// a later run in another mode cannot match.
+			if key, ok := m.fileKeys[p]; ok && !m.stagedOnly && m.ref == "" {
 				out[p] = key
 				continue
 			}
