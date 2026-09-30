@@ -297,10 +297,21 @@ Claude Code's Neovim integration does not use this form at all — it sends
 `at_mentioned` as JSON-RPC over a websocket, with `filePath` and a line range.
 That is a different channel; differ writes text into the agent's terminal.
 
-A comment on deleted code carries no reference. The reference resolves against
-the file as it is now, so an old-side line number would land on whatever
-occupies that line today — the `File:` and `Line: N (old)` lines still say
-where it was.
+How much of a reference a comment gets depends on what still resolves against
+the file on disk:
+
+| | |
+|---|---|
+| the line resolves | `@src/cache.ts :L12` |
+| only the file does | `@src/cache.ts` |
+| nothing does | no reference; the prose still says where it was |
+
+The middle case covers more than deleted code. Under `-s` and `differ commit`
+the diff's **new** side is the index, not the working tree: stage a change,
+then edit above it, and the diff still says line 3 while the code has moved to
+line 8. An old-side line number never resolves either. In both the file is
+usually still there, and `sidekick.nvim` has a bare `@path` form for exactly
+that — attaching the file and losing the line beats attaching nothing.
 
 The hunk is differ's addition: for a review it is more useful for the agent to
 see what changed than to go and read the file.

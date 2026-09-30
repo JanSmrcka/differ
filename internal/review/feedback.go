@@ -100,16 +100,21 @@ func lineLabel(c Comment) string {
 // stat it, and attach nothing. Adopting the L without the space lands back on
 // the broken shape.
 //
-// Empty for a comment on deleted code. The reference resolves against the file
-// as it is now, so an old-side line number points at whatever occupies that
-// line today — unrelated code, or nothing at all in a deleted file. Pointing
-// somewhere wrong is worse than not pointing: the File and Line lines below
-// still say where it was, and say "(old)".
+// How much of it is emitted depends on Locate — see its doc comment. Briefly:
+// a line number that does not resolve against the file on disk is worse than
+// no line number, and a file with nothing on disk is worse than no reference.
+// The first version keyed this on Side, which got `-s` and `differ commit`
+// wrong: there the diff's new side is the index, so a new-side line number is
+// as unresolvable as an old-side one.
 func Reference(c Comment) string {
-	if c.Side == SideOld {
+	switch {
+	case c.File == "", c.Locate == LocateNone:
 		return ""
-	}
-	if c.EndLine > c.StartLine {
+	case c.Locate == LocateFile:
+		// The bare form sidekick.nvim emits when it has no row: the agent
+		// attaches the file and reads it.
+		return "@" + c.File
+	case c.EndLine > c.StartLine:
 		return fmt.Sprintf("@%s :L%d-L%d", c.File, c.StartLine, c.EndLine)
 	}
 	return fmt.Sprintf("@%s :L%d", c.File, c.StartLine)

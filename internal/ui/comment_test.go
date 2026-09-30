@@ -4,9 +4,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jansmrcka/differ/internal/config"
 	"github.com/jansmrcka/differ/internal/git"
 	"github.com/jansmrcka/differ/internal/review"
 	"github.com/jansmrcka/differ/internal/testutil"
+	"github.com/jansmrcka/differ/internal/theme"
 )
 
 func reviewModel(t *testing.T, fixture string) Model {
@@ -183,8 +185,12 @@ func TestDiffFixtureCoverage_CommentOnEveryFixture(t *testing.T) {
 // hand, and nothing drove a C hunk comment over a pure deletion.
 func TestHunkComment_APureDeletionTakesTheOldSide(t *testing.T) {
 	t.Parallel()
-	// A hunk that removes three lines and adds none.
-	const raw = "@@ -4,3 +3,0 @@\n-gone one\n-gone two\n-gone three\n"
+	// A hunk that removes the first three lines and adds none. The deletion
+	// has to be at the *top* of the file: with it further down the new-side
+	// start is non-zero, so removing the branch this tests produced a
+	// confidently wrong line rather than the ":L0" the symptom is named for,
+	// and two of the three assertions below never ran.
+	const raw = "@@ -1,3 +0,0 @@\n-gone one\n-gone two\n-gone three\n"
 	_, th := testStyles()
 	m := newTestModel(t, []fileItem{{change: git.FileChange{Path: "doomed.ts", Status: git.StatusModified}}})
 	m.renderer = NewDiffRenderer(ParseDiff(raw), "doomed.ts", NewStyles(th), th, 80)
@@ -204,4 +210,76 @@ func TestHunkComment_APureDeletionTakesTheOldSide(t *testing.T) {
 	if ref := review.Reference(c); strings.Contains(ref, "L0") {
 		t.Errorf("reference points at line zero: %q", ref)
 	}
+}
+
+// Under -s the diff's new side is the index, not the working tree — so a
+// new-side line number is as unresolvable as an old-side one.
+//
+// Stage a change, then edit above it: the diff still says line 3 while the
+// code has moved to line 8. Keying the reference on Side alone emitted
+// "@f.txt :L3", which lands on unrelated code — the exact failure that
+// dropping old-side references was meant to avoid, still happening in
+// `differ commit`, whose whole purpose is reviewing staged work.
+func TestComment_StagedModeDoesNotClaimAWorktreeLine(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("f.txt", "a\nb\nc\n", "first")
+	tr.Modify("f.txt", "a\nb\nCHANGED\n")
+	tr.Stage("f.txt")
+	// Now edit above the staged change, so the worktree and the index differ.
+	tr.Modify("f.txt", "x1\nx2\nx3\nx4\nx5\na\nb\nCHANGED\n")
+
+	for _, tc := range []struct {
+		name       string
+		stagedOnly bool
+		want       review.Locate
+	}{
+		{"worktree", false, review.LocateLine},
+		{"staged only", true, review.LocateFile},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			m := liveModelStaged(t, tr, tc.stagedOnly)
+			if got := m.locateFor(review.SideNew); got != tc.want {
+				t.Errorf("locate = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// A comment on a deleted file has nothing on disk to point at.
+func TestComment_ADeletedFileHasNothingToPointAt(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("gone.ts", "one\n", "first")
+	tr.Delete("gone.ts")
+
+	m := liveModelStaged(t, tr, false)
+	if len(m.files) == 0 {
+		t.Fatal("the deletion is not in the changeset")
+	}
+	if got := m.locateFor(review.SideOld); got != review.LocateNone {
+		t.Errorf("locate = %v, want none", got)
+	}
+}
+
+// liveModelStaged is liveModel with the staged-only flag under test.
+func liveModelStaged(t *testing.T, tr *testutil.Repo, stagedOnly bool) Model {
+	t.Helper()
+	repo, err := git.NewRepo(tr.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changes, err := repo.ChangedFiles(stagedOnly, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var untracked []string
+	if !stagedOnly {
+		if untracked, err = repo.UntrackedFiles(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	th := theme.Themes["dark"]
+	return NewModel(repo, config.Default(), changes, untracked, NewStyles(th), th, stagedOnly, "")
 }

@@ -132,6 +132,7 @@ func (m Model) buildLineComment() (review.Comment, bool) {
 	c := review.Comment{
 		File:      m.currentFilePath(),
 		Side:      side,
+		Locate:    m.locateFor(side),
 		StartLine: line,
 		EndLine:   line,
 		HunkIndex: addr.HunkIndex,
@@ -164,6 +165,7 @@ func (m Model) buildHunkComment() (review.Comment, bool) {
 	return review.Comment{
 		File:      m.currentFilePath(),
 		Side:      side,
+		Locate:    m.locateFor(side),
 		StartLine: start,
 		EndLine:   start + max(count, 1) - 1,
 		HunkIndex: h.Index,
@@ -244,4 +246,32 @@ func excerptMarker(t DiffLineType) string {
 	default:
 		return " "
 	}
+}
+
+// locateFor says how precisely the agent can be pointed at a comment on this
+// side of the current file.
+//
+// Only here is everything needed in scope: the side, whether the diff is
+// against the index, and whether the file still exists. review cannot work it
+// out — it deliberately reads nothing from the repository.
+func (m Model) locateFor(side review.Side) review.Locate {
+	if m.currentFileGone() {
+		return review.LocateNone
+	}
+	// The old side describes the file before the change, so its line numbers
+	// never resolve. Under -s the *new* side is the index, which the working
+	// tree has usually moved on from — staging a change and then editing above
+	// it leaves the diff's line number pointing at something else entirely.
+	if side == review.SideOld || m.stagedOnly {
+		return review.LocateFile
+	}
+	return review.LocateLine
+}
+
+// currentFileGone reports whether the file under the cursor has been deleted.
+func (m Model) currentFileGone() bool {
+	if m.cursor >= len(m.files) {
+		return true
+	}
+	return m.files[m.cursor].change.Status == git.StatusDeleted
 }

@@ -40,7 +40,8 @@ func TestFormatFeedback_HunkComment(t *testing.T) {
 func TestFormatFeedback_MultipleFiles(t *testing.T) {
 	a := loginComment()
 	b := Comment{
-		ID: "c2", File: "src/api/client.ts", Side: SideOld, StartLine: 10, EndLine: 10,
+		ID: "c2", File: "src/api/client.ts", Side: SideOld, Locate: LocateFile,
+		StartLine: 10, EndLine: 10,
 		Excerpt: "-  return fetch(url)\n+  return await fetch(url)\n",
 		Body:    "Same problem here.", State: StatePending,
 	}
@@ -55,7 +56,8 @@ func TestFormatFeedback_MultilineBody(t *testing.T) {
 
 func TestFormatFeedback_DeletedFileComment(t *testing.T) {
 	c := Comment{
-		ID: "c1", File: "src/legacy/old.ts", Side: SideOld, StartLine: 1, EndLine: 1,
+		ID: "c1", File: "src/legacy/old.ts", Side: SideOld, Locate: LocateNone,
+		StartLine: 1, EndLine: 1,
 		Excerpt: "-export const deprecated = true\n",
 		Body:    "Why was this removed?", State: StatePending,
 	}
@@ -245,29 +247,51 @@ func TestReference_KeepsTheSpaceCliToolsNeed(t *testing.T) {
 	}
 }
 
-// A comment on deleted code carries no reference.
+// How much of a reference a comment gets depends on what still resolves.
 //
-// The reference resolves against the file as it is now, so an old-side line
-// number lands on whatever occupies that line today — unrelated code, or
-// nothing at all in a deleted file. Two comments in one payload, one on a
-// removed line and one on a context line, produced byte-identical references
-// to different things.
-func TestReference_SaysNothingAboutDeletedCode(t *testing.T) {
+// The first version keyed this on Side, which was wrong twice over: it emitted
+// a line reference under -s, where the diff's new side is the index and the
+// working tree has usually moved on, and it emitted nothing for an old-side
+// comment on a file that is still there — losing the file as well as the line,
+// when sidekick.nvim has a bare "@path" form for exactly that.
+func TestReference_SaysAsMuchAsStillResolves(t *testing.T) {
 	t.Parallel()
-	old := Comment{File: "src/gone.ts", Side: SideOld, StartLine: 7, EndLine: 7, Body: "why?"}
-	if got := Reference(old); got != "" {
-		t.Errorf("Reference for deleted code = %q, want none", got)
-	}
+	base := Comment{File: "src/cache.ts", StartLine: 12, EndLine: 12, Body: "x"}
 
-	// The payload still says where it was, and which side.
-	body := FormatComment(old)
+	for _, tc := range []struct {
+		name   string
+		locate Locate
+		want   string
+	}{
+		{"the line resolves", LocateLine, "@src/cache.ts :L12"},
+		{"only the file resolves", LocateFile, "@src/cache.ts"},
+		{"nothing resolves", LocateNone, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			c := base
+			c.Locate = tc.locate
+			if got := Reference(c); got != tc.want {
+				t.Errorf("Reference = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// A comment with nothing to point at still says where it was, in prose.
+func TestFormatComment_KeepsTheProseWhenThereIsNoReference(t *testing.T) {
+	t.Parallel()
+	body := FormatComment(Comment{
+		File: "src/gone.ts", Side: SideOld, Locate: LocateNone,
+		StartLine: 7, EndLine: 7, Body: "why?",
+	})
 	for _, want := range []string{"File: src/gone.ts", "Line: 7 (old)", "why?"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("the payload lost %q:\n%s", want, body)
 		}
 	}
 	if strings.Contains(body, "@src/gone.ts") {
-		t.Errorf("a reference was emitted for deleted code:\n%s", body)
+		t.Errorf("a reference was emitted for a deleted file:\n%s", body)
 	}
 }
 
@@ -275,12 +299,18 @@ func TestReference_SaysNothingAboutDeletedCode(t *testing.T) {
 // today only because Session.Add normalises them to be equal.
 func TestReference_ASingleLineReportsItsStartLine(t *testing.T) {
 	t.Parallel()
-	got := Reference(Comment{File: "a.ts", Side: SideNew, StartLine: 5, EndLine: 9})
-	if got != "@a.ts :L5-L9" {
-		t.Errorf("Reference = %q", got)
+	if got := Reference(Comment{File: "a.ts", StartLine: 5, EndLine: 9}); got != "@a.ts :L5-L9" {
+		t.Errorf("a range = %q", got)
 	}
-	// And with them equal, the single-line form.
-	if got := Reference(Comment{File: "a.ts", Side: SideNew, StartLine: 5, EndLine: 5}); got != "@a.ts :L5" {
-		t.Errorf("Reference = %q, want @a.ts :L5", got)
+	if got := Reference(Comment{File: "a.ts", StartLine: 5, EndLine: 5}); got != "@a.ts :L5" {
+		t.Errorf("one line = %q, want @a.ts :L5", got)
+	}
+	// The case that actually pins it. Both of the above take the branch they
+	// take whichever field it reads, so an earlier version of this test could
+	// not tell StartLine from EndLine — Session.Add normalises them, so the
+	// only way to exercise the difference is to build the comment by hand
+	// with EndLine behind StartLine.
+	if got := Reference(Comment{File: "a.ts", StartLine: 9, EndLine: 5}); got != "@a.ts :L9" {
+		t.Errorf("one line = %q, want @a.ts :L9 — the reference reports EndLine", got)
 	}
 }
