@@ -74,8 +74,16 @@ func (m Model) reanchorCmd(includeCurrent bool) tea.Cmd {
 	}
 
 	repo := m.repo
+	// The flag, not an entry: these are files the cursor is not on, so there
+	// is no entry to ask. What matters is that the Locate below is derived
+	// from the same answer, so the coordinates and the claim about them
+	// cannot disagree.
 	staged := m.stagedOnly
 	ref := m.ref
+	locate := review.LocateLine
+	if staged && ref == "" {
+		locate = review.LocateFile
+	}
 	untracked := map[string]bool{}
 	for _, f := range m.files {
 		if f.untracked {
@@ -84,13 +92,13 @@ func (m Model) reanchorCmd(includeCurrent bool) tea.Cmd {
 	}
 
 	return func() tea.Msg {
-		out := make(map[string][]review.Location, len(targets))
+		out := make(map[string]review.Anchored, len(targets))
 		for _, path := range targets {
 			parsed, ok := parseFileDiff(repo, path, staged, ref, untracked[path])
 			if !ok {
 				continue
 			}
-			out[path] = diffLocations(parsed)
+			out[path] = review.Anchored{Locations: diffLocations(parsed), Locate: locate}
 		}
 		return reanchorMsg{locations: out}
 	}
@@ -115,7 +123,7 @@ func parseFileDiff(repo *git.Repo, path string, staged bool, ref string, untrack
 
 // buildLineComment describes the line under the cursor.
 func (m Model) buildLineComment() (review.Comment, bool) {
-	if m.renderer == nil {
+	if !m.rendererIsTheCursorsFile() {
 		return review.Comment{}, false
 	}
 	parsed := m.renderer.Parsed()
@@ -132,6 +140,7 @@ func (m Model) buildLineComment() (review.Comment, bool) {
 	c := review.Comment{
 		File:      m.currentFilePath(),
 		Side:      side,
+		Locate:    m.locateFor(side),
 		StartLine: line,
 		EndLine:   line,
 		HunkIndex: addr.HunkIndex,
@@ -145,7 +154,7 @@ func (m Model) buildLineComment() (review.Comment, bool) {
 
 // buildHunkComment describes the whole hunk the cursor is in.
 func (m Model) buildHunkComment() (review.Comment, bool) {
-	if m.renderer == nil {
+	if !m.rendererIsTheCursorsFile() {
 		return review.Comment{}, false
 	}
 	parsed := m.renderer.Parsed()
@@ -164,12 +173,27 @@ func (m Model) buildHunkComment() (review.Comment, bool) {
 	return review.Comment{
 		File:      m.currentFilePath(),
 		Side:      side,
+		Locate:    m.locateFor(side),
 		StartLine: start,
 		EndLine:   start + max(count, 1) - 1,
 		HunkIndex: h.Index,
 		Anchor:    anchorForHunk(parsed, h, side),
 		Excerpt:   excerptFor(parsed, h),
 	}, true
+}
+
+// rendererIsTheCursorsFile reports whether what is parsed is what the cursor
+// is on.
+//
+// A comment takes its excerpt and anchor from the renderer and its path and
+// Locate from the cursor. A diff load is a tea.Cmd and git diff costs about
+// eight milliseconds, so holding j through the file list leaves the two
+// disagreeing — and the comment then named one file while quoting another's
+// hunk, or named the right file with the other entry's line numbers. Now
+// that the reference is machine-actionable, that is a wrong edit rather than
+// a confusing message. The editor already had this guard.
+func (m Model) rendererIsTheCursorsFile() bool {
+	return m.renderer != nil && m.rendererPath == m.currentFilePath()
 }
 
 // sideAndLine picks which side of the diff a line belongs to. A removed line
@@ -244,4 +268,70 @@ func excerptMarker(t DiffLineType) string {
 	default:
 		return " "
 	}
+}
+
+// locateFor says how precisely the agent can be pointed at a comment on this
+// side of the current file.
+//
+// Only here is everything needed in scope: the side, whether the diff is
+// against the index, and whether the file still exists. review cannot work it
+// out — it deliberately reads nothing from the repository.
+func (m Model) locateFor(side review.Side) review.Locate {
+	if m.currentFileGone() {
+		return review.LocateNone
+	}
+	// The old side describes the file before the change, so its line numbers
+	// never resolve.
+	if side == review.SideOld {
+		return review.LocateFile
+	}
+	// Whether the *new* side is the working tree depends on what this entry's
+	// diff was read with, not on the flag differ was started with. git reports
+	// a file with both staged and unstaged changes twice, staged first — so in
+	// default mode the cursor starts on an entry whose diff is `--cached`, and
+	// keying on m.stagedOnly called that the worktree. Stage a change, edit
+	// above it, and the reference said line 3 while the code had moved to line
+	// 8. loadDiffCmd reads f.change.Staged; so does this.
+	//
+	// No `&& m.ref == ""` here. Under -r, changedFilesRef never sets Staged,
+	// so the term could never be reached and removing it changed no screen —
+	// a condition documenting a case it cannot see is worse than none.
+	entry := m.files[m.cursor].change
+	if entry.Staged && !m.worktreeMatchesIndex(entry.Path) {
+		return review.LocateFile
+	}
+	return review.LocateLine
+}
+
+// currentFileGone reports whether there is no file on disk to point at: the
+// cursor is off the end of the list, or the file under it has been deleted.
+//
+// The bounds check was one-sided. A negative cursor is not reachable today,
+// but the only thing standing between it and a panic inside a tea.Cmd was
+// that fact, and this function is the guard.
+func (m Model) currentFileGone() bool {
+	if m.cursor < 0 || m.cursor >= len(m.files) {
+		return true
+	}
+	return m.files[m.cursor].change.Status == git.StatusDeleted
+}
+
+// worktreeMatchesIndex answers whether a --cached diff's line numbers also
+// address the file on disk.
+//
+// Blanket-degrading every staged entry to a file reference meant `differ
+// commit` — whose whole purpose is reviewing staged work — could never point
+// the agent at a line, even in its dominant case: stage, review, commit,
+// with nothing edited in between, where the index and the working tree are
+// the same bytes. The question is answerable exactly in one git call rather
+// than guessed at conservatively.
+//
+// A failure answers false, which is the safe direction: an unanswerable
+// question degrades to "@path", never to a line nobody checked.
+func (m Model) worktreeMatchesIndex(path string) bool {
+	if m.repo == nil {
+		return false
+	}
+	same, err := m.repo.WorktreeMatchesIndex(path)
+	return err == nil && same
 }

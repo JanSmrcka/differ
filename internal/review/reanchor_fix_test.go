@@ -38,7 +38,7 @@ func TestReanchor_DoesNotHopToADistantIdenticalLine(t *testing.T) {
 	c := s.Add(Comment{File: "a.ts", Side: SideNew, StartLine: 10, EndLine: 10, Anchor: "}", Body: "note"})
 
 	// The block at line 10 is gone; the only other "}" is far away.
-	s.Reanchor("a.ts", lines(newLine(400, "}")))
+	s.Reanchor("a.ts", Anchored{Locations: lines(newLine(400, "}")), Locate: LocateLine})
 
 	got, _ := s.Get(c.ID)
 	if got.State != StateStale {
@@ -56,7 +56,7 @@ func TestReanchor_TwoCommentsDoNotClaimTheSameLine(t *testing.T) {
 	b := s.Add(Comment{File: "a.ts", Side: SideNew, StartLine: 12, EndLine: 12, Anchor: "}", Body: "second"})
 
 	// Only one "}" survives, near both.
-	s.Reanchor("a.ts", lines(newLine(11, "}")))
+	s.Reanchor("a.ts", Anchored{Locations: lines(newLine(11, "}")), Locate: LocateLine})
 
 	ga, _ := s.Get(a.ID)
 	gb, _ := s.Get(b.ID)
@@ -70,7 +70,7 @@ func TestReanchor_NearbyShiftIsStillFollowed(t *testing.T) {
 	s := NewSession()
 	c := s.Add(Comment{File: "a.ts", Side: SideNew, StartLine: 10, EndLine: 10, Anchor: "}", Body: "note"})
 
-	s.Reanchor("a.ts", lines(newLine(13, "}")))
+	s.Reanchor("a.ts", Anchored{Locations: lines(newLine(13, "}")), Locate: LocateLine})
 
 	got, _ := s.Get(c.ID)
 	if got.State != StatePending {
@@ -86,7 +86,7 @@ func TestStaleReason_IsValidUTF8ForMultibyteAnchors(t *testing.T) {
 	anchor := "  const zpráva = \"příliš žluťoučký kůň úpěl ďábelské ódy a běžel přes pole\""
 	c := s.Add(Comment{File: "a.ts", Side: SideNew, StartLine: 1, EndLine: 1, Anchor: anchor, Body: "note"})
 
-	s.Reanchor("a.ts", lines(newLine(1, "changed")))
+	s.Reanchor("a.ts", Anchored{Locations: lines(newLine(1, "changed")), Locate: LocateLine})
 
 	got, _ := s.Get(c.ID)
 	if !utf8.ValidString(got.StaleReason) {

@@ -60,6 +60,14 @@ func header(n int) string {
 func FormatComment(c Comment) string {
 	var b strings.Builder
 
+	// The reference first, on a line of its own, in the form an agent's editor
+	// integration already understands — sidekick.nvim sends exactly this and
+	// Claude Code reads the file from it. The lines below stay because the
+	// hunk is the more useful thing for a review: the agent sees what changed
+	// without going and looking.
+	if ref := Reference(c); ref != "" {
+		fmt.Fprintf(&b, "%s\n", ref)
+	}
 	fmt.Fprintf(&b, "File: %s\n", c.File)
 	fmt.Fprintf(&b, "%s (%s)\n", lineLabel(c), sideLabel(c.Side))
 
@@ -80,6 +88,44 @@ func lineLabel(c Comment) string {
 		return fmt.Sprintf("Lines: %d-%d", c.StartLine, c.EndLine)
 	}
 	return fmt.Sprintf("Line: %d", c.StartLine)
+}
+
+// Reference locates a comment the way a CLI agent's @-mention resolver expects:
+// "@path :L12", or "@path :L12-L20" for a range.
+//
+// The space before the colon is load-bearing, not decoration. sidekick.nvim
+// emits exactly this, and its commit d570e1f ("different format that should
+// work for most cli tools") added the space and the L prefix together, because
+// "@path:12" made the resolver read the whole token as a filename, fail to
+// stat it, and attach nothing. Adopting the L without the space lands back on
+// the broken shape.
+//
+// How much of it is emitted depends on Locate — see its doc comment. Briefly:
+// a line number that does not resolve against the file on disk is worse than
+// no line number, and a file with nothing on disk is worse than no reference.
+// The first version keyed this on Side, which got `-s` and `differ commit`
+// wrong: there the diff's new side is the index, so a new-side line number is
+// as unresolvable as an old-side one.
+func Reference(c Comment) string {
+	switch {
+	case c.File == "", c.Locate == LocateNone:
+		return ""
+	case strings.ContainsAny(c.File, " \t"):
+		// The whole reason for the space before the colon is that the
+		// resolver tokenises on whitespace and would otherwise read
+		// "@path:9" as one filename. A path that itself contains a space
+		// gives it the token "@my" and a file that does not exist, which is
+		// worse than saying nothing: the prose below still carries the path
+		// in full, and a reader can open it.
+		return ""
+	case c.Locate == LocateFile, c.Locate == LocateUnknown:
+		// The bare form sidekick.nvim emits when it has no row: the agent
+		// attaches the file and reads it.
+		return "@" + c.File
+	case c.EndLine > c.StartLine:
+		return fmt.Sprintf("@%s :L%d-L%d", c.File, c.StartLine, c.EndLine)
+	}
+	return fmt.Sprintf("@%s :L%d", c.File, c.StartLine)
 }
 
 // sideLabel says which version of the file the line numbers refer to, so a

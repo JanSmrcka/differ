@@ -4,6 +4,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/jansmrcka/differ/internal/review"
 )
 
 // Update stays dispatcher-only; behavior lives in focused modules.
@@ -247,7 +248,10 @@ func (m Model) handleDiffLoaded(msg diffLoadedMsg) (tea.Model, tea.Cmd) {
 		// quoting code that is gone. The comments themselves still need
 		// installing on the new renderer.
 		if !msg.rerender {
-			m.session.Reanchor(m.currentFilePath(), diffLocations(msg.renderer.Parsed()))
+			m.session.Reanchor(m.currentFilePath(), review.Anchored{
+				Locations: diffLocations(msg.renderer.Parsed()),
+				Locate:    m.locateFor(review.SideNew),
+			})
 		}
 		m.renderer.SetComments(m.session.CommentsFor(m.currentFilePath()))
 	}
@@ -387,8 +391,8 @@ func (m Model) handleReanchor(msg reanchorMsg) (tea.Model, tea.Cmd) {
 	if m.session == nil {
 		return m, nil
 	}
-	for file, locations := range msg.locations {
-		m.session.Reanchor(file, locations)
+	for file, anchored := range msg.locations {
+		m.session.Reanchor(file, anchored)
 	}
 	return m.refreshCommentMarks(), nil
 }
