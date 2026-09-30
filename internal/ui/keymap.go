@@ -136,6 +136,7 @@ func diffBindings(review bool) []binding {
 			{Keys: []string{"s"}, Label: "s/S", Desc: "send", Help: "send the comment under the cursor, or S for all of them", Bar: true},
 			{Keys: []string{"S"}},
 			{Keys: []string{"H"}, Desc: "history", Help: "what has been sent, and whether it arrived"},
+			{Keys: []string{"R"}, Desc: "reload", Help: "re-read this file after it changed underneath you"},
 			{Keys: []string{"r"}, Desc: "exit review", Help: "go back to the plain diff", Bar: true},
 		}
 	} else {

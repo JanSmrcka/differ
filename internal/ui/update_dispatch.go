@@ -158,6 +158,17 @@ func (m Model) handleResize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 	m = m.clampFileScroll().clampBranchScroll()
 	// Re-render at the new size without resetting: a resize (or a tmux pane
 	// split) must not send the reviewer back to the top of the diff.
+	// A resize must not re-read the file while its diff is being held: that is
+	// the content swap the hold exists to prevent, and it would take the
+	// notice saying it had happened with it. Re-render the parse in hand at
+	// the new width instead.
+	// holdsTheDiff, not diffStale alone: between a refresh installing new keys
+	// and the load it batched landing, diffStale is briefly true in the plain
+	// diff and the file list too — and a resize there would keep the old
+	// content in a mode where R is unbound.
+	if m.holdsTheDiff() && m.diffStale() {
+		return m, m.rerenderCmd()
+	}
 	return m, m.loadDiffCmd(false)
 }
 
@@ -185,13 +196,37 @@ func (m Model) handleDiffLoaded(msg diffLoadedMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// A re-render carries the content that was on screen when it was asked
+	// for. If something has replaced that content since — an explicit reload
+	// landing first — the re-render is stale and installing it would undo the
+	// reload and put the notice back. The key it was built from says so; no
+	// separate sequence is needed, and a counter on the model would not work
+	// anyway, because loadDiffCmd is called on a copy in `return m, cmd`.
+	if msg.rerender && msg.key != m.rendererKey {
+		return m, nil
+	}
+
 	m.renderer = msg.renderer
 	m.rendererPath = m.currentFilePath()
+	// What this diff was built from. Staleness is the difference between this
+	// and the file's key now, so recording it here is the only place the
+	// notice is ever cleared — and it cannot be forgotten, because forgetting
+	// it means having no renderer either.
+	m = m.noteRenderedDiff(msg.key)
 	if m.session != nil {
 		// Re-resolve this file's comments against the diff that just arrived,
 		// so a comment follows its line or is marked stale — never left
 		// pointing at whatever now occupies its old line number.
-		m.session.Reanchor(m.currentFilePath(), diffLocations(msg.renderer.Parsed()))
+		//
+		// Not for a re-render: that is the same content at a new width, and
+		// the parse it carries still contains the lines the agent has since
+		// deleted. Re-anchoring against it restored every comment the refresh
+		// had just marked stale, so #44 would send one on the first press
+		// quoting code that is gone. The comments themselves still need
+		// installing on the new renderer.
+		if !msg.rerender {
+			m.session.Reanchor(m.currentFilePath(), diffLocations(msg.renderer.Parsed()))
+		}
 		m.renderer.SetComments(m.session.CommentsFor(m.currentFilePath()))
 	}
 	// A new file, or the very first diff of the session, starts at the first
@@ -233,8 +268,42 @@ func (m Model) handleFilesRefreshed(msg filesRefreshedMsg) (tea.Model, tea.Cmd) 
 	if msg.fingerprint != "" {
 		m.repoFingerprint = msg.fingerprint
 	}
+	// The file on screen moved under a reviewer. The refresh itself still
+	// lands — the list, its marks and the review counts are all current — but
+	// the diff they are reading is not swapped out from under them, and a
+	// half-written comment against it keeps its anchor. They are told instead;
+	// reloading is theirs to ask for.
+	//
+	// Asked before noteChangedFiles, which installs the new keys: after it the
+	// comparison is the new keys against themselves.
+	//
+	// Decided here, once, and outside every branch below. It used to live
+	// inside the filesEqual arm — and filesEqual compares the diff's added and
+	// deleted line counts, so any edit that changed those fell through to a
+	// reload that reset the cursor while the notice still claimed the diff was
+	// being held. Adding one line was enough.
+	hold := m.holdsTheDiff() && m.currentFileMoved(msg.keys)
+	// Which half of the entry the cursor is on, for followCursorTo. A path
+	// with both staged and unstaged changes is two entries, and moving the
+	// cursor to the wrong one made R swap in the other half's diff — on the
+	// one action that is supposed to be safe.
+	wasStaged, wasPath := false, ""
+	if m.cursor < len(m.files) {
+		wasStaged = m.files[m.cursor].change.Staged
+		wasPath = m.files[m.cursor].change.Path
+	}
 	m = m.noteChangedFiles(msg.keys)
 	if filesEqual(m.files, msg.files) {
+		// Re-anchoring happens whether or not the display is held. It is what
+		// marks a comment stale, and #44 refuses to send a stale comment
+		// without a second press — so skipping it left a comment about a line
+		// the agent had already replaced looking pending and sendable. The
+		// first fix put this in the other arm of this same if, and a
+		// same-length replacement — the commonest edit there is — took this
+		// one.
+		if hold {
+			return m, m.reanchorCmd(true)
+		}
 		return m, m.loadDiffCmd(false)
 	}
 	m.files = msg.files
@@ -247,6 +316,19 @@ func (m Model) handleFilesRefreshed(msg filesRefreshedMsg) (tea.Model, tea.Cmd) 
 			paths = append(paths, f.change.Path)
 		}
 		m.session.StaleMissingFiles(paths)
+	}
+	// The cursor is an index, and the list it indexes has just been replaced.
+	// A file sorting earlier joining the changeset shifts everything below it,
+	// so the index has to follow the entry it was on — otherwise the list
+	// highlights one file while the panel shows another.
+	//
+	// Only when the cursor and the renderer still agree. They disagree exactly
+	// when the user has navigated and the new diff has not landed yet — and
+	// dragging the cursor back to the renderer's file there undid the
+	// navigation silently, because the load for the file they asked for is
+	// then discarded by the index guard in handleDiffLoaded.
+	if m.rendererPath == wasPath {
+		m = m.followCursorTo(m.rendererPath, wasStaged)
 	}
 	if m.cursor >= len(m.files) {
 		m.cursor = max(0, len(m.files)-1)
@@ -263,7 +345,20 @@ func (m Model) handleFilesRefreshed(msg filesRefreshedMsg) (tea.Model, tea.Cmd) 
 	}
 	// The changeset moved, so comments on files that are not on screen need
 	// re-anchoring too, not just the one being viewed.
-	return m, tea.Batch(m.loadDiffCmd(true), m.reanchorAllCmd())
+	//
+	// Holding the display must not hold the bookkeeping. Re-anchoring is what
+	// marks a comment stale, and #44 refuses to send a stale one without a
+	// second press — so skipping it here meant a comment about a line the
+	// agent had already deleted stayed "pending" and went out on the first
+	// press, carrying an excerpt of code that no longer exists.
+	if hold {
+		return m, m.reanchorCmd(true)
+	}
+	// resetScroll only outside review mode. The changeset changing is not a
+	// reason to send a reviewer back to the top of the file they are reading —
+	// and with an agent working, another file changing is the common case, not
+	// the rare one.
+	return m, tea.Batch(m.loadDiffCmd(m.mode != modeReview), m.reanchorAllCmd())
 }
 
 func (m Model) handleReanchor(msg reanchorMsg) (tea.Model, tea.Cmd) {

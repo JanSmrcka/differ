@@ -76,7 +76,11 @@ func (m Model) editorLine() int {
 	// previous file's — after entering the diff, or after n/p, until
 	// diffLoadedMsg arrives. A line taken from it would be about the wrong
 	// file, so claim none until the two agree.
-	if m.renderer == nil || m.rendererPath != m.currentFilePath() {
+	// The same reason covers a held diff: it is knowingly older than the file,
+	// so its line numbers describe a version that is no longer on disk.
+	// Opening an editor at a confidently wrong line is worse than opening it
+	// at the top.
+	if m.renderer == nil || m.rendererPath != m.currentFilePath() || m.diffStale() {
 		return 0
 	}
 

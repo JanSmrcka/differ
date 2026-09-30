@@ -242,6 +242,7 @@ func (m Model) loadDiffCmd(resetScroll bool) tea.Cmd {
 	styles := m.styles
 	t := m.theme
 	staged := f.change.Staged
+	stagedOnly := m.stagedOnly
 	ref := m.ref
 	diffW := m.diffWidth()
 	filename := f.change.Path
@@ -282,7 +283,18 @@ func (m Model) loadDiffCmd(resetScroll bool) tea.Cmd {
 		r := NewDiffRenderer(parsed, filename, styles, t, diffW)
 		r.SetTabWidth(tabWidth)
 		r.SetSplit(splitMode)
-		return diffLoadedMsg{renderer: r, index: idx, resetScroll: resetScroll, themeGen: gen}
+		return diffLoadedMsg{
+			renderer:    r,
+			index:       idx,
+			resetScroll: resetScroll,
+			themeGen:    gen,
+			// Read here, next to the content, rather than looked up from the
+			// last poll's key map afterwards: a write landing between that
+			// poll and this read left the renderer holding content newer than
+			// its recorded key, and the next poll then reported a change that
+			// was already on screen.
+			key: fileKeyOf(repo, f, stagedOnly),
+		}
 	}
 }
 
@@ -392,5 +404,40 @@ func (m Model) generateCommitMsgCmd() tea.Cmd {
 			return commitMsgGeneratedMsg{err: fmt.Errorf("%s: %w", parts[0], err)}
 		}
 		return commitMsgGeneratedMsg{message: strings.TrimSpace(string(out))}
+	}
+}
+
+// rerenderCmd rebuilds the diff on screen at the current width and palette,
+// from the parse already in hand rather than from the file.
+//
+// It keeps the key the content was read with, so a resize or a theme change
+// cannot mark a held diff as current — which would remove the notice without
+// the reviewer ever seeing what moved.
+func (m Model) rerenderCmd() tea.Cmd {
+	if m.renderer == nil {
+		return nil
+	}
+	parsed := m.renderer.Parsed()
+	idx := m.cursor
+	styles := m.styles
+	t := m.theme
+	diffW := m.diffWidth()
+	filename := m.rendererPath
+	// The same rule as loadDiffCmd, onePanel included. Without it a resize
+	// into the 60-71 column band engaged split view where a fresh load
+	// refuses, because there the collapsed layout gives the diff the whole
+	// terminal.
+	splitMode := m.splitDiff && !m.onePanel() && diffW >= minSplitWidth
+	tabWidth := m.cfg.TabWidth
+	key := m.rendererKey
+	gen := m.themeGen
+	return func() tea.Msg {
+		r := NewDiffRenderer(parsed, filename, styles, t, diffW)
+		r.SetTabWidth(tabWidth)
+		r.SetSplit(splitMode)
+		return diffLoadedMsg{
+			renderer: r, index: idx, resetScroll: false,
+			key: key, themeGen: gen, rerender: true,
+		}
 	}
 }

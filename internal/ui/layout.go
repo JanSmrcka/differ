@@ -283,6 +283,17 @@ func (m Model) statusSegment() string {
 	// "failed", no hint and no "!" — and read as progress rather than a
 	// failure.
 	var parts []string
+	// First, above even what just happened: it says the screen is not showing
+	// the repository, and every other word in this row describes that screen.
+	// Only where the key that clears it works. Outside review mode the bar was
+	// still telling people to press R, which is unbound there.
+	if m.mode == modeReview && m.diffStale() {
+		notice := "diff moved"
+		if summary := m.changeSince(m.files); summary != "" {
+			notice += " (" + summary + ")"
+		}
+		parts = append(parts, notice+" — "+reloadKey+" to reload")
+	}
 	if m.statusMsg != "" {
 		parts = append(parts, m.statusMsg)
 	}

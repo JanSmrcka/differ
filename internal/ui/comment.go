@@ -44,12 +44,25 @@ func diffLocations(p ParsedDiff) []review.Location {
 // a comment on any other file keeps line numbers that the agent has since
 // moved — and would be delivered quoting the wrong place.
 func (m Model) reanchorAllCmd() tea.Cmd {
+	return m.reanchorCmd(false)
+}
+
+// reanchorCmd re-resolves commented files, optionally including the one on
+// screen.
+//
+// The file on screen is normally re-anchored by handleDiffLoaded, so it is
+// excluded here. While the diff is held that never runs — and re-anchoring is
+// what marks a comment stale, so excluding it left a comment about a deleted
+// line looking pending and sendable.
+func (m Model) reanchorCmd(includeCurrent bool) tea.Cmd {
 	if m.session == nil {
 		return nil
 	}
-	current := m.currentFilePath()
 	var targets []string
-	seen := map[string]bool{current: true}
+	seen := map[string]bool{}
+	if current := m.currentFilePath(); !includeCurrent {
+		seen[current] = true
+	}
 	for _, c := range m.session.Comments() {
 		if !seen[c.File] {
 			seen[c.File] = true

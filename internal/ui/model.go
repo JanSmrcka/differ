@@ -59,6 +59,16 @@ const (
 type tickMsg time.Time
 
 type diffLoadedMsg struct {
+	// The content key this diff was built from, read at the same moment as the
+	// content itself rather than looked up afterwards.
+	key string
+	// True when this is the diff already on screen, rebuilt at a new width or
+	// palette. Its content is by definition unchanged, so it must not
+	// re-anchor comments: the parse it carries still contains the lines the
+	// agent has since deleted, and re-anchoring against it restores every
+	// comment the refresh had just marked stale.
+	rerender bool
+
 	// renderer is nil when the diff could not be loaded; errContent then holds
 	// the message to show instead.
 	renderer    *DiffRenderer
@@ -153,6 +163,24 @@ type Model struct {
 	probeWaited int
 	// Ticks since the last full rebuild, so a burst coalesces.
 	ticksSinceRefresh int
+	// Whether the diff on screen is older than the repository.
+	//
+	// Only set in review mode: everywhere else a refresh lands straight away,
+	// which is what makes differ feel live. A reviewer is reading one diff
+	// closely and may have a comment half-written against it, so the content
+	// is held and they are told, rather than swapped and left to notice.
+	// What the diff on screen was built from: the file's content key, and its
+	// added/removed counts at that moment.
+	//
+	// Staleness is derived from these rather than stored as a flag. A flag has
+	// to be cleared, and every path that failed to clear it — an empty
+	// changeset, a failed load, leaving review mode — left the bar describing
+	// something that was not on screen, sometimes permanently. These cannot
+	// disagree with the renderer, because they are written where it is.
+	rendererKey   string
+	rendererAdded int
+	rendererGone  int
+
 	// The last refresh asked for, and the newest one installed.
 	refreshSeq   int
 	installedSeq int

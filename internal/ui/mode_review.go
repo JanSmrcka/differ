@@ -68,6 +68,8 @@ func (m Model) updateReviewMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "esc":
 		m.mode = modeFileList
 		return m, nil
+	case "R":
+		return m.reloadDiff()
 	case "r":
 		// Toggle back to the plain diff view.
 		m.mode = modeDiff
@@ -98,6 +100,12 @@ func (m Model) reviewProgress() review.Progress {
 	return m.session.Progress(paths)
 }
 
+// reloadKey re-reads the file on screen after it moved underneath.
+//
+// Not "r": that leaves review mode, and the two would be a keystroke apart
+// with opposite effects on a half-written comment.
+const reloadKey = "R"
+
 // reviewSummary is the one-line progress readout shown while reviewing.
 func (m Model) reviewSummary() string {
 	p := m.reviewProgress()
@@ -121,4 +129,24 @@ func (m Model) reviewSummary() string {
 		out += fmt.Sprintf("  %d changed", p.Changed)
 	}
 	return out
+}
+
+// reloadDiff re-reads the file on screen after it moved underneath.
+//
+// It keeps the reviewer's place: loadDiffCmd(false) clamps rather than resets,
+// and handleDiffLoaded re-anchors this file's comments against the diff that
+// arrives, so a comment follows its line or is marked stale rather than left
+// pointing at whatever now occupies its old line number.
+func (m Model) reloadDiff() (tea.Model, tea.Cmd) {
+	if !m.diffStale() {
+		return m, nil
+	}
+	// The flag is cleared by handleDiffLoaded when the reload lands, not here:
+	// clearing it now would drop the notice before the diff it describes has
+	// actually been replaced.
+	//
+	// No need to clear lastDiffContent either — it is compared against what
+	// the reload renders, so content that really differs updates the viewport
+	// and content that does not needs no update.
+	return m, m.loadDiffCmd(false)
 }
