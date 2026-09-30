@@ -802,3 +802,51 @@ func TestPersist_AFileReadThenRewrittenComesBackUnread(t *testing.T) {
 		t.Errorf("a.ts came back %v after being rewritten, want unreviewed", got)
 	}
 }
+
+// Locate is not persisted, and must not be: it says how precisely a comment's
+// line numbers address the file *now*, which is a fact about the current diff
+// rather than about the comment. A restored comment therefore comes back with
+// the zero value — which degrades to the file alone — and is given its answer
+// by the reanchor that every restored file gets at startup.
+//
+// The hazard this pins: if the zero value were LocateLine, or if
+// LocateUnknown stopped degrading, every comment read back from disk would
+// claim a line nobody had checked.
+func TestPersist_ARestoredCommentClaimsNoLineUntilTheDiffSaysSo(t *testing.T) {
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("src.ts", "one\ntwo\nthree\n", "first")
+	tr.Modify("src.ts", "one\nCHANGED\nthree\n")
+
+	first := settle(t, liveModel(t, tr), key("r"))
+	writeComment(t, first, "CHANGED", "why?")
+
+	// Straight off the disk, before anything has looked at a diff.
+	gitDir := filepath.Join(tr.Dir, ".git")
+	repo, err := git.NewRepo(tr.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored := review.NewStore(gitDir).Load(currentKeys(repo))
+	if restored == nil {
+		t.Fatal("nothing was restored")
+	}
+	loaded := restored.CommentsFor("src.ts")[0]
+	if loaded.Locate != review.LocateUnknown {
+		t.Errorf("a comment read from disk carries Locate %v, which is a claim "+
+			"about a diff nobody has looked at", loaded.Locate)
+	}
+	if got := review.Reference(loaded); got != "@src.ts" {
+		t.Errorf("reference straight off the disk = %q, want the file alone", got)
+	}
+
+	// And the reanchor a restored file gets at startup gives it its answer.
+	second := settle(t, liveModel(t, tr), key("r"))
+	got := second.session.CommentsFor("src.ts")
+	if len(got) != 1 {
+		t.Fatalf("restored %d comments", len(got))
+	}
+	if got[0].Locate != review.LocateLine {
+		t.Errorf("after reanchoring, Locate = %v — the line is there and the "+
+			"diff is the working tree", got[0].Locate)
+	}
+}
