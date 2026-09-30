@@ -35,7 +35,7 @@ func TestNotify_TheDiffIsNotSwappedUnderTheReviewer(t *testing.T) {
 	if got := m.renderer.Content(m.diffCursor); got != before {
 		t.Errorf("the diff was swapped under the reviewer:\n%s", got)
 	}
-	if !m.diffStale {
+	if !m.diffStale() {
 		t.Error("nothing recorded that the diff on screen is out of date")
 	}
 }
@@ -100,13 +100,13 @@ func TestNotify_ReloadBringsTheDiffUpToDate(t *testing.T) {
 	m := reviewing(t, tr)
 	tr.Modify("src.ts", "one\nREWRITTEN\n")
 	m = settle(t, m, m.refreshFilesCmd()())
-	if !m.diffStale {
+	if !m.diffStale() {
 		t.Fatal("the diff was not held back")
 	}
 
 	m = settle(t, m, key(reloadKey))
 
-	if m.diffStale {
+	if m.diffStale() {
 		t.Error("the notice is still showing after a reload")
 	}
 	if got := m.renderer.Content(m.diffCursor); !strings.Contains(got, "REWRITTEN") {
@@ -154,7 +154,7 @@ func TestNotify_AnOpenCommentEditorSurvivesTheChangeAndTheReload(t *testing.T) {
 	if got := m.commentInput.Value(); got != "half a thought about this line"+reloadKey {
 		t.Errorf("the reload key did not reach the editor as a character: %q", got)
 	}
-	if !m.diffStale {
+	if !m.diffStale() {
 		t.Error("the diff was reloaded under an open comment editor")
 	}
 }
@@ -206,7 +206,7 @@ func TestNotify_OutsideReviewTheDiffStaysLive(t *testing.T) {
 	tr.Modify("src.ts", "one\nREWRITTEN\n")
 	m = settle(t, m, m.refreshFilesCmd()())
 
-	if m.diffStale {
+	if m.diffStale() {
 		t.Error("the diff was held back outside review mode")
 	}
 	if got := m.renderer.Content(m.diffCursor); !strings.Contains(got, "REWRITTEN") {
@@ -302,7 +302,7 @@ func TestNotify_TheDiffIsHeldForEveryShapeOfEdit(t *testing.T) {
 			if m.diffCursor != cursor {
 				t.Errorf("the cursor moved from %d to %d", cursor, m.diffCursor)
 			}
-			if !m.diffStale {
+			if !m.diffStale() {
 				t.Error("no notice that the diff is out of date")
 			}
 		})
@@ -322,7 +322,7 @@ func TestNotify_LeavingReviewDoesNotFreezeThePlainDiff(t *testing.T) {
 	m := reviewing(t, tr)
 	tr.Modify("src.ts", "one\nREWRITTEN\n")
 	m = settle(t, m, m.refreshFilesCmd()())
-	if !m.diffStale {
+	if !m.diffStale() {
 		t.Fatal("the diff was not held")
 	}
 
@@ -357,13 +357,13 @@ func TestNotify_MovingToAnotherFileClearsTheNotice(t *testing.T) {
 	m := reviewing(t, tr)
 	tr.Modify("a.ts", "one\nREWRITTEN\n")
 	m = settle(t, m, m.refreshFilesCmd()())
-	if !m.diffStale {
+	if !m.diffStale() {
 		t.Fatal("the diff was not held")
 	}
 
 	m = settle(t, m, key("n")) // next file
 
-	if m.diffStale {
+	if m.diffStale() {
 		t.Error("the notice followed the cursor to a file it does not describe")
 	}
 	if strings.Contains(m.View(), "to reload") {
@@ -397,7 +397,7 @@ func TestNotify_ACommentGoesStaleEvenWhileTheDiffIsHeld(t *testing.T) {
 	// The agent removes the line the comment is about. No reload yet.
 	tr.Modify("src.ts", "one\nthree\n")
 	m = settle(t, m, m.refreshFilesCmd()())
-	if !m.diffStale {
+	if !m.diffStale() {
 		t.Fatal("the diff was not held")
 	}
 
@@ -426,7 +426,7 @@ func TestNotify_TheNoticeSaysWhatChanged(t *testing.T) {
 	}
 	// The diff went from +1/-1 to +3/-1: two lines more than when it was read.
 	// Asserting on "2" alone would be satisfied by any line number on screen.
-	if !strings.Contains(view, "+2 added") {
+	if !strings.Contains(view, "2 more added") {
 		t.Errorf("the notice does not say what changed:\n%s", view)
 	}
 }
@@ -445,7 +445,7 @@ func TestNotify_AnUntouchedRepositoryRaisesNoNotice(t *testing.T) {
 	m := reviewing(t, tr)
 	for i := 0; i < 5; i++ {
 		m = settle(t, m, m.refreshFilesCmd()())
-		if m.diffStale {
+		if m.diffStale() {
 			t.Fatalf("poll %d raised a notice with nothing changed", i+1)
 		}
 	}
@@ -456,7 +456,7 @@ func TestNotify_AnUntouchedRepositoryRaisesNoNotice(t *testing.T) {
 	// And a change to a *different* file is still not this diff moving.
 	tr.Modify("b.ts", "one\nOTHER\n")
 	m = settle(t, m, m.refreshFilesCmd()())
-	if m.diffStale {
+	if m.diffStale() {
 		t.Error("another file changing raised a notice about this one")
 	}
 }
@@ -474,8 +474,16 @@ func TestNotify_AFileAppearingElsewhereRaisesNoNotice(t *testing.T) {
 	tr.Untracked("brand-new.ts", "fresh\n")
 	m = settle(t, m, m.refreshFilesCmd()())
 
-	if m.diffStale {
+	if m.diffStale() {
 		t.Error("a new file elsewhere raised a notice about the diff on screen")
+	}
+
+	// And the branch that matters: the file on screen leaving the changeset
+	// entirely. There is nothing to reload, so there is nothing to offer.
+	tr.Git("checkout", "--", "a.ts")
+	m = settle(t, m, m.refreshFilesCmd()())
+	if m.diffStale() {
+		t.Error("a notice offers to reload a file that is no longer in the changeset")
 	}
 }
 
@@ -495,7 +503,7 @@ func TestNotify_NoNoticeBeforeADiffIsOnScreen(t *testing.T) {
 	tr.Modify("a.ts", "one\nREWRITTEN\n")
 	m = settle(t, m, m.refreshFilesCmd()())
 
-	if m.diffStale {
+	if m.diffStale() {
 		t.Error("a notice was raised before any diff was on screen")
 	}
 }
@@ -534,7 +542,7 @@ func TestNotify_TheEditorDoesNotJumpToALineFromAHeldDiff(t *testing.T) {
 	// The agent moves everything, so the number no longer means anything.
 	tr.Modify("src.ts", "PREPENDED\n"+strings.Repeat("keep\n", 10)+"CHANGED\n")
 	m = settle(t, m, m.refreshFilesCmd()())
-	if !m.diffStale {
+	if !m.diffStale() {
 		t.Fatal("the diff was not held")
 	}
 
@@ -563,14 +571,294 @@ func TestNotify_NoNoticeWhileTheCursorAndTheDiffDisagree(t *testing.T) {
 	// Move the cursor without letting the new diff land.
 	updated, _ := m.updateReviewMode(key("n"))
 	m = updated.(Model)
+	if m.rendererPath == "" {
+		t.Fatal("no renderer path to compare against")
+	}
 	if m.rendererPath == m.currentFilePath() {
 		t.Skip("the diff loaded synchronously here, so there is no window to test")
 	}
 
-	tr.Modify("a.ts", "one\nREWRITTEN\n")
+	// Modify the file the *renderer* is holding, which is not the one under
+	// the cursor. Staleness is keyed on the renderer's path, so this is the
+	// case the guard exists for: without it the bar would raise a notice about
+	// a file the reviewer has already moved away from, and R would reload
+	// whatever the cursor is on instead.
+	held := m.rendererPath
+	tr.Modify(held, "one\nREWRITTEN\n")
+	// Deliver the refresh and stop there. settle would run the diff load that
+	// n set in motion, which resolves the disagreement before the assertion —
+	// so the window this test is about would be gone by the time it looked.
+	updated, _ = m.Update(m.refreshFilesCmd()())
+	m = updated.(Model)
+
+	if m.diffStale() {
+		t.Errorf("a notice was raised about %q while the cursor is on %q",
+			held, m.currentFilePath())
+	}
+	if strings.Contains(m.View(), "to reload") {
+		t.Errorf("the bar offers a reload for a file the cursor has left:\n%s", m.View())
+	}
+}
+
+// The changeset emptying used to leave the notice up for good: the early
+// return skipped the clear, and the only thing that cleared it was a diff
+// load, which cannot happen with no files. The screen read "Nothing to review"
+// and "diff moved — R to reload" at the same time, and R did nothing.
+func TestNotify_AnEmptyChangesetLeavesNoNoticeBehind(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("src.ts", "one\ntwo\n", "first")
+	tr.Modify("src.ts", "one\nCHANGED\n")
+
+	m := reviewing(t, tr)
+	tr.Modify("src.ts", "one\nREWRITTEN\n")
+	m = settle(t, m, m.refreshFilesCmd()())
+	if !m.diffStale() {
+		t.Fatal("the diff was not held")
+	}
+
+	// The agent commits everything.
+	tr.Git("add", "-A")
+	tr.Git("commit", "-m", "done")
 	m = settle(t, m, m.refreshFilesCmd()())
 
-	if m.diffStale {
-		t.Error("a notice was raised while the cursor and the diff on screen disagreed")
+	if len(m.files) != 0 {
+		t.Fatalf("expected an empty changeset, got %d files", len(m.files))
+	}
+	if m.diffStale() {
+		t.Error("the notice survived the changeset emptying")
+	}
+	if strings.Contains(m.View(), "to reload") {
+		t.Errorf("the screen offers a reload with nothing to reload:\n%s", m.View())
+	}
+}
+
+// A resize must not perform the content swap the hold exists to prevent — nor
+// quietly remove the notice saying it had happened.
+func TestNotify_AResizeDoesNotSwapAHeldDiff(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("src.ts", "one\ntwo\n", "first")
+	tr.Modify("src.ts", "one\nCHANGED\n")
+
+	m := reviewing(t, tr)
+	tr.Modify("src.ts", "one\nREWRITTEN\n")
+	m = settle(t, m, m.refreshFilesCmd()())
+	if !m.diffStale() {
+		t.Fatal("the diff was not held")
+	}
+
+	m = settle(t, m, tea.WindowSizeMsg{Width: 90, Height: 30})
+
+	if got := m.renderer.Content(m.diffCursor); strings.Contains(got, "REWRITTEN") {
+		t.Errorf("the resize swapped the held diff:\n%s", got)
+	}
+	if !m.diffStale() {
+		t.Error("the resize cleared the notice without the reviewer seeing what moved")
+	}
+}
+
+// The notice belongs to the key that clears it. Outside review mode R is
+// unbound, so offering it there is a wrong instruction.
+func TestNotify_TheNoticeIsOnlyOfferedWhereItWorks(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("src.ts", "one\ntwo\n", "first")
+	tr.Modify("src.ts", "one\nCHANGED\n")
+
+	m := reviewing(t, tr)
+	tr.Modify("src.ts", "one\nREWRITTEN\n")
+	m = settle(t, m, m.refreshFilesCmd()())
+	if !strings.Contains(m.View(), "to reload") {
+		t.Fatal("no notice in review mode")
+	}
+
+	for _, mode := range []viewMode{modeFileList, modeDiff, modeCommit, modeBranchPicker} {
+		probe := m
+		probe.mode = mode
+		if strings.Contains(probe.View(), "to reload") {
+			t.Errorf("mode %v offers R, which does nothing there", mode)
+		}
+	}
+}
+
+// What just happened comes after the notice: the notice says the screen is not
+// showing the repository, and every other word in that row describes the
+// screen.
+func TestNotify_TheNoticeComesFirstInTheBar(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("src.ts", "one\ntwo\n", "first")
+	tr.Modify("src.ts", "one\nCHANGED\n")
+
+	m := reviewing(t, tr)
+	tr.Modify("src.ts", "one\nREWRITTEN\n")
+	m = settle(t, m, m.refreshFilesCmd()())
+	m.statusMsg = "a status message"
+
+	segment := m.statusSegment()
+	notice := strings.Index(segment, "diff moved")
+	status := strings.Index(segment, "a status message")
+	if notice < 0 || status < 0 {
+		t.Fatalf("expected both in the bar, got %q", segment)
+	}
+	if notice > status {
+		t.Errorf("the notice comes after the status message: %q", segment)
+	}
+}
+
+// The file list, the diff panel and the notice must agree about which file
+// they are describing.
+//
+// m.cursor is an index into m.files, and the hold skips the reload that would
+// re-sync the panel — so a file sorting earlier entering the changeset in the
+// same refresh shifted every index below it, and the reviewer saw one file
+// highlighted, another's content, and a notice about a third. R then reloaded
+// the wrong one.
+func TestNotify_TheListTheDiffAndTheNoticeAgree(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("src.ts", "one\ntwo\n", "first")
+	tr.CommitFile("aaa.ts", "one\ntwo\n", "second")
+	tr.Modify("src.ts", "one\nCHANGED\n")
+
+	m := reviewing(t, tr)
+	if m.currentFilePath() != "src.ts" {
+		t.Fatalf("expected to start on src.ts, got %q", m.currentFilePath())
+	}
+
+	// A file sorting before it joins the changeset in the same refresh that
+	// rewrites the one on screen.
+	tr.Modify("aaa.ts", "one\nNEW ENTRY\n")
+	tr.Modify("src.ts", "one\nREWRITTEN\n")
+	m = settle(t, m, m.refreshFilesCmd()())
+
+	if m.currentFilePath() != m.rendererPath {
+		t.Errorf("the list highlights %q while the panel shows %q",
+			m.currentFilePath(), m.rendererPath)
+	}
+	if m.diffStale() && m.rendererPath != "src.ts" {
+		t.Errorf("the notice is about %q, which is not the diff on screen", m.rendererPath)
+	}
+}
+
+// The same-shape edit, which is the commonest one an agent makes and the one
+// that keeps slipping through. A line replaced leaves the added and removed
+// counts untouched, so filesEqual is true and the refresh takes the short arm.
+// Re-anchoring has to happen there too: it is what marks a comment stale, and
+// without it a comment about a line that has already been replaced stays
+// pending and sends on the first press, quoting code that is gone.
+func TestNotify_AReplacedLineStalesItsCommentToo(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("src.ts", "one\ntwo\nthree\n", "first")
+	tr.Modify("src.ts", "one\nDOOMED\nthree\n")
+
+	m := reviewing(t, tr)
+	m = m.cursorTo(t, "DOOMED")
+	updated, _ := m.startComment()
+	m = updated.(Model)
+	m.commentInput.SetValue("this line worries me")
+	updated, _ = m.saveComment()
+	m = updated.(Model)
+	if m.session.StaleCount() != 0 {
+		t.Fatal("the comment is stale before anything changed")
+	}
+
+	before := m.files[m.cursor].change
+	// Replaced, not added or removed: the counts do not move.
+	tr.Modify("src.ts", "one\nREPLACED\nthree\n")
+	m = settle(t, m, m.refreshFilesCmd()())
+
+	after := m.files[m.cursor].change
+	if before.AddedLines != after.AddedLines || before.DeletedLines != after.DeletedLines {
+		t.Fatalf("this fixture changed the line counts (%d/%d -> %d/%d), so it is "+
+			"not testing the short arm",
+			before.AddedLines, before.DeletedLines, after.AddedLines, after.DeletedLines)
+	}
+	if !m.diffStale() {
+		t.Fatal("the diff was not held")
+	}
+	if m.session.StaleCount() != 1 {
+		t.Errorf("the comment is still pending while the line it describes is gone: %d stale",
+			m.session.StaleCount())
+	}
+}
+
+// A replacement is invisible to the line counts, so the notice has to say
+// something rather than nothing.
+func TestNotify_ASameSizeRewriteStillSaysSomething(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("src.ts", "one\ntwo\n", "first")
+	tr.Modify("src.ts", "one\nCHANGED\n")
+
+	m := reviewing(t, tr)
+	tr.Modify("src.ts", "one\nREPLACED\n")
+	m = settle(t, m, m.refreshFilesCmd()())
+	if !m.diffStale() {
+		t.Fatal("the diff was not held")
+	}
+
+	if got := m.changeSince(m.files); got != "rewritten" {
+		t.Errorf("a same-size rewrite is described as %q", got)
+	}
+	if !strings.Contains(m.View(), "rewritten") {
+		t.Errorf("the notice says nothing about what moved:\n%s", m.View())
+	}
+}
+
+// The agent taking lines back out has to read as English. "-3 added" is not a
+// sentence.
+func TestNotify_TheSummaryReadsBothWays(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("src.ts", "one\n", "first")
+	tr.Modify("src.ts", "one\ntwo\nthree\nfour\n")
+
+	m := reviewing(t, tr)
+	// The agent reverts two of the three lines it added.
+	tr.Modify("src.ts", "one\ntwo\n")
+	m = settle(t, m, m.refreshFilesCmd()())
+	if !m.diffStale() {
+		t.Fatal("the diff was not held")
+	}
+
+	got := m.changeSince(m.files)
+	if strings.Contains(got, "-") {
+		t.Errorf("the summary reads %q, which is not English", got)
+	}
+	if !strings.Contains(got, "fewer") {
+		t.Errorf("a partial revert is described as %q", got)
+	}
+}
+
+// Another file changing is not a reason to send the reviewer back to the top
+// of the one they are reading — and with an agent working it is the common
+// case, not the rare one.
+func TestNotify_AnotherFileChangingKeepsTheReviewersPlace(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	body := strings.Repeat("keep\n", 30)
+	tr.CommitFile("src.ts", body+"two\n", "first")
+	tr.CommitFile("other.ts", "one\n", "second")
+	tr.Modify("src.ts", body+"CHANGED\n")
+
+	m := reviewing(t, tr)
+	for i := 0; i < 10; i++ {
+		updated, _ := m.updateReviewMode(key("j"))
+		m = updated.(Model)
+	}
+	cursor := m.diffCursor
+	if cursor == 0 {
+		t.Fatal("the cursor did not move")
+	}
+
+	// A different file joins the changeset.
+	tr.Modify("other.ts", "one\nTOUCHED BY THE AGENT\n")
+	m = settle(t, m, m.refreshFilesCmd()())
+
+	if m.diffCursor != cursor {
+		t.Errorf("an edit to another file moved the cursor from %d to %d", cursor, m.diffCursor)
 	}
 }

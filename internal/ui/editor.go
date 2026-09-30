@@ -80,7 +80,7 @@ func (m Model) editorLine() int {
 	// so its line numbers describe a version that is no longer on disk.
 	// Opening an editor at a confidently wrong line is worse than opening it
 	// at the top.
-	if m.renderer == nil || m.rendererPath != m.currentFilePath() || m.diffStale {
+	if m.renderer == nil || m.rendererPath != m.currentFilePath() || m.diffStale() {
 		return 0
 	}
 

@@ -190,7 +190,7 @@ marks update as usual, but the diff you are looking at stays put and the bar
 says what moved:
 
 ```
-diff moved (+2 added) — R to reload
+diff moved (2 more added) — R to reload
 ```
 
 `R` re-reads it, keeping your cursor where it was. Your comments are

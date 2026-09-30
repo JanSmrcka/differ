@@ -285,10 +285,12 @@ func (m Model) statusSegment() string {
 	var parts []string
 	// First, above even what just happened: it says the screen is not showing
 	// the repository, and every other word in this row describes that screen.
-	if m.diffStale {
+	// Only where the key that clears it works. Outside review mode the bar was
+	// still telling people to press R, which is unbound there.
+	if m.mode == modeReview && m.diffStale() {
 		notice := "diff moved"
-		if m.staleSummary != "" {
-			notice += " (" + m.staleSummary + ")"
+		if summary := m.changeSince(m.files); summary != "" {
+			notice += " (" + summary + ")"
 		}
 		parts = append(parts, notice+" — "+reloadKey+" to reload")
 	}

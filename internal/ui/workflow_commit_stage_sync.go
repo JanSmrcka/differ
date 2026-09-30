@@ -394,3 +394,31 @@ func (m Model) generateCommitMsgCmd() tea.Cmd {
 		return commitMsgGeneratedMsg{message: strings.TrimSpace(string(out))}
 	}
 }
+
+// rerenderCmd rebuilds the diff on screen at the current width and palette,
+// from the parse already in hand rather than from the file.
+//
+// It keeps the key the content was read with, so a resize or a theme change
+// cannot mark a held diff as current — which would remove the notice without
+// the reviewer ever seeing what moved.
+func (m Model) rerenderCmd() tea.Cmd {
+	if m.renderer == nil {
+		return nil
+	}
+	parsed := m.renderer.Parsed()
+	idx := m.cursor
+	styles := m.styles
+	t := m.theme
+	diffW := m.diffWidth()
+	filename := m.rendererPath
+	splitMode := m.splitDiff && diffW >= minSplitWidth
+	tabWidth := m.cfg.TabWidth
+	key := m.rendererKey
+	gen := m.themeGen
+	return func() tea.Msg {
+		r := NewDiffRenderer(parsed, filename, styles, t, diffW)
+		r.SetTabWidth(tabWidth)
+		r.SetSplit(splitMode)
+		return diffLoadedMsg{renderer: r, index: idx, resetScroll: false, key: key, themeGen: gen}
+	}
+}

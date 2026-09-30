@@ -138,7 +138,7 @@ func (m Model) reviewSummary() string {
 // arrives, so a comment follows its line or is marked stale rather than left
 // pointing at whatever now occupies its old line number.
 func (m Model) reloadDiff() (tea.Model, tea.Cmd) {
-	if !m.diffStale {
+	if !m.diffStale() {
 		return m, nil
 	}
 	// The flag is cleared by handleDiffLoaded when the reload lands, not here:

@@ -48,6 +48,10 @@ func (m Model) applyTheme(t theme.Theme) (Model, tea.Cmd) {
 	// Every in-flight diff was built with the old palette. The counter lets
 	// their results be dropped rather than installed after this one.
 	m.themeGen++
+	// Same as a resize: previewing a theme must not swap a held diff.
+	if m.diffStale() {
+		return m, m.rerenderCmd()
+	}
 	return m, m.loadDiffCmd(false)
 }
 

@@ -59,6 +59,11 @@ const (
 type tickMsg time.Time
 
 type diffLoadedMsg struct {
+	// The content key this diff was built from, when it is not simply the
+	// file's key now — a re-render of held content keeps the key it had, so a
+	// resize cannot quietly mark a stale diff as current.
+	key string
+
 	// renderer is nil when the diff could not be loaded; errContent then holds
 	// the message to show instead.
 	renderer    *DiffRenderer
@@ -159,12 +164,17 @@ type Model struct {
 	// which is what makes differ feel live. A reviewer is reading one diff
 	// closely and may have a comment half-written against it, so the content
 	// is held and they are told, rather than swapped and left to notice.
-	diffStale bool
-	// What moved, for the notice: "+3 −1" against the diff on screen.
-	staleSummary string
-	// The file the notice is about. The notice describes one diff; moving to
-	// another file means it is describing something not on screen.
-	stalePath string
+	// What the diff on screen was built from: the file's content key, and its
+	// added/removed counts at that moment.
+	//
+	// Staleness is derived from these rather than stored as a flag. A flag has
+	// to be cleared, and every path that failed to clear it — an empty
+	// changeset, a failed load, leaving review mode — left the bar describing
+	// something that was not on screen, sometimes permanently. These cannot
+	// disagree with the renderer, because they are written where it is.
+	rendererKey   string
+	rendererAdded int
+	rendererGone  int
 
 	// The last refresh asked for, and the newest one installed.
 	refreshSeq   int

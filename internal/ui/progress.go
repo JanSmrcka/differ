@@ -121,6 +121,31 @@ func (m Model) noteChangedFiles(keys map[string]string) Model {
 	return m
 }
 
+// diffStale reports whether the diff on screen is older than the file it came
+// from.
+//
+// Derived, never stored. The renderer records the content key it was built
+// from; if the file's key has moved on, what is on screen is out of date. That
+// cannot get stuck, cannot survive the renderer being replaced, and cannot
+// describe a file the reviewer has left — all of which a boolean flag did.
+func (m Model) diffStale() bool {
+	if m.rendererKey == "" || m.renderer == nil {
+		return false
+	}
+	// Only about the file actually on screen. After n or p the renderer is
+	// still the previous file's until its diff arrives.
+	if m.rendererPath != m.currentFilePath() {
+		return false
+	}
+	now, known := m.fileKeys[m.rendererPath]
+	if !known {
+		// The file has left the changeset. That is the file list's business,
+		// not a reason to offer a reload of something that is no longer there.
+		return false
+	}
+	return now != m.rendererKey
+}
+
 // holdsTheDiff reports whether the content on screen belongs to someone who
 // would rather be asked before it changes.
 //
@@ -129,84 +154,79 @@ func (m Model) noteChangedFiles(keys map[string]string) Model {
 // longer there. Outside review mode differ stays live, which is the point of
 // the poll.
 func (m Model) holdsTheDiff() bool {
-	// The renderer has to be the cursor's file, not just any file. Diffs load
-	// asynchronously, so right after n or p the renderer is still the previous
-	// one — and a refresh landing in that window would compare the cursor's
-	// file against a diff of something else. Nothing needs holding there
-	// anyway: the load already on its way brings current content.
 	return m.mode == modeReview && m.renderer != nil && m.rendererPath == m.currentFilePath()
 }
 
-// currentFileMoved reports whether the file under the cursor has different
-// content from the one the diff on screen was built from.
-func (m Model) currentFileMoved(keys map[string]string) bool {
-	path := m.currentFilePath()
-	if path == "" {
-		return false
-	}
-	was, knew := m.fileKeys[path]
-	now, know := keys[path]
-	if !knew || !know {
-		// One side has never seen it. Appearing or vanishing is a change to
-		// the file list rather than to the diff on screen, and the list is
-		// refreshed either way.
-		return false
-	}
-	return was != now
+// noteRenderedDiff records what the diff on screen was built from.
+func (m Model) noteRenderedDiff() Model {
+	m.rendererKey = m.fileKeys[m.rendererPath]
+	added, gone := m.countsFor(m.files, m.rendererPath)
+	m.rendererAdded, m.rendererGone = added, gone
+	return m
 }
 
-// changeSince describes how the file under the cursor differs from the diff on
-// screen, for the notice.
+// changeSince describes how the file on screen differs from the diff being
+// shown, for the notice.
 //
-// The issue asks the reload to come with a summary of what changed. Counting
-// hunks would mean parsing the new diff, which is the work the hold exists to
-// postpone; the added and deleted line counts are already in the refresh, so
-// the difference between them is free.
+// Measured against what the renderer was built from, not against the previous
+// poll. Reading the previous poll meant a reviewer who left the notice up
+// through several changes was told about the last one only: four lines added
+// over two refreshes reported as two.
 func (m Model) changeSince(files []fileItem) string {
-	path := m.currentFilePath()
-	was, found := m.fileAt(m.files, path)
-	now, stillThere := m.fileAt(files, path)
-	if !found || !stillThere {
-		return ""
-	}
-	added := now.change.AddedLines - was.change.AddedLines
-	removed := now.change.DeletedLines - was.change.DeletedLines
+	nowAdded, nowGone := m.countsFor(files, m.rendererPath)
+	added := nowAdded - m.rendererAdded
+	removed := nowGone - m.rendererGone
 
 	var parts []string
 	if added != 0 {
-		parts = append(parts, signed(added)+" added")
+		parts = append(parts, describeDelta(added, "added"))
 	}
 	if removed != 0 {
-		parts = append(parts, signed(removed)+" removed")
+		parts = append(parts, describeDelta(removed, "removed"))
 	}
 	if len(parts) == 0 {
 		// Same counts, different content: a line was replaced rather than
-		// added or removed, which the counts cannot see.
+		// added or removed, which counts cannot see.
 		return "rewritten"
 	}
 	return strings.Join(parts, ", ")
 }
 
-func (m Model) fileAt(files []fileItem, path string) (fileItem, bool) {
+// describeDelta words a change in line counts so it reads as English in both
+// directions. "-3 added" is not a sentence; "3 fewer added" is.
+func describeDelta(n int, what string) string {
+	if n < 0 {
+		return strconv.Itoa(-n) + " fewer " + what
+	}
+	return strconv.Itoa(n) + " more " + what
+}
+
+// countsFor totals a path's added and removed lines across every entry for it.
+//
+// A path can appear twice, once staged and once not. Taking the first match
+// compared one half against itself and reported "rewritten" when a line had
+// plainly been added to the other.
+func (m Model) countsFor(files []fileItem, path string) (added, removed int) {
 	for _, f := range files {
 		if f.change.Path == path {
-			return f, true
+			added += f.change.AddedLines
+			removed += f.change.DeletedLines
 		}
 	}
-	return fileItem{}, false
+	return added, removed
 }
 
-func signed(n int) string {
-	if n > 0 {
-		return "+" + strconv.Itoa(n)
+// currentFileMoved reports whether the file on screen has different content
+// from the diff being shown.
+func (m Model) currentFileMoved(keys map[string]string) bool {
+	if m.rendererKey == "" {
+		return false
 	}
-	return strconv.Itoa(n)
-}
-
-// clearStaleNotice drops the notice, which describes one diff on screen.
-func (m Model) clearStaleNotice() Model {
-	m.diffStale = false
-	m.staleSummary = ""
-	m.stalePath = ""
-	return m
+	now, known := keys[m.rendererPath]
+	if !known {
+		// Appearing or vanishing is a change to the file list, which is
+		// refreshed either way.
+		return false
+	}
+	return now != m.rendererKey
 }
