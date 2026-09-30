@@ -749,3 +749,40 @@ func TestEmptyTreeHash_IsGitsOwn(t *testing.T) {
 		t.Errorf("emptyTreeHash = %q, git says %q", emptyTreeHash, got)
 	}
 }
+
+func TestGitDir_IsAnAbsolutePathToTheRepositorysGitDirectory(t *testing.T) {
+	repo := setupTestRepo(t)
+
+	dir, err := repo.GitDir()
+	if err != nil {
+		t.Fatalf("GitDir: %v", err)
+	}
+	if want := filepath.Join(repo.Dir(), ".git"); dir != want {
+		t.Errorf("GitDir() = %q, want %q", dir, want)
+	}
+}
+
+// A linked worktree has its own git directory under the main one. Review state
+// is per checkout, so this is the distinction that decides where it lands: two
+// worktrees of the same repository must not share one review file.
+func TestGitDir_IsTheWorktreesOwnDirectory(t *testing.T) {
+	main := setupTestRepo(t)
+	writeFile(t, main, "a.txt", "one\n")
+	gitRun(t, main.Dir(), "add", "a.txt")
+	gitRun(t, main.Dir(), "commit", "-m", "init")
+
+	linked := filepath.Join(t.TempDir(), "wt")
+	gitRun(t, main.Dir(), "worktree", "add", "-b", "side", linked)
+
+	repo, err := NewRepo(linked)
+	if err != nil {
+		t.Fatalf("NewRepo: %v", err)
+	}
+	dir, err := repo.GitDir()
+	if err != nil {
+		t.Fatalf("GitDir: %v", err)
+	}
+	if !strings.Contains(dir, filepath.Join("worktrees", "wt")) {
+		t.Errorf("GitDir() = %q, want the linked worktree's own directory", dir)
+	}
+}

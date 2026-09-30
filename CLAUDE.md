@@ -43,7 +43,8 @@ main.go → cmd/root.go (cobra commands)
              ├── internal/config   — Config struct, load/save ~/.config/differ/config.json
              ├── internal/git      — Repo struct, all git ops via os/exec
              ├── internal/theme    — color hex values only (no lipgloss)
-             ├── internal/review   — review session: comments, per-file state, feedback text
+             ├── internal/review   — review session: comments, per-file state, feedback text,
+             │                        and its persistence to .git/differ/review.json
              ├── internal/feedback — Target interface + clipboard/stdout/tmux delivery
              ├── internal/editor   — decides and performs "open this file in an editor"
              ├── internal/testutil — temp git repos, diff fixtures, golden files (tests only)
@@ -74,6 +75,16 @@ main.go → cmd/root.go (cobra commands)
 owns the diff parser, and a cycle would follow. A `review.Comment` therefore
 carries its own anchor text and a plain-text excerpt, which keeps feedback
 generation a pure string transformation.
+
+A review survives the process. Pending comments and the delivery history are
+written to `.git/differ/review.json` — located by `git rev-parse --git-dir`,
+so a linked worktree keeps its own — on every change to a comment rather than
+on quit, since `q` is the one case that was never the problem. A pending
+comment is restored only if its file's content key (`fileKeysOf`) is unchanged;
+the history is restored unconditionally, because it is the record that stops
+the same review going to the agent twice. Deciding what "unchanged" means is
+the UI's job — it owns the fingerprints — so `review.Store` is handed a
+function rather than reaching for one.
 
 `internal/editor` must not import `internal/ui` either. It both decides how to
 open a file and does it — the one exception is handing the terminal to a child

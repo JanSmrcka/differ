@@ -72,6 +72,32 @@ func NewRepo(path string) (*Repo, error) {
 // Dir returns the repository root directory.
 func (r *Repo) Dir() string { return r.dir }
 
+// GitDir is the repository's own git directory: `.git` in an ordinary
+// checkout, `.git/worktrees/<name>` in a linked one.
+//
+// The distinction is the point. Anything kept per checkout — differ keeps the
+// review there — must not be shared between two worktrees of the same
+// repository, and `--git-dir` is the one that separates them; `--git-common-dir`
+// would hand both the same file.
+//
+// git answers relative to the process's directory when it can, and `run` sets
+// that to the repository root, so a relative answer is resolved against it
+// rather than against whatever the caller's own directory happens to be.
+func (r *Repo) GitDir() (string, error) {
+	out, err := r.run("rev-parse", "--git-dir")
+	if err != nil {
+		return "", err
+	}
+	dir := strings.TrimSpace(out)
+	if dir == "" {
+		return "", errors.New("git did not say where its directory is")
+	}
+	if !filepath.IsAbs(dir) {
+		dir = filepath.Join(r.dir, dir)
+	}
+	return dir, nil
+}
+
 // HasCommits returns true if the repo has at least one commit.
 func (r *Repo) HasCommits() bool {
 	_, err := r.run("rev-parse", "HEAD")

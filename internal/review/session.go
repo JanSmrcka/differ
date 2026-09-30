@@ -5,7 +5,8 @@
 // comment carries the text it needs (anchor and excerpt) so that generating
 // feedback for a coding agent stays a pure string transformation.
 //
-// Session state lives for as long as the process. Nothing here is persisted.
+// A Session itself holds nothing but memory. What survives a restart, and how
+// it is decided, is store.go's business — the session is not aware of it.
 package review
 
 import (
