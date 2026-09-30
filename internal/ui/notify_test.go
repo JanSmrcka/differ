@@ -862,3 +862,374 @@ func TestNotify_AnotherFileChangingKeepsTheReviewersPlace(t *testing.T) {
 		t.Errorf("an edit to another file moved the cursor from %d to %d", cursor, m.diffCursor)
 	}
 }
+
+// A resize or a theme preview must not un-stale the comments the hold just
+// marked. This is the round-2 defect arriving through a new door: the
+// re-render rebuilds from the *held* parse, which still contains the line the
+// agent deleted — so re-anchoring against it restored every stale comment, and
+// #44 would then send one on the first press quoting code that is gone.
+func TestNotify_ARerenderDoesNotUnstaleComments(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		jog  func(t *testing.T, m Model) Model
+	}{
+		{"a resize", func(t *testing.T, m Model) Model {
+			return settle(t, m, tea.WindowSizeMsg{Width: 100, Height: 30})
+		}},
+		{"a theme preview", func(t *testing.T, m Model) Model {
+			mm, _ := m.openThemePicker()
+			mm, cmd := mm.moveThemeCursor(1)
+			return settle(t, mm, cmdMsg(cmd))
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			tr := testutil.NewRepo(t)
+			tr.CommitFile("src.ts", "one\ntwo\nthree\n", "first")
+			tr.Modify("src.ts", "one\nDOOMED\nthree\n")
+
+			m := reviewing(t, tr)
+			m = m.cursorTo(t, "DOOMED")
+			updated, _ := m.startComment()
+			m = updated.(Model)
+			m.commentInput.SetValue("this line worries me")
+			updated, _ = m.saveComment()
+			m = updated.(Model)
+
+			tr.Modify("src.ts", "one\nthree\n")
+			m = settle(t, m, m.refreshFilesCmd()())
+			if m.session.StaleCount() != 1 {
+				t.Fatalf("the comment is not stale to begin with: %d", m.session.StaleCount())
+			}
+
+			m = tc.jog(t, m)
+
+			if m.session.StaleCount() != 1 {
+				t.Errorf("%s restored the comment to pending: %d stale",
+					tc.name, m.session.StaleCount())
+			}
+		})
+	}
+}
+
+// Navigating away must not be undone by a refresh that lands before the new
+// diff does.
+func TestNotify_ARefreshDoesNotUndoNavigation(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("a.ts", "one\ntwo\n", "first")
+	tr.CommitFile("b.ts", "one\ntwo\n", "second")
+	tr.Modify("a.ts", "one\nCHANGED\n")
+	tr.Modify("b.ts", "one\nOTHER\n")
+
+	m := reviewing(t, tr)
+	start := m.currentFilePath()
+
+	// n, without letting the new diff land.
+	updated, _ := m.updateReviewMode(key("n"))
+	m = updated.(Model)
+	asked := m.currentFilePath()
+	if asked == start {
+		t.Fatal("n did not move to another file")
+	}
+
+	// A refresh arrives in that window.
+	updated, _ = m.Update(m.refreshFilesCmd()())
+	m = updated.(Model)
+
+	if got := m.currentFilePath(); got != asked {
+		t.Errorf("the refresh dragged the cursor from %q back to %q", asked, got)
+	}
+}
+
+// A path with both staged and unstaged changes is two entries. The cursor has
+// to stay on the half it was on: loadDiffCmd reads Staged from the entry, so
+// landing on the other one makes R swap in a different diff.
+func TestNotify_TheCursorKeepsItsHalfOfADualEntryFile(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("src.ts", "one\ntwo\n", "first")
+	tr.Modify("src.ts", "one\nSTAGED\n")
+	tr.Stage("src.ts")
+	tr.Modify("src.ts", "one\nSTAGED\nUNSTAGED\n")
+
+	m := reviewing(t, tr)
+	staged, unstaged := -1, -1
+	for i, f := range m.files {
+		if f.change.Path != "src.ts" {
+			continue
+		}
+		if f.change.Staged {
+			staged = i
+		} else {
+			unstaged = i
+		}
+	}
+	if staged < 0 || unstaged < 0 {
+		t.Skipf("this fixture did not produce both halves (staged=%d unstaged=%d)", staged, unstaged)
+	}
+
+	m.cursor = unstaged
+	m = settle(t, m, m.loadDiffCmd(true))
+
+	// Another file joins, reordering the list.
+	tr.Untracked("aaa.ts", "new\n")
+	updated, _ := m.Update(m.refreshFilesCmd()())
+	m = updated.(Model)
+
+	if m.cursor >= len(m.files) {
+		t.Fatalf("cursor %d is outside a list of %d", m.cursor, len(m.files))
+	}
+	got := m.files[m.cursor]
+	if got.change.Path != "src.ts" || got.change.Staged {
+		t.Errorf("the cursor moved to %q (staged=%v); it was on the unstaged half of src.ts",
+			got.change.Path, got.change.Staged)
+	}
+}
+
+// A re-render has to reproduce what a load would build, not an approximation.
+// Tab width and split mode were simply dropped, and the split rule was missing
+// its onePanel clause — so resizing into the 60-71 column band engaged split
+// view where a fresh load refuses.
+func TestNotify_ARerenderBuildsWhatALoadWouldHaveBuilt(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("src.ts", "one\n\ttabbed\nthree\n", "first")
+	tr.Modify("src.ts", "one\n\tCHANGED\nthree\n")
+
+	for _, width := range []int{65, 80, 120, 200} {
+		m := reviewing(t, tr)
+		m.splitDiff = true
+		m = settle(t, m, tea.WindowSizeMsg{Width: width, Height: 30})
+
+		fresh, ok := m.loadDiffCmd(false)().(diffLoadedMsg)
+		if !ok || fresh.renderer == nil {
+			t.Fatalf("%d: no renderer from a fresh load", width)
+		}
+		again, ok := m.rerenderCmd()().(diffLoadedMsg)
+		if !ok || again.renderer == nil {
+			t.Fatalf("%d: no renderer from a re-render", width)
+		}
+
+		if fresh.renderer.split != again.renderer.split {
+			t.Errorf("%d cols: a load builds split=%v, a re-render builds split=%v",
+				width, fresh.renderer.split, again.renderer.split)
+		}
+		if fresh.renderer.Content(-1) != again.renderer.Content(-1) {
+			t.Errorf("%d cols: a re-render does not match what a load builds", width)
+		}
+		if again.resetScroll {
+			t.Errorf("%d cols: a re-render would send the reviewer back to the top", width)
+		}
+	}
+}
+
+// A late re-render must not revert an explicit reload. Press R, then resize
+// before it lands: the re-render carries the held content, so arriving last it
+// would undo the reload and put the notice back.
+func TestNotify_ALateRerenderDoesNotRevertAReload(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("src.ts", "one\ntwo\n", "first")
+	tr.Modify("src.ts", "one\nCHANGED\n")
+
+	m := reviewing(t, tr)
+	tr.Modify("src.ts", "one\nREWRITTEN\n")
+	m = settle(t, m, m.refreshFilesCmd()())
+	if !m.diffStale() {
+		t.Fatal("the diff was not held")
+	}
+
+	// Both commands are taken while stale, so the re-render is the older.
+	stale := m.rerenderCmd()()
+	updated, reload := m.reloadDiff()
+	m = updated.(Model)
+	if reload == nil {
+		t.Fatal("R scheduled nothing")
+	}
+
+	// The reload lands, then the re-render arrives late.
+	m = settle(t, m, reload())
+	if got := m.renderer.Content(m.diffCursor); !strings.Contains(got, "REWRITTEN") {
+		t.Fatalf("the reload did not install the new content:\n%s", got)
+	}
+	updated, _ = m.Update(stale)
+	m = updated.(Model)
+
+	if got := m.renderer.Content(m.diffCursor); !strings.Contains(got, "REWRITTEN") {
+		t.Errorf("a late re-render reverted the reload:\n%s", got)
+	}
+	if m.diffStale() {
+		t.Error("the notice came back after an explicit reload")
+	}
+}
+
+// Outside review mode a resize must load, not re-render: R is unbound there,
+// so keeping old content would be a freeze with no way out.
+func TestNotify_AResizeOutsideReviewAlwaysLoads(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("src.ts", "one\ntwo\n", "first")
+	tr.Modify("src.ts", "one\nCHANGED\n")
+
+	m := settle(t, liveModel(t, tr), tea.WindowSizeMsg{Width: 120, Height: 30})
+	m = settle(t, m, m.refreshFilesCmd()())
+	m = settle(t, m, key("enter"))
+	if m.mode != modeDiff {
+		t.Fatalf("mode = %v, want modeDiff", m.mode)
+	}
+
+	tr.Modify("src.ts", "one\nREWRITTEN\n")
+	m = settle(t, m, m.refreshFilesCmd()())
+	m = settle(t, m, tea.WindowSizeMsg{Width: 100, Height: 30})
+
+	if got := m.renderer.Content(m.diffCursor); !strings.Contains(got, "REWRITTEN") {
+		t.Errorf("the plain diff kept old content across a resize:\n%s", got)
+	}
+}
+
+// The key the renderer records has to come from the content it read, not from
+// the previous poll's map — otherwise a write landing between the two makes
+// the next poll announce a change that is already on screen.
+func TestNotify_TheRecordedKeyComesFromTheContentRead(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("src.ts", "one\ntwo\n", "first")
+	tr.Modify("src.ts", "one\nCHANGED\n")
+
+	m := reviewing(t, tr)
+	// A write lands after the last refresh but before this load.
+	tr.Modify("src.ts", "one\nNEWER\n")
+	m = settle(t, m, m.loadDiffCmd(false)())
+
+	if got := m.renderer.Content(m.diffCursor); !strings.Contains(got, "NEWER") {
+		t.Fatalf("the load did not read the newer content:\n%s", got)
+	}
+	// The next poll sees the same content the renderer holds, so there is
+	// nothing to announce.
+	m = settle(t, m, m.refreshFilesCmd()())
+	if m.diffStale() {
+		t.Error("the notice fired for content that is already on screen")
+	}
+}
+
+// noteChangedFiles must never adopt an empty key map: doing so makes every
+// file look new on the next refresh and switches detection off for the run.
+func TestNotify_ANilKeyMapIsNotAdopted(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("src.ts", "one\ntwo\n", "first")
+	tr.Modify("src.ts", "one\nCHANGED\n")
+
+	m := reviewing(t, tr)
+	before := m.fileKeys
+	if len(before) == 0 {
+		t.Fatal("no keys to begin with")
+	}
+
+	m = m.noteChangedFiles(nil)
+	if len(m.fileKeys) != len(before) {
+		t.Errorf("a nil key map replaced %d keys with %d", len(before), len(m.fileKeys))
+	}
+}
+
+// Previewing a theme must not swap a held diff, for the same reason a resize
+// must not. Staleness alone cannot see this: a fresh load re-anchors against
+// the new content and the comment stays stale either way, so the thing to
+// assert is the content on screen.
+func TestNotify_AThemePreviewDoesNotSwapAHeldDiff(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("src.ts", "one\ntwo\n", "first")
+	tr.Modify("src.ts", "one\nCHANGED\n")
+
+	m := reviewing(t, tr)
+	tr.Modify("src.ts", "one\nREWRITTEN\n")
+	m = settle(t, m, m.refreshFilesCmd()())
+	if !m.diffStale() {
+		t.Fatal("the diff was not held")
+	}
+
+	mm, _ := m.openThemePicker()
+	mm, cmd := mm.moveThemeCursor(1)
+	m = settle(t, mm, cmdMsg(cmd))
+
+	if got := m.renderer.Content(m.diffCursor); strings.Contains(got, "REWRITTEN") {
+		t.Errorf("the theme preview swapped the held diff:\n%s", got)
+	}
+	if !m.diffStale() {
+		t.Error("the preview cleared the notice without the reviewer seeing what moved")
+	}
+}
+
+// The summary totals both halves of a dual-entry file. Taking the first match
+// compared one half against itself, so adding a line to the other half
+// reported "rewritten" when it had plainly grown.
+func TestNotify_TheSummaryTotalsBothHalvesOfAFile(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("src.ts", "one\ntwo\n", "first")
+	tr.Modify("src.ts", "one\nSTAGED\n")
+	tr.Stage("src.ts")
+
+	m := reviewing(t, tr)
+	staged, unstaged := 0, 0
+	for _, f := range m.files {
+		if f.change.Path != "src.ts" {
+			continue
+		}
+		staged += f.change.AddedLines
+		unstaged++
+	}
+	if unstaged == 0 {
+		t.Skip("fixture produced no src.ts entry")
+	}
+
+	// A line added to the worktree half, on top of the staged change.
+	tr.Modify("src.ts", "one\nSTAGED\nUNSTAGED\n")
+	m = settle(t, m, m.refreshFilesCmd()())
+
+	if !m.diffStale() {
+		t.Skip("this fixture did not hold the diff")
+	}
+	if got := m.changeSince(m.files); got == "rewritten" {
+		t.Errorf("a line was added and the summary says %q — one half was "+
+			"compared against itself", got)
+	}
+}
+
+// The hold belongs to the diff on screen. Without that guard, a refresh
+// arriving after the user navigated would hold on the *renderer's* file and
+// skip the reload for the file they asked for — so the panel never catches up.
+func TestNotify_NavigatingStillLoadsTheFileAskedFor(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("a.ts", "one\ntwo\n", "first")
+	tr.CommitFile("b.ts", "one\ntwo\n", "second")
+	tr.Modify("a.ts", "one\nCHANGED\n")
+	tr.Modify("b.ts", "one\nOTHER\n")
+
+	m := reviewing(t, tr)
+	start := m.rendererPath
+
+	// Navigate, and let a refresh land in the window before the diff does —
+	// with the file we navigated *away* from having changed, which is what
+	// makes an ungated hold engage.
+	updated, nav := m.updateReviewMode(key("n"))
+	m = updated.(Model)
+	asked := m.currentFilePath()
+	tr.Modify(start, "one\nREWRITTEN\n")
+	updated, _ = m.Update(m.refreshFilesCmd()())
+	m = updated.(Model)
+
+	// The navigation's own load now lands.
+	m = settle(t, m, cmdMsg(nav))
+
+	if m.rendererPath != asked {
+		t.Errorf("the panel shows %q; the reviewer asked for %q", m.rendererPath, asked)
+	}
+	if got := m.renderer.Content(m.diffCursor); !strings.Contains(got, "OTHER") {
+		t.Errorf("the panel did not load the file asked for:\n%s", got)
+	}
+}

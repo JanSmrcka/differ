@@ -41,9 +41,12 @@ import (
 // refresh.
 func fileKeysOf(repo *git.Repo, files []fileItem, stagedOnly bool) map[string]string {
 	var staged map[string]string
+	indexReadable := true
 	if stagedOnly && repo != nil {
 		// One call for the whole index, not one per file.
-		staged, _ = repo.IndexHashes()
+		var err error
+		staged, err = repo.IndexHashes()
+		indexReadable = err == nil
 	}
 
 	keys := make(map[string]string, len(files))
@@ -55,12 +58,31 @@ func fileKeysOf(repo *git.Repo, files []fileItem, stagedOnly bool) map[string]st
 			continue
 		}
 		if stagedOnly {
-			keys[path] = "index:" + staged[path]
+			keys[path] = indexKey(staged, path, indexReadable)
 			continue
 		}
 		keys[path] = worktreeKey(repo, path)
 	}
 	return keys
+}
+
+// indexKey is a path's staged object id, or a sentinel saying why there is
+// none.
+//
+// The sentinels matter. "index:" with nothing after it was the answer both for
+// a staged deletion — which then could never look changed — and for every path
+// in the changeset when IndexHashes failed, which switched change detection off
+// for the whole session with nothing on screen to say so. worktreeKey has
+// always distinguished its failures this way; this half did not.
+func indexKey(staged map[string]string, path string, readable bool) string {
+	if !readable {
+		return "index-unreadable"
+	}
+	oid, ok := staged[path]
+	if !ok {
+		return "index-absent"
+	}
+	return "index:" + oid
 }
 
 // worktreeKey fingerprints a file's content on disk.
@@ -154,12 +176,30 @@ func (m Model) diffStale() bool {
 // longer there. Outside review mode differ stays live, which is the point of
 // the poll.
 func (m Model) holdsTheDiff() bool {
+	// The renderer has to be the cursor's file, not just any file: diffs load
+	// asynchronously, so right after n or p it is still the previous one.
+	//
+	// That last clause is defence in depth and deliberately untested. Removing
+	// it leaves the suite green, and I could not build a case where it changes
+	// what the user sees: diffStale carries the same guard for the notice, and
+	// the two can only disagree while a navigation's own load is in flight,
+	// which supersedes the reload this would have skipped. It stays because
+	// the function's name is a claim about the diff on screen.
 	return m.mode == modeReview && m.renderer != nil && m.rendererPath == m.currentFilePath()
 }
 
 // noteRenderedDiff records what the diff on screen was built from.
-func (m Model) noteRenderedDiff() Model {
-	m.rendererKey = m.fileKeys[m.rendererPath]
+//
+// key comes from the load itself, read at the same moment as the content. It
+// used to be looked up in m.fileKeys, which the previous poll installed — so a
+// write landing between that poll and the read left the renderer holding
+// content newer than its recorded key, and the next poll announced a change
+// that was already on screen.
+func (m Model) noteRenderedDiff(key string) Model {
+	m.rendererKey = key
+	if key == "" {
+		m.rendererKey = m.fileKeys[m.rendererPath]
+	}
 	added, gone := m.countsFor(m.files, m.rendererPath)
 	m.rendererAdded, m.rendererGone = added, gone
 	return m
@@ -229,4 +269,41 @@ func (m Model) currentFileMoved(keys map[string]string) bool {
 		return false
 	}
 	return now != m.rendererKey
+}
+
+// fileKeyOf is one path's content key, for a caller that has just read that
+// path's diff and wants to record what it read.
+func fileKeyOf(repo *git.Repo, f fileItem, stagedOnly bool) string {
+	keys := fileKeysOf(repo, []fileItem{f}, stagedOnly)
+	return keys[f.change.Path]
+}
+
+// followCursorTo moves the cursor onto the entry for path, preferring the half
+// — staged or unstaged — it was on before the list was replaced.
+//
+// git reports a file with both staged and unstaged changes twice. Matching on
+// the path alone put the cursor on whichever came first, which is a different
+// diff: loadDiffCmd reads Staged from the entry, so the next reload would swap
+// content the reviewer never asked to see.
+func (m Model) followCursorTo(path string, staged bool) Model {
+	if path == "" {
+		return m
+	}
+	fallback := -1
+	for i, f := range m.files {
+		if f.change.Path != path {
+			continue
+		}
+		if f.change.Staged == staged {
+			m.cursor = i
+			return m
+		}
+		if fallback < 0 {
+			fallback = i
+		}
+	}
+	if fallback >= 0 {
+		m.cursor = fallback
+	}
+	return m
 }

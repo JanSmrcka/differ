@@ -59,10 +59,15 @@ const (
 type tickMsg time.Time
 
 type diffLoadedMsg struct {
-	// The content key this diff was built from, when it is not simply the
-	// file's key now — a re-render of held content keeps the key it had, so a
-	// resize cannot quietly mark a stale diff as current.
+	// The content key this diff was built from, read at the same moment as the
+	// content itself rather than looked up afterwards.
 	key string
+	// True when this is the diff already on screen, rebuilt at a new width or
+	// palette. Its content is by definition unchanged, so it must not
+	// re-anchor comments: the parse it carries still contains the lines the
+	// agent has since deleted, and re-anchoring against it restores every
+	// comment the refresh had just marked stale.
+	rerender bool
 
 	// renderer is nil when the diff could not be loaded; errContent then holds
 	// the message to show instead.
