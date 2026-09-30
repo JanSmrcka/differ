@@ -8,6 +8,11 @@ import (
 // Styles holds all lipgloss styles derived from a theme.
 type Styles struct {
 	// File list
+	// Modal is the border round a transient box that asks for an answer. The
+	// chrome has no boxes; this is the exception, and the border is what says
+	// the rest of the screen is not taking input.
+	Modal lipgloss.Style
+
 	FileItem     lipgloss.Style
 	FileSelected lipgloss.Style
 	StagedIcon   lipgloss.Style
@@ -86,6 +91,11 @@ func NewStyles(t theme.Theme) Styles {
 		// distinction in differ carries a glyph as well as a hue; this one
 		// carries cursorMarker, the same one the diff uses, so it means the
 		// same thing in both places.
+		Modal: lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color(t.AccentFg)).
+			Padding(0, modalPadding),
+
 		FileItem: lipgloss.NewStyle().
 			Foreground(lipgloss.Color(t.Fg)),
 		FileSelected: lipgloss.NewStyle().

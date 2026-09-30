@@ -115,8 +115,33 @@ is a pure function of its inputs and its tests need no `t.Setenv` (which would
 bar `t.Parallel`).
 
 The frame is the same on every screen, `differ log` included: a header, a
-rule, the content, a rule, one bar. There are no boxes — `renderCard` is gone,
-and a test fails if a box-drawing corner reappears anywhere.
+rule, the content, a rule, one bar. There are no boxes in it — `renderCard` is
+gone, and two tests sweep every mode for box-drawing corners.
+
+A **modal** is the one exception, and not a contradiction of that rule: the
+rule is about the frame you look at all day, where a border is decoration that
+costs a column on each side. A modal is transient and asks for an answer, and
+the border is what says the rest of the screen is not taking input. Both
+no-boxes sweeps render the base view, with nothing open. `modal.go` draws it —
+`lipgloss.PlaceHorizontal` centres, `RoundedBorder` frames, and `placeModal`
+does the vertical placement itself because the box has to keep *out* of the
+cursor's way rather than sit in the middle — and composites it over the panels
+so the view is still visible around it, which is why the comment editor moved
+out of the footer: you are commenting on a line you can still see, and the
+editor no longer takes rows from the diff to do it. `boxRows` is the one
+function that sizes the box, used both to fit the body and to draw it: two
+expressions that disagreed handed `fitOverlay` more rows than the box would
+show, and it replaced the overflow with a count — the picker's highlighted
+row among them.
+
+**A covered row is composited, not cut.** `overlayRow` keeps what is left and
+right of the box, and the cut is made by `dropColumns`, which walks the row's
+escape sequences and cuts the visible text by display column. Measuring
+`MaxWidth`'s output and trimming it as a byte prefix does not work: `MaxWidth`
+re-emits the string with its own escapes and a reset, so nothing was trimmed
+on any row with more than one styled run — which is every real row — and what
+appeared beside the box was the row's own *beginning* repeated. That reads as
+real diff, which is worse than the blank it replaced.
 
 `DiffRenderer` is the only rendering path — the diff viewer, untracked files
 and the commit log browser all go through it, so tab expansion, syntax

@@ -1,6 +1,7 @@
 package feedback
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -36,11 +37,18 @@ func newTmuxTarget(target string) (Target, error) {
 	if _, err := exec.LookPath("tmux"); err != nil {
 		return nil, fmt.Errorf("tmux is not installed — set feedback_target to clipboard or stdout")
 	}
-	if os.Getenv("TMUX") == "" {
-		return nil, fmt.Errorf("differ is not running inside tmux — set feedback_target to clipboard or stdout")
-	}
 	target = strings.TrimSpace(target)
 	if target == "" {
+		// Only the default needs a client: "{last}" means "the pane this
+		// session last looked at", which is meaningless without one. An
+		// explicit pane id does not — load-buffer and paste-buffer address the
+		// server, not the client, so differ in a plain terminal can send into
+		// a pane in tmux. Verified. Refusing that was over-broad, and it made
+		// the agent picker useless from outside tmux: you choose a pane by id
+		// and differ says it is not in tmux.
+		if os.Getenv("TMUX") == "" {
+			return nil, fmt.Errorf("differ is not running inside tmux — choose an agent with %s, or set feedback_target to clipboard or stdout", "A")
+		}
 		target = defaultTmuxTarget
 	}
 	return &tmuxTarget{target: target, selfPane: os.Getenv("TMUX_PANE")}, nil
@@ -79,8 +87,18 @@ func (t *tmuxTarget) Send(ctx context.Context, payload string) error {
 // tmux exits 0 and prints nothing for a target it cannot resolve, so an empty
 // result — not the exit status — is what marks an invalid target.
 func resolveTmuxPane(ctx context.Context, target string) (string, error) {
-	out, err := exec.CommandContext(ctx, "tmux", "display-message", "-p", "-t", target, "#{pane_id}").Output()
+	cmd := exec.CommandContext(ctx, "tmux", "display-message", "-p", "-t", target, "#{pane_id}")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
 	if err != nil {
+		// tmux's own words, not just "exit status 1". Whether the pane has
+		// gone ("can't find pane") or the server has ("no server running")
+		// decides whether differ reopens the picker, and exec.Cmd.Output puts
+		// stderr somewhere Error() never prints.
+		if said := strings.TrimSpace(stderr.String()); said != "" {
+			return "", fmt.Errorf("tmux target %q is not available: %s", target, said)
+		}
 		return "", fmt.Errorf("tmux target %q is not available: %w", target, err)
 	}
 	pane := strings.TrimSpace(string(out))

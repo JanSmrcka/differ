@@ -55,8 +55,13 @@ func TestView_FitsTerminalHeightInEveryMode(t *testing.T) {
 	}
 }
 
-// The viewport must shrink with the cards, or the diff is clipped instead.
-func TestCommentEditor_ShrinksTheDiffViewport(t *testing.T) {
+// The comment editor is a modal now, so it does not take rows from the diff.
+//
+// It used to live in the footer and the viewport shrank to make room, which is
+// what this test asserted. A modal is drawn over the panels instead: the diff
+// keeps its height and stays visible around the box, which is the point of
+// commenting on a line you can still see.
+func TestCommentEditor_DoesNotTakeRowsFromTheDiff(t *testing.T) {
 	tr := testutil.NewRepo(t)
 	tr.ApplyFixture(testutil.Fixture(t, "multi_hunk"))
 	m := liveModel(t, tr)
@@ -68,20 +73,17 @@ func TestCommentEditor_ShrinksTheDiffViewport(t *testing.T) {
 
 	updated, _ = m.updateReviewMode(key("c"))
 	m = updated.(Model)
-	open := m.viewport.Height
-	if open >= before {
-		t.Errorf("viewport height %d did not shrink when the editor opened (was %d)", open, before)
+	if !m.commenting {
+		t.Fatal("the editor did not open")
+	}
+	if m.viewport.Height != before {
+		t.Errorf("viewport height changed to %d when the editor opened (was %d)",
+			m.viewport.Height, before)
 	}
 
-	updated, _ = m.updateReviewMode(tea.KeyMsg{Type: tea.KeyEsc})
-	m = updated.(Model)
-	if m.viewport.Height != before {
-		t.Errorf("viewport height %d not restored after closing the editor (was %d)", m.viewport.Height, before)
-	}
-	// The viewport matches the panel's list rows, not the whole panel: two
-	// rows go to the label and the blank line under it.
-	if m.viewport.Height != m.listHeight() {
-		t.Errorf("viewport height %d != listHeight %d", m.viewport.Height, m.listHeight())
+	// And the frame is still exactly the terminal.
+	if rows := len(strings.Split(m.View(), "\n")); rows != 30 {
+		t.Errorf("the frame is %d rows in a 30-row terminal", rows)
 	}
 }
 

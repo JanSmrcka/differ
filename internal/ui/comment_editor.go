@@ -15,6 +15,20 @@ import (
 
 const commentEditorHeight = 4
 
+// commentEditorWidth is how wide the text area is drawn: the modal's inner
+// width, less the marker column the textarea draws itself.
+//
+// One function, called both where the editor is built and where it is drawn.
+// The two used to disagree — View sized a value copy while the model kept the
+// diff panel's width, 167 against the 82 on screen at 220 columns — so key
+// handling and the render wrapped the text at different places.
+func (m Model) commentEditorWidth() int {
+	if m.height < commentModalMinHeight {
+		return max(m.diffWidth()-4, 1) // the footer form, which is not in a box
+	}
+	return max(m.modalBoxWidth()-2*modalPadding-2, 1)
+}
+
 // startComment opens the editor for a new line comment, or reopens the
 // comment already attached to this line.
 func (m Model) startComment() (tea.Model, tea.Cmd) {
@@ -43,7 +57,7 @@ func (m Model) openEditor(draft review.Comment, editingID, body string) (tea.Mod
 	m.commenting = true
 	m.draft = draft
 	m.editingID = editingID
-	m.commentInput = newCommentArea(m.diffWidth(), body)
+	m.commentInput = newCommentArea(m.commentEditorWidth(), body)
 	// The editor takes several rows from the cards, so the viewport shrinks.
 	m = m.resizeViewport()
 	return m, textarea.Blink
@@ -54,8 +68,12 @@ func newCommentArea(width int, body string) textarea.Model {
 	ta.Placeholder = "review comment..."
 	ta.ShowLineNumbers = false
 	ta.SetHeight(commentEditorHeight)
-	if width > 8 {
-		ta.SetWidth(width - 4)
+	// The width it is given, not that width less some margin. The margin used
+	// to be taken here and again by the caller, so the text area wrapped four
+	// columns before the box it sits in. commentEditorWidth is the one place
+	// that arithmetic lives.
+	if width > 0 {
+		ta.SetWidth(width)
 	}
 	if body != "" {
 		ta.SetValue(body)

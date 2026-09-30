@@ -317,26 +317,32 @@ func (m Model) renderCommitBar() string {
 
 // renderCommentEditor shows the textarea plus what the two closing keys do,
 // inside budget rows.
-func (m Model) renderCommentEditor(budget int) string {
-	label := fmt.Sprintf(" comment · line %d ", m.draft.StartLine)
+// commentClosing is the two keys that close the editor. The one place they are
+// written.
+const commentClosing = "ctrl+s saves · esc cancels"
+
+// commentTitle names the line being commented on.
+func (m Model) commentTitle() string {
+	what := fmt.Sprintf(" comment · line %d", m.draft.StartLine)
 	if m.draft.EndLine > m.draft.StartLine {
-		label = fmt.Sprintf(" comment · lines %d-%d ", m.draft.StartLine, m.draft.EndLine)
+		what = fmt.Sprintf(" comment · lines %d-%d", m.draft.StartLine, m.draft.EndLine)
 	}
 	if m.editingID != "" {
-		label = " edit" + label
+		return " edit" + what
 	}
-	head := m.renderBar(lipgloss.NewStyle(), m.styles.HelpKey.Render(label)+m.styles.HelpDesc.Render("· ctrl+s save · esc cancel"))
+	return what
+}
 
-	// The textarea takes whatever is left rather than a fixed five rows. It was
-	// fixed, and the frame was built as though the footer could always have it:
-	// at height 8 the content area came out at -1 and View() panicked in
-	// make([]string, -1). The head stays whatever happens — it is the only
-	// place "ctrl+s save · esc cancel" is written.
-	rows := max(budget-lipgloss.Height(head), 1)
-	if rows < commentEditorHeight {
-		m.commentInput.SetHeight(rows)
-	}
-	return lipgloss.JoinVertical(lipgloss.Left, head, m.commentInput.View())
+// commentRows is the editor itself, sized to the modal.
+//
+// It used to live in the footer, where it had a fixed five rows and the frame
+// was built as though it could always have them — at height 8 the content area
+// came out at -1 and View panicked in make([]string, -1). A modal is bounded
+// by the room it is given instead, and the diff stays visible around it.
+func (m Model) commentRows(room int) []string {
+	m.commentInput.SetWidth(m.commentEditorWidth())
+	m.commentInput.SetHeight(max(min(room, commentEditorHeight), 1))
+	return strings.Split(m.commentInput.View(), "\n")
 }
 
 func (m Model) renderBranchCreateBar() string {
@@ -353,4 +359,22 @@ func (m Model) commitBarContent() string {
 
 func (m Model) branchCreateContent() string {
 	return m.styles.HelpKey.Render(" new branch: ") + m.branchInput.View() + "  " + m.styles.HelpDesc.Render("esc cancel · enter create")
+}
+
+// renderCommentBar is the comment editor in the footer, for terminals too
+// short to draw it as a box.
+//
+// One row of head and one of input: the smallest thing that still shows what
+// you are typing and how to get out.
+func (m Model) renderCommentBar() string {
+	head := m.renderBar(lipgloss.NewStyle(),
+		m.styles.HelpKey.Render(m.commentTitle()+" ")+m.styles.HelpDesc.Render("· "+commentClosing))
+	m.commentInput.SetHeight(1)
+	// commentEditorWidth, not m.width-2: this function set its own width and
+	// the model kept another, so the textarea's viewport was scrolled to a
+	// soft-wrapped row that did not exist after the resize — type 170
+	// characters at 220 columns and the row rendered as a bare marker with
+	// nothing in it.
+	m.commentInput.SetWidth(m.commentEditorWidth())
+	return lipgloss.JoinVertical(lipgloss.Left, head, m.commentInput.View())
 }

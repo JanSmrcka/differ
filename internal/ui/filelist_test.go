@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -380,26 +381,44 @@ func TestFileList_TruncatingANonASCIINameKeepsItReadable(t *testing.T) {
 // CPU, while both halves of a ratio are inflated equally. The same number of
 // rows is drawn either way, so the only thing that grows with the changeset is
 // one pass over the paths.
+//
+// The ratio is taken from the *fastest* batch of several rather than from one
+// batch each. Both halves are inflated equally only on average: a scheduler
+// preemption inside the 100-file batch alone raised the ratio above four with
+// the code unchanged, which failed this test twice in one afternoon for
+// reasons that had nothing to do with the file list. The minimum of several
+// batches is the one least interfered with, and interference can only ever
+// make a batch slower.
 func TestFileList_RenderingDoesNotCostRowsTimesFiles(t *testing.T) {
 	t.Parallel()
 	frame := func(n int) time.Duration {
 		m := newTestModel(t, manyFiles(n))
 		m.height = 60
 		_ = m.renderFileList() // warm the styles
-		start := time.Now()
-		const runs = 20
-		for range runs {
-			_ = m.renderFileList()
+
+		best := time.Duration(math.MaxInt64)
+		for range 5 {
+			start := time.Now()
+			const runs = 20
+			for range runs {
+				_ = m.renderFileList()
+			}
+			best = min(best, time.Since(start)/runs)
 		}
-		return time.Since(start) / runs
+		return best
 	}
 
-	small, large := frame(100), frame(1000)
-	// Quadratic in the changeset would be about 10×; linear is a little over
-	// 1×. Four is comfortably between the two and well clear of noise.
-	if large > 4*small {
-		t.Errorf("a 1000-file frame took %v against %v for 100 files — %0.1f×",
-			large, small, float64(large)/float64(small))
+	// 50 against 2000, not 100 against 1000. A frame has a fixed cost that
+	// does not scale with the changeset at all — the rows themselves — so the
+	// linear ratio is never 1 but 2 to 4, and a bound of four left no margin:
+	// 4.1× was measured with the code correct. Forty times the changeset
+	// makes quadratic about 40× and linear still 2 to 4, and ten sits
+	// unambiguously between them.
+	const factor = 40
+	small, large := frame(2000/factor), frame(2000)
+	if large > 10*small {
+		t.Errorf("a 2000-file frame took %v against %v for %d files — %0.1f×",
+			large, small, 2000/factor, float64(large)/float64(small))
 	}
 }
 
