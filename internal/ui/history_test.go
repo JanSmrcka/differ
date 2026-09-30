@@ -270,7 +270,7 @@ func TestOverlays_ViewDrawsThemOverThePanelsWithoutResizing(t *testing.T) {
 
 	m.showHistory = true
 	view := m.View()
-	if !strings.Contains(stripANSI(view), "sent this session") {
+	if !strings.Contains(stripANSI(view), "already sent") {
 		t.Errorf("View does not draw the history:\n%s", stripANSI(view))
 	}
 	if got := lipgloss.Height(view); got != plain {

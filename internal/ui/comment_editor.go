@@ -128,7 +128,7 @@ func (m Model) saveComment() (tea.Model, tea.Cmd) {
 		m.session.Add(c)
 		m.statusMsg = "comment added"
 	}
-	m = m.closeEditor()
+	m = m.closeEditor().persistReview()
 	return m.refreshCommentMarks(), nil
 }
 
@@ -140,6 +140,7 @@ func (m Model) deleteCommentAtCursor() (tea.Model, tea.Cmd) {
 	}
 	m.session.Remove(c.ID)
 	m.statusMsg = "comment deleted"
+	m = m.persistReview()
 	return m.refreshCommentMarks(), nil
 }
 

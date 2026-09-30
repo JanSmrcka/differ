@@ -310,9 +310,16 @@ type Model struct {
 	editorEnv editor.Env
 
 	// session holds review state — comments and per-file progress. It is
-	// created on first entering review mode and lives until the process ends;
-	// it is never written to disk and never mirrored into the git index.
+	// created on first entering review mode, or restored from store at
+	// startup when a previous run left something behind.
 	session *review.Session
+	// store is where the review is kept between runs: one file in this
+	// checkout's own git directory. Nil when there is nowhere to write it, in
+	// which case the review lives for the session as it always did.
+	store *review.Store
+	// reviewLock is this process's claim on the review file. Nil when there
+	// is nothing to claim, or when another differ holds it.
+	reviewLock *review.Lock
 }
 
 type fileItem struct {
@@ -355,11 +362,20 @@ func NewModel(repo *git.Repo, cfg config.Config, changes []git.FileChange, untra
 		branch = repo.BranchName()
 	}
 
+	// Whatever the last run left behind, silently. There is no prompt: being
+	// asked "restore 3 saved comments?" on every start is a question with one
+	// answer, and the comments that do come back are only the ones whose file
+	// is still what it was.
+	store, session, lock, lockNote := openReviewStore(repo)
+
 	return Model{
 		// Open, so a change arriving in the first seconds refreshes at once
 		// rather than waiting for the rate limit to fill.
 		ticksSinceRefresh: refreshEvery,
 		currentBranch:     branch,
+
+		reviewLock: lock,
+		statusMsg:  lockNote,
 
 		repo:         repo,
 		cfg:          cfg,
@@ -374,6 +390,8 @@ func NewModel(repo *git.Repo, cfg config.Config, changes []git.FileChange, untra
 		branchFilter: bf,
 		branchInput:  bi,
 		commentInput: ca,
+		store:        store,
+		session:      session,
 		target:       target,
 		targetErr:    targetErr,
 		editorEnv:    editor.NewEnv(),
@@ -429,7 +447,12 @@ func filesEqual(a, b []fileItem) bool {
 // the bar said something else — two answers to the same question.
 func (m *Model) StartInReviewMode() {
 	m.mode = modeReview
-	m.session = review.NewSession()
+	if m.session == nil {
+		// Not unconditionally: a session restored from the last run is
+		// already here, and replacing it would throw away the comments that
+		// were just read back.
+		m.session = review.NewSession()
+	}
 	if len(m.files) > 0 {
 		m.session.MarkViewed(m.currentFilePath())
 	}
@@ -442,6 +465,14 @@ func (m *Model) StartInCommitMode() {
 
 func (m Model) Init() tea.Cmd {
 	cmds := []tea.Cmd{m.loadDiffCmd(true), m.fetchUpstreamStatusCmd(), tickCmd()}
+	// Restored comments have to be re-resolved against the diff as it is now.
+	// The file on screen is re-anchored by its own load; every other one is
+	// only reached from here, and a comment left on a line number nobody
+	// checked would be delivered quoting the wrong place. Nothing to do when
+	// there are no comments: reanchorAllCmd returns nil.
+	if m.session != nil {
+		cmds = append(cmds, m.reanchorAllCmd())
+	}
 	if m.mode == modeCommit {
 		cmds = append(cmds, textinput.Blink)
 	}

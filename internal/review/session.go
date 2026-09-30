@@ -5,7 +5,8 @@
 // comment carries the text it needs (anchor and excerpt) so that generating
 // feedback for a coding agent stays a pure string transformation.
 //
-// Session state lives for as long as the process. Nothing here is persisted.
+// A Session itself holds nothing but memory. What survives a restart, and how
+// it is decided, is store.go's business — the session is not aware of it.
 package review
 
 import (
@@ -95,6 +96,18 @@ type Comment struct {
 	// Excerpt is the diff context shown to whoever receives this feedback.
 	Excerpt string
 	Body    string
+	// FileKey fingerprints the content this comment was written about, and
+	// Scope says which content that was — the working tree, or the index.
+	//
+	// Recorded when the comment is written, not when the review is saved. A
+	// key measured at save time is whatever the agent had written a moment
+	// earlier, so a comment would come back attached to a version of the file
+	// its author never read — which is the one thing the fingerprint exists
+	// to prevent. The scope travels with it because differ can be reopened in
+	// another mode: under -s the reviewer reads the index, and an unstaged
+	// edit does not touch what they read.
+	FileKey string
+	Scope   KeyScope
 	State   State
 	// StaleReason says why a comment no longer matches the diff, so the user
 	// can judge whether to re-create or discard it.

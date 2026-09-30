@@ -29,7 +29,12 @@ func (m Model) FlushFeedback(w io.Writer) error {
 }
 
 // confirmQuit asks once before quitting with comments that were never sent.
-// Review state is session-only, so quitting really does discard them.
+//
+// The comments themselves survive now — they are on disk and come back on the
+// next start — so the question is no longer "are you sure you want to lose
+// these?". It is still worth asking: the agent has not been told, and walking
+// away believing it has is the mistake that costs an hour of someone else's
+// work rather than your own.
 func (m Model) confirmQuit() (tea.Model, tea.Cmd) {
 	pending := 0
 	if m.session != nil {
@@ -39,7 +44,7 @@ func (m Model) confirmQuit() (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	}
 	m.quitConfirm = true
-	m.statusMsg = fmt.Sprintf("%s not sent — q again to discard, S to send", plural(pending, "comment"))
+	m.statusMsg = fmt.Sprintf("%s not sent — q again to quit, S to send", plural(pending, "comment"))
 	return m, nil
 }
 
@@ -136,7 +141,11 @@ func (m Model) send(cs []review.Comment) (tea.Model, tea.Cmd) {
 func (m Model) handleFeedbackSent(msg feedbackSentMsg) (tea.Model, tea.Cmd) {
 	m.recordDelivery(msg)
 	if msg.err != nil {
-		// Comments stay pending: the user can retry or switch target.
+		// Comments stay pending: the user can retry or switch target. The
+		// attempt is still written out — the history is what stops the same
+		// review going to the agent twice, and a send that failed is the one
+		// most worth being able to look up.
+		m = m.persistReview()
 		m = m.fail("sending the review", msg.err)
 		// A pane that has gone is not a failure to read about, it is a choice
 		// to make again — so the picker opens rather than leaving the user to
@@ -156,6 +165,10 @@ func (m Model) handleFeedbackSent(msg feedbackSentMsg) (tea.Model, tea.Cmd) {
 		m.session.MarkSent(msg.ids)
 	}
 	m.statusMsg = fmt.Sprintf("sent %s to %s", plural(len(msg.ids), "comment"), msg.target)
+	// After the status message, not before: if the write fails, what it has
+	// to say is more important than the send having worked, and fail() would
+	// otherwise be painted over by the line above.
+	m = m.persistReview()
 	return m.refreshCommentMarks(), nil
 }
 

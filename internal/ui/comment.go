@@ -149,7 +149,41 @@ func (m Model) buildLineComment() (review.Comment, bool) {
 	if h, ok := parsed.HunkAt(m.diffCursor); ok {
 		c.Excerpt = excerptFor(parsed, h)
 	}
+	c.FileKey, c.Scope = m.contentKeyNow(c.File)
 	return c, true
+}
+
+// contentKeyNow fingerprints the content the reviewer is looking at, right
+// now, so a restored comment can be checked against the version its author
+// read rather than against whatever the file held when the review was last
+// written out.
+//
+// The scope is decided the way the diff was read, not by the flag differ was
+// started with: git reports a file with both staged and unstaged changes
+// twice, staged first, so in default mode the cursor can sit on an entry
+// whose diff is `--cached`. Under -r the diff is a ref against the working
+// tree whatever the index says.
+func (m Model) contentKeyNow(path string) (string, review.KeyScope) {
+	if m.repo == nil || path == "" {
+		return "", review.ScopeWorktree
+	}
+	if m.readsTheIndex() {
+		staged, err := m.repo.IndexHashes()
+		return indexKey(staged, path, err == nil), review.ScopeIndex
+	}
+	return worktreeKey(m.repo, path), review.ScopeWorktree
+}
+
+// readsTheIndex reports whether the diff under the cursor came from the
+// index rather than the working tree.
+func (m Model) readsTheIndex() bool {
+	if m.ref != "" {
+		return false
+	}
+	if m.cursor < 0 || m.cursor >= len(m.files) {
+		return m.stagedOnly
+	}
+	return m.files[m.cursor].change.Staged
 }
 
 // buildHunkComment describes the whole hunk the cursor is in.
@@ -170,7 +204,7 @@ func (m Model) buildHunkComment() (review.Comment, bool) {
 		start, count, side = h.OldStart, h.OldCount, review.SideOld
 	}
 
-	return review.Comment{
+	c := review.Comment{
 		File:      m.currentFilePath(),
 		Side:      side,
 		Locate:    m.locateFor(side),
@@ -179,7 +213,9 @@ func (m Model) buildHunkComment() (review.Comment, bool) {
 		HunkIndex: h.Index,
 		Anchor:    anchorForHunk(parsed, h, side),
 		Excerpt:   excerptFor(parsed, h),
-	}, true
+	}
+	c.FileKey, c.Scope = m.contentKeyNow(c.File)
+	return c, true
 }
 
 // rendererIsTheCursorsFile reports whether what is parsed is what the cursor

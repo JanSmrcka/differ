@@ -9,11 +9,14 @@ import (
 
 // The session history overlay.
 //
-// Review state is session-only and deliberately so, which makes "have I
-// already sent that?" unanswerable from anywhere outside the running process.
-// H answers it: every attempt, what was in it, where it went and whether it
-// arrived — failures included, because a send that went nowhere is the one
-// worth looking up.
+// "Have I already sent that?" is unanswerable from anywhere but here: nothing
+// differ sends leaves a mark on the repository. H answers it: every attempt,
+// what was in it, where it went and whether it arrived — failures included,
+// because a send that went nowhere is the one worth looking up.
+//
+// It outlives the process. The record of what the agent has been told is
+// exactly what stops the same review going out twice, so it is written to disk
+// and restored unconditionally, whatever has happened to the files since.
 
 // renderHistoryOverlay lists the session's deliveries, most recent first.
 func (m Model) renderHistoryOverlay(width, height int) string {
@@ -25,7 +28,9 @@ func (m Model) renderHistoryOverlay(width, height int) string {
 			rows = append(rows, m.renderDelivery(d, width)...)
 		}
 	}
-	return m.fitOverlay(" sent this session", rows, "H or esc to close", width, height)
+	// Not "sent this session" any more: the list outlives the session, and a
+	// title claiming otherwise would undersell the one thing it is for.
+	return m.fitOverlay(" already sent", rows, "H or esc to close", width, height)
 }
 
 // renderDelivery is one entry: when, how many comments, where to and what came

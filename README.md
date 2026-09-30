@@ -240,7 +240,7 @@ It never changes git state — staging and committing stay explicit actions.
 | `x`       | delete comment under cursor     |
 | `s`       | send comment under cursor       |
 | `S`       | send all pending comments       |
-| `H`       | what has been sent this session |
+| `H`       | what has already been sent      |
 | `R`       | reload after the file changed   |
 | `r`       | toggle review mode              |
 | `e`       | open in editor at the cursor's line |
@@ -337,10 +337,38 @@ The comment editor is a box in the middle of the screen with the diff still
 visible around it, so you can see the line you are writing about. `ctrl+s`
 saves, `esc` cancels. Comments are multiline, shown inline under the line
 they refer to, and marked `pending` until sent.
-They live for the session only — nothing is written to disk or to git.
 
-Quitting with unsent comments asks for confirmation — review state is
-session-only, so `q` really does discard them.
+They outlive the process. Every change to a comment is written to
+`.git/differ/review.json` — not on quit, which would be no help against a
+crash, a closed tmux window or a `kill` — and read back silently on the next
+start. Nothing lands in the working tree, so there is nothing to ignore and
+nothing to commit, and the file dies with the repository. A linked worktree
+keeps its own, because a review belongs to a checkout.
+
+A pending comment only comes back if the content it was written about is
+still byte-for-byte what it was. That is the working tree normally, and the
+*staged* content for a comment written under `-s` or in `differ commit` —
+which is what you were reading there, so an unstaged edit does not disturb
+it. If the agent rewrote that content while differ was closed, the comment
+goes and the file is unreviewed again: it needs reading again, and a comment
+about code that has been replaced is worse than no comment. It goes for good
+— there is no dormant copy waiting for the old bytes to come back. What does
+come back is re-anchored against the diff as it is now, the same way it would
+be if the change had happened while you were watching.
+
+Files you read without commenting on come back read too, so an hour of
+reading does not report as nothing — and they stop counting as read if the
+agent rewrote them, exactly as during a session.
+
+**One differ at a time per repository.** A second one in the same checkout
+reviews normally but saves nothing, and says so in the bar: each save writes
+the whole review out, so two of them would overwrite each other — and could
+hand the agent a comment it had already been sent. Closing the first frees
+it; so does killing it.
+
+Quitting with unsent comments still asks for confirmation. Not because they
+would be lost — they will be there next time — but because the agent has not
+been told.
 
 ### Progress and history
 
@@ -354,10 +382,10 @@ you — the working-tree file normally and under `-r`, git's own object id for
 the staged content under `-s`. So staging never counts as a rewrite, and
 neither does a formatter writing the same bytes back.
 
-`H` lists what has left the session, most recent first:
+`H` lists what has been sent, most recent first:
 
 ```
- sent this session
+ already sent
 
  14:22:06  2 comments → tmux  sent  src/api/client.ts, src/auth/login.ts
  14:19:41  1 comment → tmux   failed: tmux pane %9 is gone  src/legacy.ts
@@ -705,7 +733,7 @@ Worth knowing if you are changing it:
 
 - `internal/git` — every git operation, via `os/exec`. No go-git.
 - `internal/review` — the review session: comments, per-file state, feedback
-  text. Never imports the UI.
+  text, and what of it survives a restart. Never imports the UI.
 - `internal/feedback` — where a review goes: clipboard, stdout or tmux.
 - `internal/editor` — decides *and* performs "open this file in an editor".
 - `internal/theme` — colour values only, no lipgloss.
