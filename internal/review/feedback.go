@@ -60,6 +60,12 @@ func header(n int) string {
 func FormatComment(c Comment) string {
 	var b strings.Builder
 
+	// The reference first, on a line of its own, in the form an agent's editor
+	// integration already understands — sidekick.nvim sends exactly this and
+	// Claude Code reads the file from it. The lines below stay because the
+	// hunk is the more useful thing for a review: the agent sees what changed
+	// without going and looking.
+	fmt.Fprintf(&b, "%s\n", Reference(c))
 	fmt.Fprintf(&b, "File: %s\n", c.File)
 	fmt.Fprintf(&b, "%s (%s)\n", lineLabel(c), sideLabel(c.Side))
 
@@ -80,6 +86,20 @@ func lineLabel(c Comment) string {
 		return fmt.Sprintf("Lines: %d-%d", c.StartLine, c.EndLine)
 	}
 	return fmt.Sprintf("Line: %d", c.StartLine)
+}
+
+// Reference locates a comment the way an editor integration expects:
+// "@path:L12", or "@path:L12-L20" for a range.
+//
+// The line numbers are the comment's own side, so a comment on deleted code
+// references the old file rather than a line that does not exist in the new
+// one. The path is repository-relative, which is what the comment already
+// carries.
+func Reference(c Comment) string {
+	if c.EndLine > c.StartLine {
+		return fmt.Sprintf("@%s:L%d-L%d", c.File, c.StartLine, c.EndLine)
+	}
+	return fmt.Sprintf("@%s:L%d", c.File, c.StartLine)
 }
 
 // sideLabel says which version of the file the line numbers refer to, so a

@@ -163,3 +163,70 @@ func TestFormatFeedback_TiebreakUsesCreationOrderNotStringOrder(t *testing.T) {
 		}
 	}
 }
+
+// The agent's editor integration understands a reference, so the payload
+// carries one.
+//
+// sidekick.nvim — the working reference on this machine — sends
+// "@src/cache.ts:L12" and lets Claude Code read the file. differ sends the
+// hunk as well, which is the more useful thing for a review, but without the
+// reference the agent has to parse "File:" and "Line:" out of prose to know
+// where to go.
+func TestFormatComment_CarriesAReferenceTheAgentUnderstands(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		c    Comment
+		want string
+	}{
+		{
+			name: "one line on the new side",
+			c:    Comment{File: "src/cache.ts", Side: SideNew, StartLine: 12, EndLine: 12, Body: "x"},
+			want: "@src/cache.ts:L12",
+		},
+		{
+			name: "a range",
+			c:    Comment{File: "src/cache.ts", Side: SideNew, StartLine: 12, EndLine: 20, Body: "x"},
+			want: "@src/cache.ts:L12-L20",
+		},
+		{
+			name: "a deletion references the old side",
+			c:    Comment{File: "src/gone.ts", Side: SideOld, StartLine: 7, EndLine: 7, Body: "x"},
+			want: "@src/gone.ts:L7",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := FormatComment(tc.c)
+			if !strings.Contains(got, tc.want) {
+				t.Errorf("payload carries no %q:\n%s", tc.want, got)
+			}
+		})
+	}
+}
+
+// The reference is a line of its own, so a parser can find it without reading
+// the prose around it.
+func TestFormatComment_TheReferenceIsItsOwnLine(t *testing.T) {
+	t.Parallel()
+	got := FormatComment(Comment{
+		File: "src/cache.ts", Side: SideNew, StartLine: 12, EndLine: 12,
+		Body: "this drops the error", Excerpt: "-  old\n+  new",
+	})
+
+	var found bool
+	for _, line := range strings.Split(got, "\n") {
+		if strings.TrimSpace(line) == "@src/cache.ts:L12" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("the reference is not on a line of its own:\n%s", got)
+	}
+	// And everything that was there before still is.
+	for _, want := range []string{"File: src/cache.ts", "Line: 12", "Changed code:", "-  old", "this drops the error"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the payload lost %q:\n%s", want, got)
+		}
+	}
+}
