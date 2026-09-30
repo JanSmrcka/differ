@@ -317,26 +317,34 @@ func (m Model) renderCommitBar() string {
 
 // renderCommentEditor shows the textarea plus what the two closing keys do,
 // inside budget rows.
-func (m Model) renderCommentEditor(budget int) string {
-	label := fmt.Sprintf(" comment · line %d ", m.draft.StartLine)
+// commentClosing is the two keys that close the editor. The one place they are
+// written.
+const commentClosing = "ctrl+s saves · esc cancels"
+
+// commentTitle names the line being commented on.
+func (m Model) commentTitle() string {
+	what := fmt.Sprintf(" comment · line %d", m.draft.StartLine)
 	if m.draft.EndLine > m.draft.StartLine {
-		label = fmt.Sprintf(" comment · lines %d-%d ", m.draft.StartLine, m.draft.EndLine)
+		what = fmt.Sprintf(" comment · lines %d-%d", m.draft.StartLine, m.draft.EndLine)
 	}
 	if m.editingID != "" {
-		label = " edit" + label
+		return " edit" + what
 	}
-	head := m.renderBar(lipgloss.NewStyle(), m.styles.HelpKey.Render(label)+m.styles.HelpDesc.Render("· ctrl+s save · esc cancel"))
+	return what
+}
 
-	// The textarea takes whatever is left rather than a fixed five rows. It was
-	// fixed, and the frame was built as though the footer could always have it:
-	// at height 8 the content area came out at -1 and View() panicked in
-	// make([]string, -1). The head stays whatever happens — it is the only
-	// place "ctrl+s save · esc cancel" is written.
-	rows := max(budget-lipgloss.Height(head), 1)
-	if rows < commentEditorHeight {
-		m.commentInput.SetHeight(rows)
+// commentRows is the editor itself, sized to the modal.
+//
+// It used to live in the footer, where it had a fixed five rows and the frame
+// was built as though it could always have them — at height 8 the content area
+// came out at -1 and View panicked in make([]string, -1). A modal is bounded
+// by the room it is given instead, and the diff stays visible around it.
+func (m Model) commentRows() []string {
+	inner := m.modalWidth() - 2*modalPadding - 2
+	if inner > 4 {
+		m.commentInput.SetWidth(inner - 2)
 	}
-	return lipgloss.JoinVertical(lipgloss.Left, head, m.commentInput.View())
+	return strings.Split(m.commentInput.View(), "\n")
 }
 
 func (m Model) renderBranchCreateBar() string {

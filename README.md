@@ -269,7 +269,9 @@ letter while the editor is open.
 While the diff is held, `e` opens the file without jumping to a line — the line
 numbers belong to a version that is no longer on disk.
 
-In the comment editor: `ctrl+s` saves, `esc` cancels. Comments are multiline,
+The comment editor is a box in the middle of the screen with the diff still
+visible around it, so you can see the line you are writing about. `ctrl+s`
+saves, `esc` cancels. Comments are multiline,
 shown inline under the line they refer to, and marked `pending` until sent.
 They live for the session only — nothing is written to disk or to git.
 
@@ -437,6 +439,34 @@ Config file: `~/.config/differ/config.json`
 
 A failed send never discards comments — they stay pending and the error is
 shown, so you can fix the target and send again.
+
+### Choosing the agent
+
+`A` lists the agents running in tmux and sends the review to the one you pick:
+
+```
+ agent
+
+▍ differ:2            claude      ~/git/private/differ
+  ELI-panda:2         claude      ~/git/work/ELI-panda
+  personal-web:2      opencode    ~/git/private/personal-web
+
+ j/k · enter chooses · esc cancels
+```
+
+It writes `tmux_target` and sets `feedback_target` to `tmux`, so the choice
+survives a restart. The agent in differ's own tmux session comes first, then
+one working in this repository.
+
+Discovery **walks each pane's process tree** rather than reading its current
+command: an agent started through `npx`, a shell function or a wrapper script
+does not show up as the pane's command. It looks for `claude`, `codex`,
+`gemini`, `copilot`, `opencode` and `aider`, and the whole scan is two
+subprocesses however many panes there are.
+
+If the pane you chose has since exited, the picker reopens rather than leaving
+you to work out why a send failed. It never starts an agent — it chooses among
+those already running.
 
 ## Reviewing agent changes in tmux
 

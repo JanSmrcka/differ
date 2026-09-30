@@ -84,8 +84,18 @@ is a pure function of its inputs and its tests need no `t.Setenv` (which would
 bar `t.Parallel`).
 
 The frame is the same on every screen, `differ log` included: a header, a
-rule, the content, a rule, one bar. There are no boxes — `renderCard` is gone,
-and a test fails if a box-drawing corner reappears anywhere.
+rule, the content, a rule, one bar. There are no boxes in it — `renderCard` is
+gone, and two tests sweep every mode for box-drawing corners.
+
+A **modal** is the one exception, and not a contradiction of that rule: the
+rule is about the frame you look at all day, where a border is decoration that
+costs a column on each side. A modal is transient and asks for an answer, and
+the border is what says the rest of the screen is not taking input. Both
+no-boxes sweeps render the base view, with nothing open. `modal.go` draws it —
+`lipgloss.Place` centres, `RoundedBorder` frames — and composites it over the
+panels so the view is still visible around it, which is why the comment editor
+moved out of the footer: you are commenting on a line you can still see, and
+the editor no longer takes rows from the diff to do it.
 
 `DiffRenderer` is the only rendering path — the diff viewer, untracked files
 and the commit log browser all go through it, so tab expansion, syntax

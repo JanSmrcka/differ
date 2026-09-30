@@ -49,6 +49,8 @@ func (m Model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleBranchCreated(msg)
 	case repoProbedMsg:
 		return m.handleRepoProbed(msg)
+	case agentsLoadedMsg:
+		return m.handleAgentsLoaded(msg)
 	case upstreamStatusMsg:
 		m.upstream = msg.info
 		return m, nil
@@ -87,6 +89,12 @@ func (m Model) routeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		mm, cmd, _ := m.themePickerKey(msg.String())
 		return mm, cmd
 	}
+	// Same reason as the theme picker: it owns j/k and enter, so it is
+	// answered before the overlays that only close.
+	if m.showAgents {
+		mm, cmd := m.agentPickerKey(msg.String())
+		return mm, cmd
+	}
 
 	if m.showHelp || m.showHistory || m.showProblem {
 		switch msg.String() {
@@ -98,6 +106,9 @@ func (m Model) routeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "t":
 			return m.openThemePicker()
+		case agentKey:
+			mm, cmd := m.openAgentPicker()
+			return mm, cmd
 		case "H":
 			// H closes the history, but does not open one from the help
 			// overlay: unlike ?, it is not a global — it exists only in
@@ -127,6 +138,9 @@ func (m Model) routeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "t":
 			return m.openThemePicker()
+		case agentKey:
+			mm, cmd := m.openAgentPicker()
+			return mm, cmd
 		}
 	}
 
@@ -415,6 +429,7 @@ func (m Model) handleBranchesLoaded(msg branchesLoadedMsg) (tea.Model, tea.Cmd) 
 	// the flag: it is the only overlay that changes the session as you move
 	// through it, so dropping it without restoring left the user in a theme
 	// they never confirmed, with esc no longer able to undo it.
+	m.showAgents = false
 	var restore tea.Cmd
 	if m.showThemes {
 		m, restore = m.cancelTheme()

@@ -140,6 +140,12 @@ type branchSwitchedMsg struct{ err error }
 
 type upstreamStatusMsg struct{ info git.UpstreamInfo }
 
+// agentsLoadedMsg carries the result of scanning tmux for running agents.
+type agentsLoadedMsg struct {
+	agents []feedback.Agent
+	err    error
+}
+
 // repoProbedMsg carries the answer to "did anything move?".
 type repoProbedMsg struct {
 	fingerprint string
@@ -166,6 +172,17 @@ type Model struct {
 	// The last probe's fingerprint. An equal one means the tick can stop
 	// without asking git anything else.
 	repoFingerprint string
+	// The agent picker: which panes are running one, where the cursor is, and
+	// the tmux session differ itself is in — used to offer the nearest agent
+	// first.
+	showAgents bool
+	agents     []feedback.Agent
+	// Whether the scan has answered. A nil slice cannot say the difference
+	// between "still looking" and "found none", and the picker has to show
+	// something different for each.
+	agentsScanned bool
+	agentCursor   int
+
 	// Whether a probe is out, and for how many ticks. tea.Tick does not wait
 	// for the previous one, and git can block rather than fail.
 	probing     bool

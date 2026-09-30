@@ -47,6 +47,7 @@ func (m Model) View() string {
 		body = m.renderHistoryOverlay(m.width, contentH)
 	case m.showProblem:
 		body = m.renderProblemOverlay(m.width, contentH)
+
 	case m.onePanel():
 		// One panel takes the terminal. A pair squeezed into sixty columns is
 		// two unusable panels rather than one usable one, and the diff is what
@@ -77,6 +78,13 @@ func (m Model) View() string {
 			rows[i] = m.panelRow(left[i], right[i])
 		}
 		body = strings.Join(rows, "\n")
+	}
+
+	// The modals go on top of whatever the switch produced, so the view is
+	// still there around the box — you are commenting on a line, and choosing
+	// where feedback goes while looking at what will be sent.
+	if modal := m.modal(contentH); modal != "" {
+		body = modalOver(strings.Split(body, "\n"), modal, m.width, contentH)
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Left,
@@ -218,19 +226,14 @@ func (m Model) rule() string {
 // renderFooter is the bar below the content: hints, or an input when one is
 // open.
 func (m Model) renderFooter() string {
-	// The status row is part of the footer's budget, not an extra on top of it:
-	// counting it afterwards is how the frame came out a row taller than the
-	// terminal at heights 8 and 9.
+	// No budget arithmetic left here. The comment editor was the only footer
+	// that wanted more than one row, and it is a modal now — the commit bar
+	// and the branch-name bar are one line each, so the footer is at most two
+	// with the status row.
 	segment := m.statusSegment()
-	budget := m.footerBudget()
-	if segment != "" {
-		budget = max(budget-1, 1)
-	}
 
 	var input string
 	switch {
-	case m.commenting:
-		input = m.renderCommentEditor(budget)
 	case m.mode == modeCommit:
 		input = m.renderCommitBar()
 	case m.mode == modeBranchPicker && m.branchCreating:
