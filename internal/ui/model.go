@@ -294,6 +294,9 @@ type Model struct {
 	// checkout's own git directory. Nil when there is nowhere to write it, in
 	// which case the review lives for the session as it always did.
 	store *review.Store
+	// reviewLock is this process's claim on the review file. Nil when there
+	// is nothing to claim, or when another differ holds it.
+	reviewLock *review.Lock
 }
 
 type fileItem struct {
@@ -340,13 +343,16 @@ func NewModel(repo *git.Repo, cfg config.Config, changes []git.FileChange, untra
 	// asked "restore 3 saved comments?" on every start is a question with one
 	// answer, and the comments that do come back are only the ones whose file
 	// is still what it was.
-	store, session := openReviewStore(repo)
+	store, session, lock, lockNote := openReviewStore(repo)
 
 	return Model{
 		// Open, so a change arriving in the first seconds refreshes at once
 		// rather than waiting for the rate limit to fill.
 		ticksSinceRefresh: refreshEvery,
 		currentBranch:     branch,
+
+		reviewLock: lock,
+		statusMsg:  lockNote,
 
 		repo:         repo,
 		cfg:          cfg,

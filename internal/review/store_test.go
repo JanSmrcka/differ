@@ -7,17 +7,34 @@ import (
 	"time"
 )
 
-// fixedKeys answers content questions from a table, which is what the UI's
-// file fingerprints look like from here.
+// fixedKeys answers content questions from a table of working-tree
+// fingerprints, which is what the UI's file keys look like from here.
 func fixedKeys(table map[string]string) Keys {
-	return func(files []string) map[string]string { return table }
+	return func(files []string) map[string]ContentKey {
+		out := make(map[string]ContentKey, len(table))
+		for path, key := range table {
+			out[path] = ContentKey{Worktree: key}
+		}
+		return out
+	}
+}
+
+// stagedKeys answers with index-side fingerprints instead, for the -s case.
+func stagedKeys(table map[string]string) Keys {
+	return func(files []string) map[string]ContentKey {
+		out := make(map[string]ContentKey, len(table))
+		for path, key := range table {
+			out[path] = ContentKey{Index: key}
+		}
+		return out
+	}
 }
 
 func TestStore_PendingCommentSurvivesWhenTheFileHasNotMoved(t *testing.T) {
 	t.Parallel()
 	st := NewStore(t.TempDir())
 	s := NewSession()
-	s.Add(Comment{File: "a.ts", StartLine: 12, EndLine: 12, Anchor: "x := 1", Body: "why 1?"})
+	s.Add(Comment{File: "a.ts", StartLine: 12, EndLine: 12, Anchor: "x := 1", Body: "why 1?", FileKey: "k1"})
 
 	if err := st.Save(s, fixedKeys(map[string]string{"a.ts": "k1"})); err != nil {
 		t.Fatalf("Save: %v", err)
@@ -43,8 +60,8 @@ func TestStore_CommentsAreDroppedWhenTheirFileWasRewritten(t *testing.T) {
 	t.Parallel()
 	st := NewStore(t.TempDir())
 	s := NewSession()
-	s.Add(Comment{File: "moved.ts", StartLine: 3, EndLine: 3, Body: "about the old code"})
-	s.Add(Comment{File: "still.ts", StartLine: 7, EndLine: 7, Body: "about code that is still there"})
+	s.Add(Comment{File: "moved.ts", StartLine: 3, EndLine: 3, Body: "about the old code", FileKey: "k1"})
+	s.Add(Comment{File: "still.ts", StartLine: 7, EndLine: 7, Body: "about code that is still there", FileKey: "k2"})
 	if err := st.Save(s, fixedKeys(map[string]string{"moved.ts": "k1", "still.ts": "k2"})); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
@@ -273,5 +290,138 @@ func TestStore_AnEmptiedReviewRestoresNothing(t *testing.T) {
 	}
 	if got := st.Load(fixedKeys(nil)); got != nil {
 		t.Errorf("Load = %v, want nil", got)
+	}
+}
+
+// A kill between the temp file and the rename leaves a stray, and nothing
+// ever reaped them: the directory the feature exists to protect filled with
+// litter nobody would ever look at.
+func TestStore_AnOldStrayTempFileIsSweptUp(t *testing.T) {
+	t.Parallel()
+	gitDir := t.TempDir()
+	st := NewStore(gitDir)
+	dir := filepath.Dir(st.Path())
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	old := filepath.Join(dir, ".review-1871183222.json")
+	fresh := filepath.Join(dir, ".review-4037558089.json")
+	for _, p := range []string{old, fresh} {
+		if err := os.WriteFile(p, []byte("{}"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// One from a run that ended some time ago, one from a write happening
+	// now — which must not be swept out from under its own process.
+	past := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(old, past, past); err != nil {
+		t.Fatal(err)
+	}
+
+	s := NewSession()
+	s.Add(Comment{File: "a.ts", StartLine: 1, EndLine: 1, Body: "x", FileKey: "k1"})
+	if err := st.Save(s, fixedKeys(map[string]string{"a.ts": "k1"})); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	if _, err := os.Stat(old); !os.IsNotExist(err) {
+		t.Errorf("the stray from an earlier run is still there: %v", err)
+	}
+	if _, err := os.Stat(fresh); err != nil {
+		t.Errorf("a temp file from a write in progress was swept: %v", err)
+	}
+}
+
+// The excerpt is the code context the agent is shown. Dropping it from the
+// round trip delivered a restored comment with no context at all, and
+// nothing said so.
+func TestStore_ARestoredCommentKeepsItsExcerptAndSide(t *testing.T) {
+	t.Parallel()
+	st := NewStore(t.TempDir())
+	s := NewSession()
+	s.Add(Comment{
+		File: "a.ts", Side: SideOld, StartLine: 4, EndLine: 4, HunkIndex: 2,
+		Anchor: "removed()", Excerpt: " keep()\n-removed()\n", Body: "why?",
+		FileKey: "k1",
+	})
+	if err := st.Save(s, fixedKeys(map[string]string{"a.ts": "k1"})); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	back := st.Load(fixedKeys(map[string]string{"a.ts": "k1"}))
+	if back == nil {
+		t.Fatal("nothing was restored")
+	}
+	got := back.CommentsFor("a.ts")[0]
+	if got.Excerpt != " keep()\n-removed()\n" {
+		t.Errorf("Excerpt = %q", got.Excerpt)
+	}
+	// A comment on a removed line re-anchors against the old side. Losing
+	// the side made every restored comment SideNew, so it went stale or
+	// landed on an unrelated line.
+	if got.Side != SideOld {
+		t.Errorf("Side = %v, want old", got.Side)
+	}
+	if got.HunkIndex != 2 {
+		t.Errorf("HunkIndex = %d, want 2", got.HunkIndex)
+	}
+}
+
+// A file written by another version is ignored rather than migrated. The
+// only fixture for this was an empty review, which Load returns nil for
+// anyway — so the gate itself was untested.
+func TestStore_AReviewFromAnotherVersionIsIgnored(t *testing.T) {
+	t.Parallel()
+	gitDir := t.TempDir()
+	st := NewStore(gitDir)
+	if err := os.MkdirAll(filepath.Dir(st.Path()), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A real comment, under a version this differ does not write. Without
+	// the gate it would be restored, fields and all.
+	body := `{"version":99,"next_id":2,"comments":[` +
+		`{"id":"c1","file":"a.ts","start_line":1,"end_line":1,` +
+		`"body":"from the future","file_key":"k1"}]}`
+	if err := os.WriteFile(st.Path(), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if back := st.Load(fixedKeys(map[string]string{"a.ts": "k1"})); back != nil {
+		t.Errorf("a review written by version 99 was restored: %d comments",
+			back.CountFor("a.ts"))
+	}
+}
+
+// Under -s the reviewer reads the index, so that is what the comment is
+// keyed to — and a working-tree edit that leaves the index alone must not
+// drop it. Comparing against the wrong scope simply never matches, which
+// looks exactly like the file having been rewritten.
+func TestStore_ACommentIsComparedAgainstTheScopeItWasWrittenIn(t *testing.T) {
+	t.Parallel()
+	st := NewStore(t.TempDir())
+	s := NewSession()
+	s.Add(Comment{File: "a.ts", StartLine: 1, EndLine: 1, Body: "staged",
+		FileKey: "index:abc", Scope: ScopeIndex})
+	if err := st.Save(s, stagedKeys(map[string]string{"a.ts": "index:abc"})); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	// The index has not moved; the working tree has, and says nothing about
+	// this comment.
+	both := Keys(func(files []string) map[string]ContentKey {
+		return map[string]ContentKey{"a.ts": {Worktree: "moved", Index: "index:abc"}}
+	})
+	back := st.Load(both)
+	if back == nil || back.CountFor("a.ts") != 1 {
+		t.Fatalf("a comment about unchanged staged content was dropped: %v", back)
+	}
+
+	// And when the index does move, it goes.
+	moved := Keys(func(files []string) map[string]ContentKey {
+		return map[string]ContentKey{"a.ts": {Worktree: "moved", Index: "index:def"}}
+	})
+	if back := st.Load(moved); back != nil && back.CountFor("a.ts") != 0 {
+		t.Errorf("a comment survived the staged content being replaced")
 	}
 }

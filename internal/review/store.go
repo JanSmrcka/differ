@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"time"
 )
 
@@ -19,15 +21,46 @@ import (
 // other version is ignored rather than migrated: this is a cache of work in
 // progress, not a document, and the cost of getting a migration wrong is
 // higher than the cost of losing comments once.
-const storeVersion = 1
+const storeVersion = 2
 
-// Keys answers what each named file's content key is now.
+// KeyScope says which version of a file a fingerprint measures.
 //
-// It takes the whole list at once rather than one path at a time because under
-// -s a key comes from git's view of the entire index, read in one call. Asked
+// The zero value is the working tree, because that is what a reviewer reads
+// in every mode but -s, and because a comment restored from a file written
+// before this field existed is better treated as being about the file on disk
+// than about nothing.
+type KeyScope int
+
+const (
+	// ScopeWorktree fingerprints the bytes on disk.
+	ScopeWorktree KeyScope = iota
+	// ScopeIndex fingerprints the staged content: what `differ -s` and
+	// `differ commit` put on screen, and what an unstaged edit leaves alone.
+	ScopeIndex
+)
+
+// ContentKey is a file's fingerprint in both scopes, so a comment can be
+// compared against the version its author actually read.
+type ContentKey struct {
+	Worktree string
+	Index    string
+}
+
+// For returns the fingerprint in one scope.
+func (k ContentKey) For(scope KeyScope) string {
+	if scope == ScopeIndex {
+		return k.Index
+	}
+	return k.Worktree
+}
+
+// Keys answers what each named file's content key is now, in both scopes.
+//
+// It takes the whole list at once rather than one path at a time because the
+// index key comes from git's view of the whole index, read in one call. Asked
 // file by file, a review touching a dozen files would start a dozen git
-// processes every time a comment changed.
-type Keys func(files []string) map[string]string
+// processes.
+type Keys func(files []string) map[string]ContentKey
 
 // Store is one review's state on disk.
 type Store struct{ path string }
@@ -51,10 +84,20 @@ type storedReview struct {
 	// recomputed because the history refers to comments by id, and reusing the
 	// id of a comment that was dropped would make an entry in it describe
 	// something else.
-	NextID   int               `json:"next_id"`
-	Files    map[string]string `json:"files,omitempty"`
-	Comments []storedComment   `json:"comments,omitempty"`
-	History  []storedDelivery  `json:"history,omitempty"`
+	NextID int `json:"next_id"`
+	// Viewed is the files the reviewer had read, each with the fingerprint of
+	// what they read. Without it an hour of reading that produced no comment
+	// reported as unreviewed after a restart, and the progress in the bar
+	// went backwards.
+	Viewed   []storedViewed   `json:"viewed,omitempty"`
+	Comments []storedComment  `json:"comments,omitempty"`
+	History  []storedDelivery `json:"history,omitempty"`
+}
+
+type storedViewed struct {
+	File    string `json:"file"`
+	FileKey string `json:"file_key"`
+	Scope   int    `json:"scope,omitempty"`
 }
 
 type storedComment struct {
@@ -67,6 +110,8 @@ type storedComment struct {
 	Anchor    string `json:"anchor"`
 	Excerpt   string `json:"excerpt"`
 	Body      string `json:"body"`
+	FileKey   string `json:"file_key"`
+	Scope     int    `json:"scope,omitempty"`
 }
 
 type storedDelivery struct {
@@ -78,6 +123,10 @@ type storedDelivery struct {
 }
 
 // Save writes the session out.
+//
+// keys is only asked about the files the reviewer has read without commenting
+// on, because every comment already carries the fingerprint of the content it
+// was written about.
 func (st *Store) Save(s *Session, keys Keys) error {
 	if s == nil {
 		return nil
@@ -95,11 +144,10 @@ func (st *Store) Save(s *Session, keys Keys) error {
 			ID: c.ID, File: c.File, Side: int(c.Side),
 			StartLine: c.StartLine, EndLine: c.EndLine, HunkIndex: c.HunkIndex,
 			Anchor: c.Anchor, Excerpt: c.Excerpt, Body: c.Body,
+			FileKey: c.FileKey, Scope: int(c.Scope),
 		})
 	}
-	if keys != nil {
-		out.Files = keys(filesOf(out.Comments))
-	}
+	out.Viewed = viewedOf(s, keys)
 	for _, d := range s.deliveries {
 		out.History = append(out.History, storedDelivery{
 			At:     d.At.Format(time.RFC3339Nano),
@@ -128,9 +176,15 @@ func (st *Store) Load(keys Keys) *Session {
 		return nil
 	}
 
+	now := map[string]ContentKey{}
+	if keys != nil {
+		now = keys(in.fingerprintedFiles())
+	}
+
 	s := NewSession()
 	s.nextID = in.NextID
-	s.comments = restoredComments(in, keys)
+	s.comments = restoredComments(in, now)
+	restoreViewed(s, in, now)
 	// The history comes back whatever happened to the files. It answers "what
 	// have I already told the agent?", and that question does not stop being
 	// asked because the code has moved on — it is asked *because* it has.
@@ -140,7 +194,7 @@ func (st *Store) Load(keys Keys) *Session {
 			Target: sd.Target, Comments: sd.Comments, Files: sd.Files, Err: sd.Err,
 		})
 	}
-	if len(s.comments) == 0 && len(s.deliveries) == 0 {
+	if len(s.comments) == 0 && len(s.deliveries) == 0 && len(s.viewed) == 0 {
 		// Nothing came back — every comment was deleted, or every one of them
 		// belonged to a file that has been rewritten. The caller gets the
 		// same answer as if nothing had ever been written, because that is
@@ -162,23 +216,61 @@ func (st *Store) Load(keys Keys) *Session {
 // Everything comes back pending. State is not saved because it is not a fact
 // about the comment — it is what the diff currently says about it, and the
 // caller re-anchors what it gets, which is what decides it again.
-func restoredComments(in storedReview, keys Keys) []Comment {
-	now := map[string]string{}
-	if keys != nil {
-		now = keys(filesOf(in.Comments))
-	}
-
+func restoredComments(in storedReview, now map[string]ContentKey) []Comment {
 	var out []Comment
 	for _, sc := range in.Comments {
-		if was, ok := in.Files[sc.File]; !ok || was == "" || now[sc.File] != was {
+		scope := KeyScope(sc.Scope)
+		if sc.FileKey == "" || now[sc.File].For(scope) != sc.FileKey {
 			continue
 		}
 		out = append(out, Comment{
 			ID: sc.ID, File: sc.File, Side: Side(sc.Side),
 			StartLine: sc.StartLine, EndLine: sc.EndLine, HunkIndex: sc.HunkIndex,
 			Anchor: sc.Anchor, Excerpt: sc.Excerpt, Body: sc.Body,
+			FileKey: sc.FileKey, Scope: scope,
 			State: StatePending, seq: len(out) + 1,
 		})
+	}
+	return out
+}
+
+// restoreViewed brings back the files the reviewer had read, and only those
+// still holding the content they read.
+func restoreViewed(s *Session, in storedReview, now map[string]ContentKey) {
+	for _, sv := range in.Viewed {
+		if sv.FileKey == "" || now[sv.File].For(KeyScope(sv.Scope)) != sv.FileKey {
+			continue
+		}
+		s.MarkViewed(sv.File)
+	}
+}
+
+// viewedOf is the files read but not commented on, each with the fingerprint
+// of what was read. A file carrying a comment needs no entry: the comment
+// already says the file was read, and restoring one marks it.
+func viewedOf(s *Session, keys Keys) []storedViewed {
+	commented := map[string]bool{}
+	for _, c := range s.comments {
+		commented[c.File] = true
+	}
+	var files []string
+	for path := range s.viewed {
+		if !commented[path] {
+			files = append(files, path)
+		}
+	}
+	if len(files) == 0 || keys == nil {
+		return nil
+	}
+	sort.Strings(files) // a stable file, so five saves in a row are identical
+	now := keys(files)
+	var out []storedViewed
+	for _, path := range files {
+		// The working tree, always: "have I read this file?" is about the
+		// file, and a reviewer who read it under -s has still read it.
+		if key := now[path].Worktree; key != "" {
+			out = append(out, storedViewed{File: path, FileKey: key})
+		}
 	}
 	return out
 }
@@ -198,16 +290,23 @@ func parseTime(s string) time.Time {
 	return t
 }
 
-// filesOf names the files a set of stored comments came from, each once.
-func filesOf(cs []storedComment) []string {
+// fingerprintedFiles names every file the stored review has a fingerprint
+// for, each once, so the current keys can be read in one pass.
+func (in storedReview) fingerprintedFiles() []string {
 	var out []string
 	seen := map[string]bool{}
-	for _, c := range cs {
-		if seen[c.File] {
-			continue
+	add := func(path string) {
+		if seen[path] {
+			return
 		}
-		seen[c.File] = true
-		out = append(out, c.File)
+		seen[path] = true
+		out = append(out, path)
+	}
+	for _, c := range in.Comments {
+		add(c.File)
+	}
+	for _, v := range in.Viewed {
+		add(v.File)
 	}
 	return out
 }
@@ -234,6 +333,16 @@ func writeFileAtomically(path string, data []byte) error {
 		_ = os.Remove(name)
 		return err
 	}
+	// Flushed to the device before the rename, not just to the page cache.
+	// Without it "a crash" meant only a process kill: the rename can return
+	// having durably created a name that points at unwritten blocks, so a
+	// machine crash or a power loss could leave review.json empty — which is
+	// the same as losing the hour of reading it exists to protect.
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(name)
+		return err
+	}
 	if err := tmp.Close(); err != nil {
 		_ = os.Remove(name)
 		return err
@@ -242,5 +351,48 @@ func writeFileAtomically(path string, data []byte) error {
 		_ = os.Remove(name)
 		return err
 	}
+	syncDir(dir)
+	sweepStrays(dir, name)
 	return nil
+}
+
+// syncDir makes the rename itself durable. Renaming into place is only atomic
+// with respect to readers; the directory entry is a write like any other.
+//
+// Best effort: a filesystem that refuses to open a directory, or to sync one,
+// is not a reason to tell the reviewer their comment was not saved when it
+// was.
+func syncDir(dir string) {
+	d, err := os.Open(dir)
+	if err != nil {
+		return
+	}
+	_ = d.Sync()
+	_ = d.Close()
+}
+
+// sweepStrays removes temporary files left behind by an earlier write that
+// did not reach its rename — a kill between the two, which is exactly the
+// scenario this file exists for.
+//
+// Only files older than a minute, and never the one just renamed, so a
+// concurrent write is not swept out from under itself. Litter inside .git
+// that nothing ever reaps is still litter.
+func sweepStrays(dir, keep string) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	cutoff := time.Now().Add(-time.Minute)
+	for _, e := range entries {
+		name := filepath.Join(dir, e.Name())
+		if e.IsDir() || name == keep || !strings.HasPrefix(e.Name(), ".review-") {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil || info.ModTime().After(cutoff) {
+			continue
+		}
+		_ = os.Remove(name)
+	}
 }

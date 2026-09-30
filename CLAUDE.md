@@ -76,15 +76,35 @@ owns the diff parser, and a cycle would follow. A `review.Comment` therefore
 carries its own anchor text and a plain-text excerpt, which keeps feedback
 generation a pure string transformation.
 
-A review survives the process. Pending comments and the delivery history are
-written to `.git/differ/review.json` — located by `git rev-parse --git-dir`,
-so a linked worktree keeps its own — on every change to a comment rather than
-on quit, since `q` is the one case that was never the problem. A pending
-comment is restored only if its file's content key (`fileKeysOf`) is unchanged;
-the history is restored unconditionally, because it is the record that stops
-the same review going to the agent twice. Deciding what "unchanged" means is
-the UI's job — it owns the fingerprints — so `review.Store` is handed a
-function rather than reaching for one.
+A review survives the process. Pending comments, what has been read and the
+delivery history are written to `.git/differ/review.json` — located by `git
+rev-parse --git-dir`, so a linked worktree keeps its own — on every change to
+a comment rather than on quit, since `q` is the one case that was never the
+problem. The history is restored unconditionally, because it is the record
+that stops the same review going to the agent twice.
+
+**A comment carries the fingerprint of the content its author read**, taken
+when the comment is written and stored with it, along with the *scope* it was
+measured in. Measuring at save time was wrong twice over: the key was
+whatever the agent had written a moment earlier, so a comment came back
+presented as valid against a version nobody had seen; and one scope for the
+whole file was wrong in both directions — the working tree dropped comments
+about staged content that had not moved under `-s`, the mode's own key made a
+review written with `differ` unreadable by `differ -s` and then overwrote it.
+The scope follows the entry the diff was read from, not the flag differ was
+started with, because git lists a file with both staged and unstaged changes
+twice. Deciding what "unchanged" means is still the UI's job — it owns the
+fingerprints — so `review.Store` is handed a function rather than reaching
+for one.
+
+**One differ owns a repository's review.** Every save writes the whole
+session over the file; there is no merge, so two instances destroyed each
+other's comments and, worse, brought back a comment the other had already
+delivered. `review.TakeLock` claims `.git/differ/review.lock` with `O_EXCL`
+and this process's pid; a second differ reviews normally, saves nothing and
+says so in the bar. A lock naming a pid that is no longer running is taken
+over, because a kill is the case the whole feature exists for and must not be
+the one that locks the reviewer out.
 
 `internal/editor` must not import `internal/ui` either. It both decides how to
 open a file and does it — the one exception is handing the terminal to a child

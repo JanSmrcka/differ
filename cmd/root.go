@@ -247,6 +247,12 @@ func openDiff(cmd *cobra.Command, review bool) error {
 
 	p := tea.NewProgram(model, tea.WithAltScreen())
 	finalModel, err := p.Run()
+	if m, ok := finalModel.(ui.Model); ok {
+		// Before the error check: the claim on the review file has to be
+		// given up however the program ended, or the next differ in this
+		// repository would find it held and refuse to save.
+		defer m.Close()
+	}
 	if err != nil {
 		return err
 	}
@@ -285,6 +291,9 @@ func runCommit(cmd *cobra.Command, args []string) error {
 	model.StartInCommitMode()
 	p := tea.NewProgram(model, tea.WithAltScreen())
 	finalModel, err := p.Run()
+	if m, ok := finalModel.(ui.Model); ok {
+		defer m.Close()
+	}
 	if err != nil {
 		return err
 	}

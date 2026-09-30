@@ -279,12 +279,26 @@ start. Nothing lands in the working tree, so there is nothing to ignore and
 nothing to commit, and the file dies with the repository. A linked worktree
 keeps its own, because a review belongs to a checkout.
 
-A pending comment only comes back if the file it is about is still
-byte-for-byte what it was. If the agent rewrote the file while differ was
-closed, the comment goes and the file is unreviewed again: it needs reading
-again, and a comment about code that has been replaced is worse than no
-comment. What does come back is re-anchored against the diff as it is now, the
-same way it would be if the change had happened while you were watching.
+A pending comment only comes back if the content it was written about is
+still byte-for-byte what it was. That is the working tree normally, and the
+*staged* content for a comment written under `-s` or in `differ commit` —
+which is what you were reading there, so an unstaged edit does not disturb
+it. If the agent rewrote that content while differ was closed, the comment
+goes and the file is unreviewed again: it needs reading again, and a comment
+about code that has been replaced is worse than no comment. It goes for good
+— there is no dormant copy waiting for the old bytes to come back. What does
+come back is re-anchored against the diff as it is now, the same way it would
+be if the change had happened while you were watching.
+
+Files you read without commenting on come back read too, so an hour of
+reading does not report as nothing — and they stop counting as read if the
+agent rewrote them, exactly as during a session.
+
+**One differ at a time per repository.** A second one in the same checkout
+reviews normally but saves nothing, and says so in the bar: each save writes
+the whole review out, so two of them would overwrite each other — and could
+hand the agent a comment it had already been sent. Closing the first frees
+it; so does killing it.
 
 Quitting with unsent comments still asks for confirmation. Not because they
 would be lost — they will be there next time — but because the agent has not

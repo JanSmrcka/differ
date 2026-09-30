@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"errors"
+
 	"github.com/jansmrcka/differ/internal/git"
 	"github.com/jansmrcka/differ/internal/review"
 )
@@ -17,46 +19,64 @@ import (
 // was?". internal/review must not reach back into internal/ui — the diff
 // parser lives here — and it does not need to: it asks a function.
 
-// openReviewStore finds where this checkout keeps its review and reads back
-// whatever was left there. Both results are nil when there is nowhere to keep
-// it, which is a review that works and does not survive, not a failure worth
-// saying anything about.
-func openReviewStore(repo *git.Repo) (*review.Store, *review.Session) {
+// openReviewStore finds where this checkout keeps its review, claims it for
+// this process, and reads back whatever was left there.
+//
+// The store is nil when there is nowhere to keep the review, or when another
+// differ already has it: both are a review that works and does not survive.
+// The second case gets a note for the status bar, because it is a choice the
+// reviewer can act on — close the other differ, or accept that this one's
+// comments end with it — and silently not saving is exactly the failure the
+// whole feature exists to prevent.
+func openReviewStore(repo *git.Repo) (*review.Store, *review.Session, *review.Lock, string) {
 	if repo == nil {
-		return nil, nil
+		return nil, nil, nil, ""
 	}
 	gitDir, err := repo.GitDir()
 	if err != nil {
-		return nil, nil
+		return nil, nil, nil, ""
 	}
+	lock, err := review.TakeLock(gitDir)
+	if errors.Is(err, review.ErrHeldElsewhere) {
+		return nil, nil, nil, "another differ has this review open — comments here are not saved"
+	}
+	// Any other failure leaves the store in place, unlocked. A .git/differ
+	// that cannot be created is a broken directory, so nobody else can be
+	// holding a lock in it either — and the saves that then fail report the
+	// real reason on every comment, which is louder and more accurate than
+	// one line at startup about a lock.
 	store := review.NewStore(gitDir)
-	return store, store.Load(freshKeys(repo))
+	return store, store.Load(currentKeys(repo)), lock, ""
 }
 
-// It goes through fileKeysOf, the same function the change detector uses, so
-// "the file moved" cannot come to mean two different things — and so staging,
-// or a formatter writing the same bytes back, is not mistaken for a rewrite
-// here either.
-// freshKeys fingerprints files on disk, whatever mode differ is in.
+// currentKeys fingerprints files in both scopes: the bytes on disk, and the
+// staged content git holds for them.
 //
-// Deliberately not the mode-dependent key that change detection uses. That one
-// answers "is the diff on screen out of date", which depends on what is being
-// diffed — the index under -s, a ref under -r. Persistence asks a different
-// question: has the file the reviewer read been re-saved since? That is the
-// working tree in every mode.
+// Both, because a comment records which one its author read — the working
+// tree normally, the index under -s and in the commit review. Measuring only
+// one meant a review written in one mode and reopened in another found no
+// comparable key, dropped every pending comment, and then overwrote the file
+// on the next change, losing them for good rather than merely not showing
+// them. Measuring the *mode's* key was the same bug in a different direction:
+// under -s an unstaged edit dropped comments about staged content that had
+// not moved.
 //
-// Using the change-detection key here meant a review written with `differ` and
-// reopened with `differ -s` found no comparable key, dropped every pending
-// comment, and then overwrote the file on the next change — losing them for
-// good rather than merely not showing them.
-func freshKeys(repo *git.Repo) review.Keys {
-	return func(paths []string) map[string]string {
-		if len(paths) == 0 {
+// The index side is one git call for the whole list, so asking for both costs
+// one process per save rather than one per file.
+func currentKeys(repo *git.Repo) review.Keys {
+	return func(paths []string) map[string]review.ContentKey {
+		if len(paths) == 0 || repo == nil {
 			return nil
 		}
-		keys := make(map[string]string, len(paths))
+		staged, err := repo.IndexHashes()
+		indexReadable := err == nil
+		keys := make(map[string]review.ContentKey, len(paths))
 		for _, p := range paths {
-			keys[p] = worktreeKey(repo, p)
+			worktree := worktreeKey(repo, p)
+			keys[p] = review.ContentKey{
+				Worktree: worktree,
+				Index:    indexKey(staged, p, indexReadable),
+			}
 		}
 		return keys
 	}
@@ -72,38 +92,18 @@ func (m Model) persistReview() Model {
 	if m.store == nil || m.session == nil {
 		return m
 	}
-	if err := m.store.Save(m.session, m.reviewKeys()); err != nil {
+	if err := m.store.Save(m.session, currentKeys(m.repo)); err != nil {
 		return m.fail("saving the review", err)
 	}
 	return m
 }
 
-// reviewKeys answers with what the last refresh measured, and only reads a
-// file it has no answer for.
+// Close gives up this process's claim on the review file, so the next differ
+// in this repository can save.
 //
-// Preferring the stored fingerprints is not just about the reads. They are the
-// content differ has actually shown the reviewer; a fresh read at save time
-// would record whatever the agent had written a moment earlier, and the
-// comment would come back on the next start attached to a version of the file
-// its author never saw.
-func (m Model) reviewKeys() review.Keys {
-	fresh := freshKeys(m.repo)
-	return func(paths []string) map[string]string {
-		out := make(map[string]string, len(paths))
-		var unknown []string
-		for _, p := range paths {
-			// m.fileKeys is only comparable when it is measuring the same
-			// thing: under -s and -r it holds index oids and ref hashes, which
-			// a later run in another mode cannot match.
-			if key, ok := m.fileKeys[p]; ok && !m.stagedOnly && m.ref == "" {
-				out[p] = key
-				continue
-			}
-			unknown = append(unknown, p)
-		}
-		for p, key := range fresh(unknown) {
-			out[p] = key
-		}
-		return out
-	}
+// Called by cmd once the program has returned, rather than on every path that
+// quits: there are five of those and a sixth would not be noticed. A claim
+// left behind by a kill is taken over by the next start.
+func (m Model) Close() {
+	m.reviewLock.Release()
 }
