@@ -333,8 +333,10 @@ from one to the other re-resolves a comment into the other's line numbers.
 The hunk is differ's addition: for a review it is more useful for the agent to
 see what changed than to go and read the file.
 
-In the comment editor: `ctrl+s` saves, `esc` cancels. Comments are multiline,
-shown inline under the line they refer to, and marked `pending` until sent.
+The comment editor is a box in the middle of the screen with the diff still
+visible around it, so you can see the line you are writing about. `ctrl+s`
+saves, `esc` cancels. Comments are multiline, shown inline under the line
+they refer to, and marked `pending` until sent.
 They live for the session only — nothing is written to disk or to git.
 
 Quitting with unsent comments asks for confirmation — review state is
@@ -501,6 +503,49 @@ Config file: `~/.config/differ/config.json`
 
 A failed send never discards comments — they stay pending and the error is
 shown, so you can fix the target and send again.
+
+### Choosing the agent
+
+`A` lists the agents running in tmux and sends the review to the one you pick:
+
+```
+ agent
+
+▍ differ:2  claude  /Users/you/git/private/differ
+  ELI-panda:2  claude  /Users/you/git/work/ELI-panda
+  personal-web:2 %5  opencode  /Users/you/git/private/personal-web
+  personal-web:2 %6  claude  /Users/you/git/private/personal-web
+
+ j/k · enter chooses · esc cancels
+```
+
+It writes `tmux_target` and sets `feedback_target` to `tmux`, so the choice
+survives a restart. The agent in differ's own tmux session comes first, then
+one working in this repository.
+
+Discovery **walks each pane's process tree** rather than reading its current
+command: an agent started through `npx`, a shell function or a wrapper script
+does not show up as the pane's command. It looks for `claude`, `codex`,
+`gemini`, `copilot`, `opencode` and `aider`, and the whole scan is two
+subprocesses however many panes there are: one `tmux list-panes -a` and one
+`ps`. The session differ itself is in — which is what puts the agent beside
+you first — comes out of that same listing.
+
+It finds the documented invocation of each: `npx @anthropic-ai/claude-code`,
+`uvx --from aider-chat aider`, `uv run aider`, `gh copilot`. A one-shot is
+not offered — `claude -p` is differ's own default commit-message command, and
+pasting a review into it would write to a process that has already read its
+input.
+
+The choice takes effect immediately, not at the next start: it re-resolves
+where feedback goes as well as writing the config.
+
+Two agents in one window are told apart by their pane id, which is shown only
+when the session and window alone would be ambiguous.
+
+If the pane you chose has since exited, the picker reopens rather than leaving
+you to work out why a send failed. It never starts an agent — it chooses among
+those already running.
 
 ## Reviewing agent changes in tmux
 

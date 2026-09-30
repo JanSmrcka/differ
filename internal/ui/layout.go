@@ -47,6 +47,7 @@ func (m Model) View() string {
 		body = m.renderHistoryOverlay(m.width, contentH)
 	case m.showProblem:
 		body = m.renderProblemOverlay(m.width, contentH)
+
 	case m.onePanel():
 		// One panel takes the terminal. A pair squeezed into sixty columns is
 		// two unusable panels rather than one usable one, and the diff is what
@@ -77,6 +78,13 @@ func (m Model) View() string {
 			rows[i] = m.panelRow(left[i], right[i])
 		}
 		body = strings.Join(rows, "\n")
+	}
+
+	// The modals go on top of whatever the switch produced, so the view is
+	// still there around the box — you are commenting on a line, and choosing
+	// where feedback goes while looking at what will be sent.
+	if modal := m.modal(contentH); modal != "" {
+		body = modalOver(strings.Split(body, "\n"), modal, m.width, contentH)
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Left,
@@ -218,26 +226,28 @@ func (m Model) rule() string {
 // renderFooter is the bar below the content: hints, or an input when one is
 // open.
 func (m Model) renderFooter() string {
-	// The status row is part of the footer's budget, not an extra on top of it:
-	// counting it afterwards is how the frame came out a row taller than the
-	// terminal at heights 8 and 9.
-	segment := m.statusSegment()
-	budget := m.footerBudget()
-	if segment != "" {
-		budget = max(budget-1, 1)
-	}
-
+	// No budget arithmetic left here. The comment editor was the only footer
+	// that wanted more than one row, and it is a modal now — the commit bar
+	// and the branch-name bar are one line each, so the footer is at most two
+	// with the status row.
 	var input string
 	switch {
-	case m.commenting:
-		input = m.renderCommentEditor(budget)
+	case m.commenting && m.height < commentModalMinHeight:
+		// Too short for a box. The footer form needs two rows and is what
+		// this replaced, so it is still here for terminals the modal cannot
+		// serve.
+		input = m.renderCommentBar()
 	case m.mode == modeCommit:
 		input = m.renderCommitBar()
 	case m.mode == modeBranchPicker && m.branchCreating:
 		input = m.renderBranchCreateBar()
 	default:
-		return m.renderHintBar() // already carries the status row
+		return m.renderHintBar() // already carries the status row, and asks
+		// for it itself — computing it above ran the whole thing twice on
+		// every frame of the common path.
 	}
+
+	segment := m.statusSegment()
 
 	// An open input replaces the hints, but not the status: "comment is empty
 	// — esc to cancel" and "ai msg failed" are only reachable here, and the

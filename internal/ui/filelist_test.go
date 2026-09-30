@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -380,18 +381,31 @@ func TestFileList_TruncatingANonASCIINameKeepsItReadable(t *testing.T) {
 // CPU, while both halves of a ratio are inflated equally. The same number of
 // rows is drawn either way, so the only thing that grows with the changeset is
 // one pass over the paths.
+//
+// The ratio is taken from the *fastest* batch of several rather than from one
+// batch each. Both halves are inflated equally only on average: a scheduler
+// preemption inside the 100-file batch alone raised the ratio above four with
+// the code unchanged, which failed this test twice in one afternoon for
+// reasons that had nothing to do with the file list. The minimum of several
+// batches is the one least interfered with, and interference can only ever
+// make a batch slower.
 func TestFileList_RenderingDoesNotCostRowsTimesFiles(t *testing.T) {
 	t.Parallel()
 	frame := func(n int) time.Duration {
 		m := newTestModel(t, manyFiles(n))
 		m.height = 60
 		_ = m.renderFileList() // warm the styles
-		start := time.Now()
-		const runs = 20
-		for range runs {
-			_ = m.renderFileList()
+
+		best := time.Duration(math.MaxInt64)
+		for range 5 {
+			start := time.Now()
+			const runs = 20
+			for range runs {
+				_ = m.renderFileList()
+			}
+			best = min(best, time.Since(start)/runs)
 		}
-		return time.Since(start) / runs
+		return best
 	}
 
 	small, large := frame(100), frame(1000)

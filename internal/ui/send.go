@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -136,7 +137,20 @@ func (m Model) handleFeedbackSent(msg feedbackSentMsg) (tea.Model, tea.Cmd) {
 	m.recordDelivery(msg)
 	if msg.err != nil {
 		// Comments stay pending: the user can retry or switch target.
-		return m.fail("send", msg.err), nil
+		m = m.fail("sending the review", msg.err)
+		// A pane that has gone is not a failure to read about, it is a choice
+		// to make again — so the picker opens rather than leaving the user to
+		// work out that the agent they chose has exited.
+		if paneIsGone(msg.err) {
+			// The failure above is kept as it is. It was reported a second
+			// time here, under another action name, and the first result was
+			// thrown away — the picker's scan must not replace it either,
+			// which is what agentsAfterSendFailure says.
+			mm, cmd := m.openAgentPicker()
+			mm.agentsAfterSendFailure = true
+			return mm, cmd
+		}
+		return m, nil
 	}
 	if m.session != nil {
 		m.session.MarkSent(msg.ids)
@@ -194,4 +208,34 @@ func (m Model) filesOf(ids []string) []string {
 		out = append(out, c.File)
 	}
 	return out
+}
+
+// paneIsGone reports whether a delivery failed because the chosen pane no
+// longer exists.
+//
+// Matched on tmux's wording, the same way the git hints are: tmux has no exit
+// code for it, and an unmatched failure still gets reported — it just does not
+// reopen the picker.
+//
+// Only tmux's wording. "is not available" was in this list and is differ's
+// own wrapper around *any* display-message failure, so a tmux server that had
+// gone away entirely reopened the picker, whose scan then failed for the same
+// reason. resolveTmuxPane now carries tmux's stderr, so the real message —
+// "can't find pane" against "no server running" — is what decides.
+func paneIsGone(err error) bool {
+	if err == nil {
+		return false
+	}
+	text := strings.ToLower(err.Error())
+	for _, said := range []string{
+		"can't find pane",
+		"pane not found",
+		"does not match a pane",
+		"no such pane",
+	} {
+		if strings.Contains(text, said) {
+			return true
+		}
+	}
+	return false
 }

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -55,8 +56,13 @@ func handledKeys(t *testing.T) map[string][]string {
 	return out
 }
 
-// isKeyHandler spots a method that takes a tea.KeyMsg, which is how every key
-// handler in this package is shaped.
+// isKeyHandler spots a method that handles keys: one taking a tea.KeyMsg, or
+// one named *Key taking the key as a plain string.
+//
+// The second shape was invisible to this scanner. The overlay pickers are
+// written that way — agentPickerKey, themePickerKey — so none of the checks
+// below reached them: a key could be handled and undocumented, bound twice,
+// or leave an overlay with no way out, with the suite green.
 func isKeyHandler(fn *ast.FuncDecl) bool {
 	if fn.Recv == nil || fn.Type.Params == nil {
 		return false
@@ -67,7 +73,16 @@ func isKeyHandler(fn *ast.FuncDecl) bool {
 			return true
 		}
 	}
-	return false
+	return strings.HasSuffix(fn.Name.Name, "Key") && takesOneString(fn)
+}
+
+// takesOneString reports whether the method's only parameter is a string.
+func takesOneString(fn *ast.FuncDecl) bool {
+	if len(fn.Type.Params.List) != 1 || len(fn.Type.Params.List[0].Names) != 1 {
+		return false
+	}
+	id, ok := fn.Type.Params.List[0].Type.(*ast.Ident)
+	return ok && id.Name == "string"
 }
 
 // caseStrings collects the keys a handler actually matches: the cases of a
@@ -102,9 +117,12 @@ func caseStrings(fn *ast.FuncDecl) []string {
 	return keys
 }
 
-// isKeyString reports whether an expression is a call to .String() on the key
-// message.
+// isKeyString reports whether an expression is the key: a call to .String()
+// on the key message, or the plain `key` parameter the pickers take.
 func isKeyString(e ast.Expr) bool {
+	if id, ok := e.(*ast.Ident); ok {
+		return id.Name == "key"
+	}
 	call, ok := e.(*ast.CallExpr)
 	if !ok {
 		return false
@@ -540,6 +558,47 @@ func TestKeymap_TheREADMEParserReadsEverySection(t *testing.T) {
 		}
 		if !found {
 			t.Errorf("%s: parsed %v, which does not include %q", section.heading, keys, section.want)
+		}
+	}
+}
+
+// overlayHandlers are the key handlers that own the keyboard while an overlay
+// is open. They are written as `func (m Model) xKey(key string)` rather than
+// taking a tea.KeyMsg, which is why the checks above, keyed on handlerFor,
+// never saw them.
+var overlayHandlers = []string{"agentPickerKey", "themePickerKey"}
+
+// An overlay owns the keyboard, so it has to say how to leave. Without this
+// the only thing standing between a picker and a trapped user was that
+// someone remembered.
+func TestKeymap_EveryOverlayOffersAnExit(t *testing.T) {
+	t.Parallel()
+	handled := handledKeys(t)
+
+	for _, name := range overlayHandlers {
+		keys := handled[name]
+		if len(keys) == 0 {
+			t.Errorf("%s handles no keys — the scanner no longer reads it", name)
+			continue
+		}
+		if !slices.Contains(keys, "esc") {
+			t.Errorf("%s has no esc: %v", name, keys)
+		}
+	}
+}
+
+// And no overlay may bind one key to two things.
+func TestKeymap_NoOverlayBindsAKeyTwice(t *testing.T) {
+	t.Parallel()
+	handled := handledKeys(t)
+
+	for _, name := range overlayHandlers {
+		seen := map[string]bool{}
+		for _, k := range handled[name] {
+			if seen[k] {
+				t.Errorf("%s binds %q twice", name, k)
+			}
+			seen[k] = true
 		}
 	}
 }
