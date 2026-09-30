@@ -161,6 +161,12 @@ func TestAgents_FindsAnAgentInARealTmuxSession(t *testing.T) {
 	name := "differ-test-agents-" + strconv.Itoa(os.Getpid())
 	dir := t.TempDir()
 	fake := filepath.Join(dir, "claude")
+	// Blocks forever, so the pane stays alive without a `; sleep 30` after
+	// it. That trailing sleep was read back from ps as part of one command
+	// line, and strings.Fields then yielded "claude;" with the semicolon
+	// attached — so whether this test passed depended on the *child*
+	// process being matched instead, which is not a thing to depend on. It
+	// held on macOS and not on ubuntu.
 	script := "#!/bin/sh\nread x\n"
 	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
@@ -176,7 +182,7 @@ func TestAgents_FindsAnAgentInARealTmuxSession(t *testing.T) {
 	_ = exec.Command("tmux", "kill-session", "-t", name).Run()
 	// sh -c keeps a shell as the pane's process and the fake agent as its
 	// child, which is the shape this is about.
-	cmd := exec.Command("tmux", "new-session", "-d", "-s", name, "sh", "-c", fake+"; sleep 30")
+	cmd := exec.Command("tmux", "new-session", "-d", "-s", name, "sh", "-c", fake)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Skipf("could not start a tmux session: %v\n%s", err, out)
 	}
@@ -495,5 +501,26 @@ func TestAgentTool_InstallingIsToldFromRunning(t *testing.T) {
 			t.Errorf("agentTool(%q) = %q — installing an agent is not running one",
 				command, got)
 		}
+	}
+}
+
+// A shell invoking the agent is matched at the shell itself, not only at the
+// child it forks.
+//
+// `sh -c "<path>/claude; sleep 30"` is one command line as ps prints it, so
+// strings.Fields yields "claude;" with the semicolon attached and the shell
+// matches nothing — the agent was then found only because the child process
+// had appeared in ps yet, which is a 400 ms race. It held on macOS and failed
+// on ubuntu.
+func TestAgentTool_AShellInvokingTheAgentIsMatchedAtTheShell(t *testing.T) {
+	t.Parallel()
+	if got := agentTool("sh -c /tmp/xyz/claude"); got != "claude" {
+		t.Errorf(`agentTool("sh -c /tmp/xyz/claude") = %q, want claude`, got)
+	}
+	// And the shape that does not match, so the reason is recorded rather
+	// than only the fix: a trailing command makes the path a different token.
+	if got := agentTool("sh -c /tmp/xyz/claude; sleep 30"); got != "" {
+		t.Errorf("a semicolon-joined command line matched %q; if this now "+
+			"works the comment above is stale", got)
 	}
 }

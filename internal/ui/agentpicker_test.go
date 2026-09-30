@@ -290,10 +290,13 @@ func TestAgentPicker_ChoosingChangesWhereASendGoes(t *testing.T) {
 	m := settle(t, liveModel(t, tr), tea.WindowSizeMsg{Width: 120, Height: 30})
 
 	// A default install: no feedback_target, so the live target is the
-	// clipboard.
+	// clipboard — or nothing at all, on a machine with no clipboard command,
+	// which is what CI is. Either way it is not tmux, which is the premise;
+	// requiring a resolved target made this fail on ubuntu, where there is no
+	// pbcopy and no xclip.
 	m.cfg.FeedbackTarget = ""
 	m.target, m.targetErr = feedback.Resolve(feedback.Config{})
-	if m.target == nil || m.target.Name() == "tmux" {
+	if m.target != nil && m.target.Name() == "tmux" {
 		t.Fatalf("expected a non-tmux target to begin with, got %v", m.target)
 	}
 
