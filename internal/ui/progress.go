@@ -6,6 +6,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 
 	"github.com/jansmrcka/differ/internal/git"
 )
@@ -127,7 +129,12 @@ func (m Model) noteChangedFiles(keys map[string]string) Model {
 // longer there. Outside review mode differ stays live, which is the point of
 // the poll.
 func (m Model) holdsTheDiff() bool {
-	return m.mode == modeReview && m.renderer != nil
+	// The renderer has to be the cursor's file, not just any file. Diffs load
+	// asynchronously, so right after n or p the renderer is still the previous
+	// one — and a refresh landing in that window would compare the cursor's
+	// file against a diff of something else. Nothing needs holding there
+	// anyway: the load already on its way brings current content.
+	return m.mode == modeReview && m.renderer != nil && m.rendererPath == m.currentFilePath()
 }
 
 // currentFileMoved reports whether the file under the cursor has different
@@ -146,4 +153,60 @@ func (m Model) currentFileMoved(keys map[string]string) bool {
 		return false
 	}
 	return was != now
+}
+
+// changeSince describes how the file under the cursor differs from the diff on
+// screen, for the notice.
+//
+// The issue asks the reload to come with a summary of what changed. Counting
+// hunks would mean parsing the new diff, which is the work the hold exists to
+// postpone; the added and deleted line counts are already in the refresh, so
+// the difference between them is free.
+func (m Model) changeSince(files []fileItem) string {
+	path := m.currentFilePath()
+	was, found := m.fileAt(m.files, path)
+	now, stillThere := m.fileAt(files, path)
+	if !found || !stillThere {
+		return ""
+	}
+	added := now.change.AddedLines - was.change.AddedLines
+	removed := now.change.DeletedLines - was.change.DeletedLines
+
+	var parts []string
+	if added != 0 {
+		parts = append(parts, signed(added)+" added")
+	}
+	if removed != 0 {
+		parts = append(parts, signed(removed)+" removed")
+	}
+	if len(parts) == 0 {
+		// Same counts, different content: a line was replaced rather than
+		// added or removed, which the counts cannot see.
+		return "rewritten"
+	}
+	return strings.Join(parts, ", ")
+}
+
+func (m Model) fileAt(files []fileItem, path string) (fileItem, bool) {
+	for _, f := range files {
+		if f.change.Path == path {
+			return f, true
+		}
+	}
+	return fileItem{}, false
+}
+
+func signed(n int) string {
+	if n > 0 {
+		return "+" + strconv.Itoa(n)
+	}
+	return strconv.Itoa(n)
+}
+
+// clearStaleNotice drops the notice, which describes one diff on screen.
+func (m Model) clearStaleNotice() Model {
+	m.diffStale = false
+	m.staleSummary = ""
+	m.stalePath = ""
+	return m
 }

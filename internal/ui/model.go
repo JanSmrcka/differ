@@ -160,6 +160,11 @@ type Model struct {
 	// closely and may have a comment half-written against it, so the content
 	// is held and they are told, rather than swapped and left to notice.
 	diffStale bool
+	// What moved, for the notice: "+3 −1" against the diff on screen.
+	staleSummary string
+	// The file the notice is about. The notice describes one diff; moving to
+	// another file means it is describing something not on screen.
+	stalePath string
 
 	// The last refresh asked for, and the newest one installed.
 	refreshSeq   int

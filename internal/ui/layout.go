@@ -286,7 +286,11 @@ func (m Model) statusSegment() string {
 	// First, above even what just happened: it says the screen is not showing
 	// the repository, and every other word in this row describes that screen.
 	if m.diffStale {
-		parts = append(parts, "diff moved — "+reloadKey+" to reload")
+		notice := "diff moved"
+		if m.staleSummary != "" {
+			notice += " (" + m.staleSummary + ")"
+		}
+		parts = append(parts, notice+" — "+reloadKey+" to reload")
 	}
 	if m.statusMsg != "" {
 		parts = append(parts, m.statusMsg)

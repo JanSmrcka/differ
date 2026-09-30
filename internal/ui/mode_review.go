@@ -100,13 +100,13 @@ func (m Model) reviewProgress() review.Progress {
 	return m.session.Progress(paths)
 }
 
-// reviewSummary is the one-line progress readout shown while reviewing.
 // reloadKey re-reads the file on screen after it moved underneath.
 //
 // Not "r": that leaves review mode, and the two would be a keystroke apart
 // with opposite effects on a half-written comment.
 const reloadKey = "R"
 
+// reviewSummary is the one-line progress readout shown while reviewing.
 func (m Model) reviewSummary() string {
 	p := m.reviewProgress()
 	out := fmt.Sprintf("%d/%d reviewed", p.Reviewed, p.Total)
@@ -141,10 +141,12 @@ func (m Model) reloadDiff() (tea.Model, tea.Cmd) {
 	if !m.diffStale {
 		return m, nil
 	}
-	m.diffStale = false
-	// No need to clear lastDiffContent: it is compared against what the reload
-	// renders, so content that really differs updates the viewport and content
-	// that does not needs no update. Clearing it was belt and braces that no
-	// test could distinguish from not clearing it.
+	// The flag is cleared by handleDiffLoaded when the reload lands, not here:
+	// clearing it now would drop the notice before the diff it describes has
+	// actually been replaced.
+	//
+	// No need to clear lastDiffContent either — it is compared against what
+	// the reload renders, so content that really differs updates the viewport
+	// and content that does not needs no update.
 	return m, m.loadDiffCmd(false)
 }

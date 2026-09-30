@@ -185,6 +185,11 @@ func (m Model) handleDiffLoaded(msg diffLoadedMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// Whatever arrives here is current, so the notice has nothing left to say.
+	// It has to be cleared on every load, not only on the one R asks for: n, p,
+	// v, a resize and a branch switch all reload the diff, and the notice
+	// would otherwise describe a file the user has since left.
+	m = m.clearStaleNotice()
 	m.renderer = msg.renderer
 	m.rendererPath = m.currentFilePath()
 	if m.session != nil {
@@ -241,12 +246,21 @@ func (m Model) handleFilesRefreshed(msg filesRefreshedMsg) (tea.Model, tea.Cmd) 
 	//
 	// Asked before noteChangedFiles, which installs the new keys: after it the
 	// comparison is the new keys against themselves.
-	if m.holdsTheDiff() && m.currentFileMoved(msg.keys) {
+	//
+	// Decided here, once, and outside every branch below. It used to live
+	// inside the filesEqual arm — and filesEqual compares the diff's added and
+	// deleted line counts, so any edit that changed those fell through to a
+	// reload that reset the cursor while the notice still claimed the diff was
+	// being held. Adding one line was enough.
+	hold := m.holdsTheDiff() && m.currentFileMoved(msg.keys)
+	if hold {
 		m.diffStale = true
+		m.staleSummary = m.changeSince(msg.files)
+		m.stalePath = m.currentFilePath()
 	}
 	m = m.noteChangedFiles(msg.keys)
 	if filesEqual(m.files, msg.files) {
-		if m.diffStale {
+		if hold {
 			return m, nil
 		}
 		return m, m.loadDiffCmd(false)
@@ -277,6 +291,15 @@ func (m Model) handleFilesRefreshed(msg filesRefreshedMsg) (tea.Model, tea.Cmd) 
 	}
 	// The changeset moved, so comments on files that are not on screen need
 	// re-anchoring too, not just the one being viewed.
+	//
+	// Holding the display must not hold the bookkeeping. Re-anchoring is what
+	// marks a comment stale, and #44 refuses to send a stale one without a
+	// second press — so skipping it here meant a comment about a line the
+	// agent had already deleted stayed "pending" and went out on the first
+	// press, carrying an excerpt of code that no longer exists.
+	if hold {
+		return m, m.reanchorCmd(true)
+	}
 	return m, tea.Batch(m.loadDiffCmd(true), m.reanchorAllCmd())
 }
 
