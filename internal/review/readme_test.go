@@ -56,21 +56,49 @@ func TestREADME_TheReferenceTableMatchesReference(t *testing.T) {
 // names the integration and the @ form has to carry a negation.
 func TestREADME_DoesNotClaimTheWrongIntegration(t *testing.T) {
 	t.Parallel()
-	readme := strings.ToLower(readReadme(t))
+	readme := normaliseNames(strings.ToLower(readReadme(t)))
 
 	if !strings.Contains(readme, "does not use this form") {
 		t.Fatal("the README no longer says which integration does not use this form")
 	}
 
+	seen := 0
 	for _, clause := range splitClauses(readme) {
 		if !strings.Contains(clause, "claude code") || !mentionsTheTextForm(clause) {
 			continue
 		}
+		seen++
 		if !negated(clause) {
 			t.Errorf("the README says Claude Code's integration uses this text form: %q",
 				strings.TrimSpace(clause))
 		}
 	}
+	// Round 4 found the loop inspecting exactly one clause of the whole
+	// README while looking like a general check. If it ever inspects none,
+	// the sentinel above is the only thing left and this test means nothing.
+	if seen == 0 {
+		t.Error("no clause of the README was examined — the check is inspecting nothing")
+	}
+}
+
+// normaliseNames spells the integration the way the loop looks for it.
+//
+// "claudecode.nvim" is the project's actual name and does not contain
+// "claude code", so the clause naming it was skipped — and round 2's exact
+// false claim, written about claudecode.nvim, went straight back in with the
+// suite green.
+// And the dot in a project's name is not the end of a sentence: splitting on
+// it cut "claudecode.nvim" in two, so neither half named both the
+// integration and the @ form and the clause was skipped by both tests.
+func normaliseNames(text string) string {
+	for _, r := range []struct{ from, to string }{
+		{"claudecode.nvim", "claude code nvim"},
+		{"sidekick.nvim", "sidekick nvim"},
+		{"claudecode", "claude code"},
+	} {
+		text = strings.ReplaceAll(text, r.from, r.to)
+	}
+	return text
 }
 
 // splitClauses cuts prose at the punctuation that separates one assertion
@@ -95,8 +123,12 @@ func mentionsTheTextForm(clause string) bool {
 }
 
 // negated reports whether a clause denies rather than asserts.
+//
+// Not " no ": it matched any incidental "no", so "picks this reference up
+// with no trouble" and "no configuration needed" both read as denials. A
+// negation of a verb is what this is looking for.
 func negated(clause string) bool {
-	for _, no := range []string{" not ", "n't ", " never ", " no "} {
+	for _, no := range []string{" not ", "n't ", " never ", " cannot ", " nothing "} {
 		if strings.Contains(clause, no) {
 			return true
 		}

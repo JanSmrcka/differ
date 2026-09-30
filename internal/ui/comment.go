@@ -74,8 +74,16 @@ func (m Model) reanchorCmd(includeCurrent bool) tea.Cmd {
 	}
 
 	repo := m.repo
+	// The flag, not an entry: these are files the cursor is not on, so there
+	// is no entry to ask. What matters is that the Locate below is derived
+	// from the same answer, so the coordinates and the claim about them
+	// cannot disagree.
 	staged := m.stagedOnly
 	ref := m.ref
+	locate := review.LocateLine
+	if staged && ref == "" {
+		locate = review.LocateFile
+	}
 	untracked := map[string]bool{}
 	for _, f := range m.files {
 		if f.untracked {
@@ -84,13 +92,13 @@ func (m Model) reanchorCmd(includeCurrent bool) tea.Cmd {
 	}
 
 	return func() tea.Msg {
-		out := make(map[string][]review.Location, len(targets))
+		out := make(map[string]review.Anchored, len(targets))
 		for _, path := range targets {
 			parsed, ok := parseFileDiff(repo, path, staged, ref, untracked[path])
 			if !ok {
 				continue
 			}
-			out[path] = diffLocations(parsed)
+			out[path] = review.Anchored{Locations: diffLocations(parsed), Locate: locate}
 		}
 		return reanchorMsg{locations: out}
 	}
@@ -115,7 +123,7 @@ func parseFileDiff(repo *git.Repo, path string, staged bool, ref string, untrack
 
 // buildLineComment describes the line under the cursor.
 func (m Model) buildLineComment() (review.Comment, bool) {
-	if m.renderer == nil {
+	if !m.rendererIsTheCursorsFile() {
 		return review.Comment{}, false
 	}
 	parsed := m.renderer.Parsed()
@@ -146,7 +154,7 @@ func (m Model) buildLineComment() (review.Comment, bool) {
 
 // buildHunkComment describes the whole hunk the cursor is in.
 func (m Model) buildHunkComment() (review.Comment, bool) {
-	if m.renderer == nil {
+	if !m.rendererIsTheCursorsFile() {
 		return review.Comment{}, false
 	}
 	parsed := m.renderer.Parsed()
@@ -172,6 +180,20 @@ func (m Model) buildHunkComment() (review.Comment, bool) {
 		Anchor:    anchorForHunk(parsed, h, side),
 		Excerpt:   excerptFor(parsed, h),
 	}, true
+}
+
+// rendererIsTheCursorsFile reports whether what is parsed is what the cursor
+// is on.
+//
+// A comment takes its excerpt and anchor from the renderer and its path and
+// Locate from the cursor. A diff load is a tea.Cmd and git diff costs about
+// eight milliseconds, so holding j through the file list leaves the two
+// disagreeing — and the comment then named one file while quoting another's
+// hunk, or named the right file with the other entry's line numbers. Now
+// that the reference is machine-actionable, that is a wrong edit rather than
+// a confusing message. The editor already had this guard.
+func (m Model) rendererIsTheCursorsFile() bool {
+	return m.renderer != nil && m.rendererPath == m.currentFilePath()
 }
 
 // sideAndLine picks which side of the diff a line belongs to. A removed line
@@ -271,9 +293,11 @@ func (m Model) locateFor(side review.Side) review.Locate {
 	// above it, and the reference said line 3 while the code had moved to line
 	// 8. loadDiffCmd reads f.change.Staged; so does this.
 	//
-	// Except under -r, where ChangedFiles ignores the index entirely and the
-	// diff really is the ref against the working tree.
-	if m.files[m.cursor].change.Staged && m.ref == "" {
+	// No `&& m.ref == ""` here. Under -r, changedFilesRef never sets Staged,
+	// so the term could never be reached and removing it changed no screen —
+	// a condition documenting a case it cannot see is worse than none.
+	entry := m.files[m.cursor].change
+	if entry.Staged && !m.worktreeMatchesIndex(entry.Path) {
 		return review.LocateFile
 	}
 	return review.LocateLine
@@ -290,4 +314,24 @@ func (m Model) currentFileGone() bool {
 		return true
 	}
 	return m.files[m.cursor].change.Status == git.StatusDeleted
+}
+
+// worktreeMatchesIndex answers whether a --cached diff's line numbers also
+// address the file on disk.
+//
+// Blanket-degrading every staged entry to a file reference meant `differ
+// commit` — whose whole purpose is reviewing staged work — could never point
+// the agent at a line, even in its dominant case: stage, review, commit,
+// with nothing edited in between, where the index and the working tree are
+// the same bytes. The question is answerable exactly in one git call rather
+// than guessed at conservatively.
+//
+// A failure answers false, which is the safe direction: an unanswerable
+// question degrades to "@path", never to a line nobody checked.
+func (m Model) worktreeMatchesIndex(path string) bool {
+	if m.repo == nil {
+		return false
+	}
+	same, err := m.repo.WorktreeMatchesIndex(path)
+	return err == nil && same
 }

@@ -1,6 +1,7 @@
 package ui
 
 import (
+	tea "github.com/charmbracelet/bubbletea"
 	"strings"
 	"testing"
 
@@ -116,6 +117,7 @@ func TestBuildLineComment_OnUntrackedFile(t *testing.T) {
 	m := diffModel(t, "multi_hunk", 20)
 	parsed := ParseNewFile("alpha\nbeta\n")
 	m.renderer = NewDiffRenderer(parsed, "new.ts", m.styles, m.theme, 80)
+	m.rendererPath = "new.ts"
 	m.files[0].change.Path = "new.ts"
 	m = m.setCursor(1)
 
@@ -194,6 +196,7 @@ func TestHunkComment_APureDeletionTakesTheOldSide(t *testing.T) {
 	_, th := testStyles()
 	m := newTestModel(t, []fileItem{{change: git.FileChange{Path: "doomed.ts", Status: git.StatusModified}}})
 	m.renderer = NewDiffRenderer(ParseDiff(raw), "doomed.ts", NewStyles(th), th, 80)
+	m.rendererPath = "doomed.ts"
 	m.diffCursor = 1 // a removed line
 
 	c, ok := m.buildHunkComment()
@@ -349,4 +352,155 @@ func liveModelStaged(t *testing.T, tr *testutil.Repo, stagedOnly bool) Model {
 	}
 	th := theme.Themes["dark"]
 	return NewModel(repo, config.Default(), changes, untracked, NewStyles(th), th, stagedOnly, "")
+}
+
+// Walking from one entry of a dual-listed file to the other re-resolves the
+// comment into the other diff's line numbers. The claim about how precise
+// those numbers are has to move with them.
+//
+// git lists a file with both staged and unstaged changes twice. Comment on
+// the unstaged entry — worktree coordinates, a line reference — then move to
+// the staged entry: the `--cached` diff loads, the comment is reanchored
+// into index coordinates, and Locate still said the line resolved. The agent
+// was handed `@f.txt :L3` for code that was at line 8 on disk, which is the
+// exact failure the staged arm of locateFor exists to prevent.
+func TestComment_ReanchoringAcrossEntriesRevisesTheClaim(t *testing.T) {
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("f.txt", "a\nb\nc\n", "first")
+	tr.Modify("f.txt", "a\nb\nCHANGED\n")
+	tr.Stage("f.txt")
+	tr.ExternalEdit("f.txt", "x1\nx2\nx3\nx4\nx5\na\nb\nCHANGED\n")
+
+	m := settle(t, liveModel(t, tr), tea.WindowSizeMsg{Width: 120, Height: 40})
+	m = atEntry(t, m, "f.txt", false)
+	m = settle(t, m, key("r"))
+
+	m = cursorOn(t, m, LineContext, "CHANGED")
+	updated, _ := m.updateReviewMode(key("c"))
+	m = typeText(t, updated.(Model), "why?")
+	updated, _ = m.updateReviewMode(key("ctrl+s"))
+	m = updated.(Model)
+
+	before := m.session.CommentsFor("f.txt")[0]
+	if before.Locate != review.LocateLine {
+		t.Fatalf("the comment was not written against worktree coordinates: %v", before.Locate)
+	}
+
+	// Walk to the staged entry, whose diff is --cached.
+	m = settle(t, m, key("esc"))
+	m = atEntry(t, m, "f.txt", true)
+
+	after := m.session.CommentsFor("f.txt")[0]
+	if after.StartLine != before.StartLine && after.Locate == review.LocateLine {
+		t.Errorf("the comment moved from line %d to %d and still claims the "+
+			"line resolves: reference %q",
+			before.StartLine, after.StartLine, review.Reference(after))
+	}
+}
+
+// atEntry puts the cursor on the named file's staged or unstaged entry,
+// walking the list the way a user does.
+func atEntry(t *testing.T, m Model, path string, staged bool) Model {
+	t.Helper()
+	want := -1
+	for i, f := range m.files {
+		if f.change.Path == path && f.change.Staged == staged {
+			want = i
+			break
+		}
+	}
+	if want < 0 {
+		t.Fatalf("no %s entry for %s in %d files", map[bool]string{true: "staged", false: "unstaged"}[staged], path, len(m.files))
+	}
+	for range len(m.files) {
+		if m.cursor == want {
+			return m
+		}
+		if m.cursor < want {
+			m = settle(t, m, key("j"))
+		} else {
+			m = settle(t, m, key("k"))
+		}
+	}
+	t.Fatalf("the cursor would not reach entry %d (it is at %d)", want, m.cursor)
+	return m
+}
+
+// currentFileGone is the guard the comment builders stand behind, and
+// neither of its bounds was tested: removing either left the suite green,
+// while the doc comment said the only thing between a negative cursor and a
+// panic inside a tea.Cmd was that this function checks.
+func TestComment_AnOutOfRangeCursorPointsAtNothing(t *testing.T) {
+	m := reviewModel(t, "multi_hunk")
+
+	for _, cursor := range []int{-1, len(m.files), len(m.files) + 5} {
+		probe := m
+		probe.cursor = cursor
+		if got := probe.locateFor(review.SideNew); got != review.LocateNone {
+			t.Errorf("cursor %d gives %v, want LocateNone", cursor, got)
+		}
+		if !probe.currentFileGone() {
+			t.Errorf("cursor %d is not reported as out of range", cursor)
+		}
+	}
+}
+
+// `differ commit` shows the index. When the working tree holds exactly the
+// same bytes, a line number from that diff addresses the file on disk too —
+// and blanket-degrading every staged entry meant the mode whose whole
+// purpose is reviewing staged work could never point the agent at a line.
+func TestComment_StagedAndIdenticalStillNamesTheLine(t *testing.T) {
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("src.ts", "one\ntwo\n", "first")
+	tr.Modify("src.ts", "one\nSTAGED\n")
+	tr.Stage("src.ts")
+
+	m := settle(t, liveModelStaged(t, tr, true), tea.WindowSizeMsg{Width: 120, Height: 40})
+	m = settle(t, m, key("r"))
+
+	if got := m.locateFor(review.SideNew); got != review.LocateLine {
+		t.Errorf("locate = %v, want LocateLine — the worktree is the index", got)
+	}
+
+	// Edit the worktree without staging, and it degrades again.
+	tr.ExternalEdit("src.ts", "a new first line\none\nSTAGED\n")
+	if got := m.locateFor(review.SideNew); got != review.LocateFile {
+		t.Errorf("locate = %v after an unstaged edit, want LocateFile — the "+
+			"index line numbers no longer address the file on disk", got)
+	}
+}
+
+// The comment takes its excerpt and anchor from the renderer and its path
+// and Locate from the cursor. A diff load is a tea.Cmd, so holding j through
+// the file list leaves the two disagreeing — and the comment then named one
+// file while quoting another's hunk. With the reference now machine-
+// actionable, that is a wrong edit rather than a confusing message.
+func TestComment_RefusesWhileTheRendererIsAnotherFile(t *testing.T) {
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("a.txt", "a1\na2\na3\n", "first")
+	tr.CommitFile("b.txt", "b1\nb2\nb3\n", "second")
+	tr.Modify("a.txt", "a1\nAAA\na3\n")
+	tr.Modify("b.txt", "b1\nBBB\nb3\n")
+
+	m := settle(t, liveModel(t, tr), tea.WindowSizeMsg{Width: 120, Height: 40})
+	m = settle(t, m, key("r"))
+	if m.rendererPath != m.currentFilePath() {
+		t.Fatalf("the fixture did not settle: renderer=%q cursor=%q",
+			m.rendererPath, m.currentFilePath())
+	}
+
+	// Move the cursor without letting the reload land, which is what happens
+	// while git diff runs.
+	moved, _ := m.updateReviewMode(key("n"))
+	m = moved.(Model)
+	if m.rendererPath == m.currentFilePath() {
+		t.Skip("the diff loaded synchronously; there is no window to test")
+	}
+
+	if _, ok := m.buildLineComment(); ok {
+		t.Error("a line comment was built from another file's diff")
+	}
+	if _, ok := m.buildHunkComment(); ok {
+		t.Error("a hunk comment was built from another file's diff")
+	}
 }

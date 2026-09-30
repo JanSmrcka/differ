@@ -315,11 +315,20 @@ the file on disk:
 | nothing does | no reference; the prose still says where it was |
 
 The middle case covers more than deleted code. Under `-s` and `differ commit`
-the diff's **new** side is the index, not the working tree: stage a change,
-then edit above it, and the diff still says line 3 while the code has moved to
-line 8. An old-side line number never resolves either. In both the file is
-usually still there, and `sidekick.nvim` has a bare `@path` form for exactly
-that — attaching the file and losing the line beats attaching nothing.
+the diff's **new** side is the index, not the working tree — so differ asks
+whether the two hold the same bytes, and only degrades when they do not:
+stage a change, then edit above it, and the diff still says line 3 while the
+code has moved to line 8, so you get `@path`. Stage, review and commit
+without touching the file in between and the line reference stands. An
+old-side line number never resolves either, and neither does a path
+containing a space, which the agent's resolver would read as two tokens. In
+each case the file is usually still there, and `sidekick.nvim` has a bare
+`@path` form for exactly that — attaching the file and losing the line beats
+attaching nothing.
+
+Which entry the cursor is on decides this, not the flag differ started with:
+git lists a file with both staged and unstaged changes twice, and walking
+from one to the other re-resolves a comment into the other's line numbers.
 
 The hunk is differ's addition: for a review it is more useful for the agent to
 see what changed than to go and read the file.

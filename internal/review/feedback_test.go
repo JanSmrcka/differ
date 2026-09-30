@@ -171,7 +171,7 @@ func TestFormatFeedback_TiebreakUsesCreationOrderNotStringOrder(t *testing.T) {
 // carries one.
 //
 // sidekick.nvim — the working reference on this machine — sends
-// "@src/cache.ts:L12" and lets Claude Code read the file. differ sends the
+// "@src/cache.ts :L12" and lets Claude Code read the file. differ sends the
 // hunk as well, which is the more useful thing for a review, but without the
 // reference the agent has to parse "File:" and "Line:" out of prose to know
 // where to go.
@@ -312,6 +312,56 @@ func TestReference_ASingleLineReportsItsStartLine(t *testing.T) {
 	// only way to exercise the difference is to build the comment by hand
 	// with EndLine behind StartLine.
 	if got := Reference(Comment{File: "a.ts", Locate: LocateLine, StartLine: 9, EndLine: 5}); got != "@a.ts :L9" {
-		t.Errorf("one line = %q, want @a.ts :L9 — the reference reports EndLine", got)
+		t.Errorf("one line = %q, want @a.ts :L9 — the reference reports StartLine", got)
+	}
+}
+
+// A path that contains a space cannot be written as an @-reference at all.
+//
+// The space before the colon exists because the resolver tokenises on
+// whitespace; a space inside the path hands it the token "@my" and a file
+// that does not exist. Saying nothing is better than saying something wrong
+// — the File: line below still carries the path in full.
+func TestReference_APathWithASpaceGetsNoReference(t *testing.T) {
+	t.Parallel()
+	for _, path := range []string{"my notes.ts", "src/two words/a.ts", "a\tb.ts"} {
+		c := Comment{File: path, Locate: LocateLine, StartLine: 1, EndLine: 1}
+		if got := Reference(c); got != "" {
+			t.Errorf("Reference for %q = %q, which the resolver cannot read", path, got)
+		}
+	}
+	// And a path with no space still gets one, including a non-ASCII name:
+	// core.quotepath=false means those arrive intact and resolve fine.
+	c := Comment{File: "žluťoučký.ts", Locate: LocateLine, StartLine: 1, EndLine: 1}
+	if got := Reference(c); got != "@žluťoučký.ts :L1" {
+		t.Errorf("Reference for a non-ASCII path = %q", got)
+	}
+}
+
+// LocateUnknown is the zero value and must degrade to a file reference. Two
+// halves, both untested: that the zero value is not LocateLine, and that
+// LocateUnknown is treated as file-only. Either one alone lets a Comment
+// built without the field claim a line nobody checked — which is exactly
+// what a comment decoded from storage is.
+func TestReference_TheZeroValueClaimsNoLine(t *testing.T) {
+	t.Parallel()
+	if LocateUnknown != 0 {
+		t.Errorf("LocateUnknown = %d, want 0 — the zero value must be the safe one", LocateUnknown)
+	}
+	var zero Locate
+	if zero == LocateLine {
+		t.Error("the zero Locate is LocateLine, so a Comment built without it claims a line")
+	}
+	got := Reference(Comment{File: "a.ts", StartLine: 12, EndLine: 12})
+	if got != "@a.ts" {
+		t.Errorf("a Comment with no Locate references %q, want the file alone", got)
+	}
+}
+
+// A comment with no file has nothing to point at, whatever it claims.
+func TestReference_NoFileMeansNoReference(t *testing.T) {
+	t.Parallel()
+	if got := Reference(Comment{Locate: LocateLine, StartLine: 3, EndLine: 3}); got != "" {
+		t.Errorf("Reference with no file = %q", got)
 	}
 }

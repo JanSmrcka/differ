@@ -110,6 +110,14 @@ func Reference(c Comment) string {
 	switch {
 	case c.File == "", c.Locate == LocateNone:
 		return ""
+	case strings.ContainsAny(c.File, " \t"):
+		// The whole reason for the space before the colon is that the
+		// resolver tokenises on whitespace and would otherwise read
+		// "@path:9" as one filename. A path that itself contains a space
+		// gives it the token "@my" and a file that does not exist, which is
+		// worse than saying nothing: the prose below still carries the path
+		// in full, and a reader can open it.
+		return ""
 	case c.Locate == LocateFile, c.Locate == LocateUnknown:
 		// The bare form sidekick.nvim emits when it has no row: the agent
 		// attaches the file and reads it.
