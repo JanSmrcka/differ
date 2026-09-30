@@ -110,7 +110,7 @@ func Reference(c Comment) string {
 	switch {
 	case c.File == "", c.Locate == LocateNone:
 		return ""
-	case c.Locate == LocateFile:
+	case c.Locate == LocateFile, c.Locate == LocateUnknown:
 		// The bare form sidekick.nvim emits when it has no row: the agent
 		// attaches the file and reads it.
 		return "@" + c.File

@@ -65,8 +65,16 @@ const (
 type Locate int
 
 const (
+	// LocateUnknown is the zero value, and deliberately not LocateLine.
+	//
+	// A Comment built without setting this — a fixture, or one decoded from a
+	// stored review written before the field existed — would otherwise claim
+	// its line resolves, which is the one thing that must not be assumed. It
+	// degrades to the file, so an unset value costs a line number rather than
+	// pointing at the wrong one.
+	LocateUnknown Locate = iota
 	// LocateLine: the path and the line both address the file on disk.
-	LocateLine Locate = iota
+	LocateLine
 	// LocateFile: the file is there, the line numbers are not the worktree's.
 	LocateFile
 	// LocateNone: there is nothing on disk to point at.

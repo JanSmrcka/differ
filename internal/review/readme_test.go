@@ -7,79 +7,117 @@ import (
 	"testing"
 )
 
-// The README shows what a comment looks like when it reaches the agent, so it
-// is checked against what FormatComment actually produces — the whole block,
-// not one line of it.
+// The three forms in the README's table have to be the three Reference
+// produces.
 //
-// An earlier version rebuilt only the reference from the File: and Line: lines
-// in the same block and compared that. It caught the format bug it was written
-// for and nothing else: the block could document an old-side comment carrying
-// a line reference, drop the "Changed code:" and "Comment:" sections, put the
-// reference in the wrong place, or be swapped wholesale for a made-up example,
-// and the test stayed green.
-func TestREADME_ShowsThePayloadThatIsActuallySent(t *testing.T) {
+// The table was added by the commit that introduced the distinction and
+// checked by nothing: round 1's exact bug could be reintroduced there — a
+// reference with no space — with the suite green, and so could a file-only
+// row given a line number.
+func TestREADME_TheReferenceTableMatchesReference(t *testing.T) {
 	t.Parallel()
-	block := readmePayloadBlock(t)
+	readme := readReadme(t)
+	base := Comment{File: "src/cache.ts", StartLine: 12, EndLine: 12}
 
-	// The fixture the README documents. Kept here rather than parsed out of
-	// the prose: the point is that the README agrees with the code, and
-	// deriving the expectation from the README would make it agree with
-	// itself.
-	want := FormatComment(Comment{
-		File:      "src/session.ts",
-		Side:      SideNew,
-		Locate:    LocateLine,
-		StartLine: 9,
-		EndLine:   9,
-		Excerpt: " export async function loadSession(path: string) {\n" +
-			"-  const raw = await readFile(path, \"utf8\");\n" +
-			"+  } catch {\n" +
-			"+    return null;\n",
-		Body: "this drops the error instead of returning it — the caller cannot tell",
-	})
+	for _, tc := range []struct {
+		row    string
+		locate Locate
+	}{
+		{"the line resolves", LocateLine},
+		{"only the file does", LocateFile},
+		{"nothing does", LocateNone},
+	} {
+		line := rowContaining(t, readme, tc.row)
+		c := base
+		c.Locate = tc.locate
+		want := Reference(c)
 
-	if strings.TrimSpace(block) != strings.TrimSpace(want) {
-		t.Errorf("the README's payload block is not what FormatComment produces.\n"+
-			"README:\n%s\n\nactual:\n%s", block, want)
+		if want == "" {
+			if strings.Contains(line, "@") {
+				t.Errorf("the %q row shows a reference, and there is none: %q", tc.row, line)
+			}
+			continue
+		}
+		if !strings.Contains(line, "`"+want+"`") {
+			t.Errorf("the %q row does not show %q: %q", tc.row, want, line)
+		}
 	}
 }
 
 // And the claim about the other integration has to stay true: claudecode.nvim
-// sends at_mentioned as JSON-RPC over a websocket and has no text form at all,
-// which an earlier README asserted the opposite of.
+// sends at_mentioned as JSON-RPC over a websocket and has no text form at all.
+//
+// Checked as a claim rather than as a blacklist of two phrasings. The
+// blacklist version let any rewording of the false claim straight through,
+// which is the shape of the original defect; a first attempt at this version
+// still let one through, because it accepted any clause that went on to
+// mention JSON-RPC and the real sentence does exactly that after an em dash.
+// So the text is cut at em dashes and semicolons too, and every clause that
+// names the integration and the @ form has to carry a negation.
 func TestREADME_DoesNotClaimTheWrongIntegration(t *testing.T) {
 	t.Parallel()
-	readme := readReadme(t)
-	for _, wrong := range []string{
-		"Claude Code's editor integration already use",
-		"Claude Code's editor integration uses",
-	} {
-		if strings.Contains(readme, wrong) {
-			t.Errorf("the README claims %q, which is false: that integration "+
-				"sends JSON-RPC, not this text form", wrong)
-		}
-	}
+	readme := strings.ToLower(readReadme(t))
+
 	if !strings.Contains(readme, "does not use this form") {
-		t.Error("the README no longer says which integration does not use this form")
+		t.Fatal("the README no longer says which integration does not use this form")
+	}
+
+	for _, clause := range splitClauses(readme) {
+		if !strings.Contains(clause, "claude code") || !mentionsTheTextForm(clause) {
+			continue
+		}
+		if !negated(clause) {
+			t.Errorf("the README says Claude Code's integration uses this text form: %q",
+				strings.TrimSpace(clause))
+		}
 	}
 }
 
-func readmePayloadBlock(t *testing.T) string {
+// splitClauses cuts prose at the punctuation that separates one assertion
+// from the next, em dashes included: "X does not use this form — it sends
+// JSON-RPC" is two claims, and reading it as one let a false first half hide
+// behind a true second.
+func splitClauses(text string) []string {
+	return strings.FieldsFunc(text, func(r rune) bool {
+		return r == '.' || r == ';' || r == '\n' || r == '\u2014'
+	})
+}
+
+// mentionsTheTextForm reports whether a clause is about the @-mention form
+// rather than about Claude Code generally.
+func mentionsTheTextForm(clause string) bool {
+	for _, marker := range []string{"this form", "@", "reference", "at_mentioned"} {
+		if strings.Contains(clause, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// negated reports whether a clause denies rather than asserts.
+func negated(clause string) bool {
+	for _, no := range []string{" not ", "n't ", " never ", " no "} {
+		if strings.Contains(clause, no) {
+			return true
+		}
+	}
+	return false
+}
+
+// rowContaining returns the README line holding text, failing if there is not
+// exactly one.
+func rowContaining(t *testing.T, readme, text string) string {
 	t.Helper()
-	const anchor = "What the agent receives, per comment"
-	_, after, ok := strings.Cut(readReadme(t), anchor)
-	if !ok {
-		t.Fatalf("the README no longer says %q", anchor)
+	var found []string
+	for _, line := range strings.Split(readme, "\n") {
+		if strings.Contains(line, text) {
+			found = append(found, line)
+		}
 	}
-	_, block, ok := strings.Cut(after, "```\n")
-	if !ok {
-		t.Fatal("no payload block follows")
+	if len(found) != 1 {
+		t.Fatalf("expected exactly one README line containing %q, found %d", text, len(found))
 	}
-	body, _, ok := strings.Cut(block, "```")
-	if !ok {
-		t.Fatal("the payload block is never closed")
-	}
-	return body
+	return found[0]
 }
 
 func readReadme(t *testing.T) string {

@@ -273,15 +273,23 @@ What the agent receives, per comment: a reference, then the hunk the comment is
 about, then what you wrote.
 
 ```
-@src/session.ts :L9
+@src/session.ts :L8
 File: src/session.ts
-Line: 9 (new)
+Line: 8 (new)
 
 Changed code:
+ import { readFile } from "node:fs/promises";
+ 
  export async function loadSession(path: string) {
 -  const raw = await readFile(path, "utf8");
+-  return JSON.parse(raw);
++  try {
++    const raw = await readFile(path, "utf8");
++    return JSON.parse(raw);
 +  } catch {
 +    return null;
++  }
+ }
 
 Comment:
 this drops the error instead of returning it — the caller cannot tell

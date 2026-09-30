@@ -229,21 +229,88 @@ func TestComment_StagedModeDoesNotClaimAWorktreeLine(t *testing.T) {
 	// Now edit above the staged change, so the worktree and the index differ.
 	tr.Modify("f.txt", "x1\nx2\nx3\nx4\nx5\na\nb\nCHANGED\n")
 
+	// Which entry the cursor is on decides it, not the flag differ was
+	// started with. git reports a file with both staged and unstaged changes
+	// twice, staged first, so in *default* mode the cursor starts on an entry
+	// whose diff was read with --cached. The first version of this test
+	// asserted LocateLine for that and read as "the worktree case"; it was
+	// asserting the wrong answer for the staged entry.
 	for _, tc := range []struct {
 		name       string
 		stagedOnly bool
+		staged     bool
 		want       review.Locate
 	}{
-		{"worktree", false, review.LocateLine},
-		{"staged only", true, review.LocateFile},
+		{"default mode, the staged entry", false, true, review.LocateFile},
+		{"default mode, the unstaged entry", false, false, review.LocateLine},
+		{"staged only", true, true, review.LocateFile},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			m := liveModelStaged(t, tr, tc.stagedOnly)
+			found := false
+			for i, f := range m.files {
+				if f.change.Path == "f.txt" && f.change.Staged == tc.staged {
+					m.cursor, found = i, true
+					break
+				}
+			}
+			if !found {
+				t.Skipf("no entry with staged=%v in this fixture", tc.staged)
+			}
 			if got := m.locateFor(review.SideNew); got != tc.want {
 				t.Errorf("locate = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+// The old side never resolves, whatever the entry. Nothing tested this: the
+// only SideOld case went through a deleted file, which returns LocateNone
+// before the side is read.
+func TestComment_TheOldSideNeverClaimsAWorktreeLine(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("f.txt", "a\nb\n", "first")
+	tr.Modify("f.txt", "a\nCHANGED\n")
+
+	m := liveModelStaged(t, tr, false)
+	if len(m.files) == 0 {
+		t.Fatal("nothing in the changeset")
+	}
+	if got := m.locateFor(review.SideOld); got != review.LocateFile {
+		t.Errorf("locate = %v, want file — the old side describes the file before the change", got)
+	}
+}
+
+// And the decision reaches the comment. Nothing checked that either: every
+// test either built a Comment by hand or called locateFor directly, so
+// dropping the field from both builders left the suite green.
+func TestComment_TheBuildersRecordWhereItPoints(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("f.txt", "a\nb\nc\n", "first")
+	tr.Modify("f.txt", "a\nCHANGED\nc\n")
+
+	m := liveModelStaged(t, tr, false)
+	m = settle(t, m, key("r"))
+	if m.renderer == nil {
+		t.Fatal("no diff on screen")
+	}
+
+	line, ok := m.buildLineComment()
+	if !ok {
+		t.Fatal("no line comment could be built")
+	}
+	if line.Locate == review.LocateUnknown {
+		t.Error("a line comment carries no Locate, so it would degrade to file-only")
+	}
+	hunk, ok := m.buildHunkComment()
+	if !ok {
+		t.Fatal("no hunk comment could be built")
+	}
+	if hunk.Locate == review.LocateUnknown {
+		t.Error("a hunk comment carries no Locate")
 	}
 }
 

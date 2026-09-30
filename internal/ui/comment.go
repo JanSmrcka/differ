@@ -259,18 +259,34 @@ func (m Model) locateFor(side review.Side) review.Locate {
 		return review.LocateNone
 	}
 	// The old side describes the file before the change, so its line numbers
-	// never resolve. Under -s the *new* side is the index, which the working
-	// tree has usually moved on from — staging a change and then editing above
-	// it leaves the diff's line number pointing at something else entirely.
-	if side == review.SideOld || m.stagedOnly {
+	// never resolve.
+	if side == review.SideOld {
+		return review.LocateFile
+	}
+	// Whether the *new* side is the working tree depends on what this entry's
+	// diff was read with, not on the flag differ was started with. git reports
+	// a file with both staged and unstaged changes twice, staged first — so in
+	// default mode the cursor starts on an entry whose diff is `--cached`, and
+	// keying on m.stagedOnly called that the worktree. Stage a change, edit
+	// above it, and the reference said line 3 while the code had moved to line
+	// 8. loadDiffCmd reads f.change.Staged; so does this.
+	//
+	// Except under -r, where ChangedFiles ignores the index entirely and the
+	// diff really is the ref against the working tree.
+	if m.files[m.cursor].change.Staged && m.ref == "" {
 		return review.LocateFile
 	}
 	return review.LocateLine
 }
 
-// currentFileGone reports whether the file under the cursor has been deleted.
+// currentFileGone reports whether there is no file on disk to point at: the
+// cursor is off the end of the list, or the file under it has been deleted.
+//
+// The bounds check was one-sided. A negative cursor is not reachable today,
+// but the only thing standing between it and a panic inside a tea.Cmd was
+// that fact, and this function is the guard.
 func (m Model) currentFileGone() bool {
-	if m.cursor >= len(m.files) {
+	if m.cursor < 0 || m.cursor >= len(m.files) {
 		return true
 	}
 	return m.files[m.cursor].change.Status == git.StatusDeleted

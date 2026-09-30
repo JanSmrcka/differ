@@ -13,6 +13,7 @@ func loginComment() Comment {
 		ID:        "c1",
 		File:      "src/auth/login.ts",
 		Side:      SideNew,
+		Locate:    LocateLine,
 		StartLine: 43,
 		EndLine:   43,
 		HunkIndex: 0,
@@ -183,12 +184,12 @@ func TestFormatComment_CarriesAReferenceTheAgentUnderstands(t *testing.T) {
 	}{
 		{
 			name: "one line on the new side",
-			c:    Comment{File: "src/cache.ts", Side: SideNew, StartLine: 12, EndLine: 12, Body: "x"},
+			c:    Comment{File: "src/cache.ts", Locate: LocateLine, StartLine: 12, EndLine: 12, Body: "x"},
 			want: "@src/cache.ts :L12",
 		},
 		{
 			name: "a range",
-			c:    Comment{File: "src/cache.ts", Side: SideNew, StartLine: 12, EndLine: 20, Body: "x"},
+			c:    Comment{File: "src/cache.ts", Locate: LocateLine, StartLine: 12, EndLine: 20, Body: "x"},
 			want: "@src/cache.ts :L12-L20",
 		},
 	} {
@@ -207,7 +208,7 @@ func TestFormatComment_CarriesAReferenceTheAgentUnderstands(t *testing.T) {
 func TestFormatComment_TheReferenceIsItsOwnLine(t *testing.T) {
 	t.Parallel()
 	got := FormatComment(Comment{
-		File: "src/cache.ts", Side: SideNew, StartLine: 12, EndLine: 12,
+		File: "src/cache.ts", Side: SideNew, Locate: LocateLine, StartLine: 12, EndLine: 12,
 		Body: "this drops the error", Excerpt: "-  old\n+  new",
 	})
 
@@ -237,7 +238,7 @@ func TestFormatComment_TheReferenceIsItsOwnLine(t *testing.T) {
 // the space out, which is the broken shape with extra characters.
 func TestReference_KeepsTheSpaceCliToolsNeed(t *testing.T) {
 	t.Parallel()
-	got := Reference(Comment{File: "src/cache.ts", Side: SideNew, StartLine: 12, EndLine: 12})
+	got := Reference(Comment{File: "src/cache.ts", Locate: LocateLine, StartLine: 12, EndLine: 12})
 	const want = "@src/cache.ts :L12"
 	if got != want {
 		t.Errorf("Reference = %q, want %q", got, want)
@@ -299,10 +300,10 @@ func TestFormatComment_KeepsTheProseWhenThereIsNoReference(t *testing.T) {
 // today only because Session.Add normalises them to be equal.
 func TestReference_ASingleLineReportsItsStartLine(t *testing.T) {
 	t.Parallel()
-	if got := Reference(Comment{File: "a.ts", StartLine: 5, EndLine: 9}); got != "@a.ts :L5-L9" {
+	if got := Reference(Comment{File: "a.ts", Locate: LocateLine, StartLine: 5, EndLine: 9}); got != "@a.ts :L5-L9" {
 		t.Errorf("a range = %q", got)
 	}
-	if got := Reference(Comment{File: "a.ts", StartLine: 5, EndLine: 5}); got != "@a.ts :L5" {
+	if got := Reference(Comment{File: "a.ts", Locate: LocateLine, StartLine: 5, EndLine: 5}); got != "@a.ts :L5" {
 		t.Errorf("one line = %q, want @a.ts :L5", got)
 	}
 	// The case that actually pins it. Both of the above take the branch they
@@ -310,7 +311,7 @@ func TestReference_ASingleLineReportsItsStartLine(t *testing.T) {
 	// not tell StartLine from EndLine — Session.Add normalises them, so the
 	// only way to exercise the difference is to build the comment by hand
 	// with EndLine behind StartLine.
-	if got := Reference(Comment{File: "a.ts", StartLine: 9, EndLine: 5}); got != "@a.ts :L9" {
+	if got := Reference(Comment{File: "a.ts", Locate: LocateLine, StartLine: 9, EndLine: 5}); got != "@a.ts :L9" {
 		t.Errorf("one line = %q, want @a.ts :L9 — the reference reports EndLine", got)
 	}
 }
