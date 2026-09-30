@@ -33,9 +33,9 @@ func TestFindAgents_WalksTheProcessTree(t *testing.T) {
 	}, "\n"))
 
 	panes := parsePanes(strings.Join([]string{
-		"%1\x1f100\x1fwork\x1f0\x1f/home/u/proj",
-		"%2\x1f200\x1fwork\x1f1\x1f/home/u/proj",
-		"%3\x1f300\x1fwork\x1f2\x1f/home/u/proj",
+		"%1\t100\twork\t0\t/home/u/proj",
+		"%2\t200\twork\t1\t/home/u/proj",
+		"%3\t300\twork\t2\t/home/u/proj",
 	}, "\n"))
 
 	got := findAgents(panes, procs, "")
@@ -258,7 +258,7 @@ func TestAgentTool_InstallingAnAgentIsNotRunningOne(t *testing.T) {
 func TestFindAgents_NeverOffersDiffersOwnPane(t *testing.T) {
 	t.Parallel()
 	procs := parseProcs("  100     1 claude\n  200     1 claude\n")
-	panes := parsePanes("%1\x1f100\x1fwork\x1f0\x1f/repo\n%2\x1f200\x1fwork\x1f1\x1f/repo\n")
+	panes := parsePanes("%1\t100\twork\t0\t/repo\n%2\t200\twork\t1\t/repo\n")
 
 	got := findAgents(panes, procs, "%1")
 	if len(got) != 1 {
@@ -344,9 +344,9 @@ func TestParseProcs_CutsTheCommandColumnByPosition(t *testing.T) {
 func TestParsePanes_TakesOnlyWholeRows(t *testing.T) {
 	t.Parallel()
 	got := parsePanes(strings.Join([]string{
-		"%1\x1f100\x1fwork\x1f0\x1f/home/u/proj",
-		"%2\x1f200\x1fwork",
-		"%3\x1f300\x1fwork\x1f2",
+		"%1\t100\twork\t0\t/home/u/proj",
+		"%2\t200\twork",
+		"%3\t300\twork\t2",
 		"",
 	}, "\n"))
 
@@ -355,19 +355,32 @@ func TestParsePanes_TakesOnlyWholeRows(t *testing.T) {
 	}
 }
 
-// A tmux session name may contain a tab. With a tab separator one there
-// shifted every field after it, so the window index landed in the session and
-// the pid landed in the window — and the pane was silently dropped or
-// mislabelled. The separator is one no name will hold.
-func TestParsePanes_ASeparatorlessTabInANameChangesNothing(t *testing.T) {
+// A tab in the *path* is safe: it is the last field and is not split, so a
+// directory containing one arrives whole rather than becoming a sixth field.
+func TestParsePanes_ATabInThePathIsKept(t *testing.T) {
 	t.Parallel()
-	got := parsePanes("%1\x1f100\x1fmy\twork\x1f7\x1f/home/u/my proj\n")
+	got := parsePanes("%1\t100\twork\t7\t/home/u/my\tproj\n")
 
 	if len(got) != 1 {
 		t.Fatalf("parsePanes kept %d rows", len(got))
 	}
-	if got[0].session != "my\twork" || got[0].window != "7" || got[0].dir != "/home/u/my proj" {
-		t.Errorf("parsed %+v — the tab in the session name moved the other fields", got[0])
+	if got[0].dir != "/home/u/my\tproj" {
+		t.Errorf("dir = %q — the tab in the path was split off", got[0].dir)
+	}
+}
+
+// A tab in a session *name* does shift the fields, and such a row is dropped
+// rather than mislabelled. This is a stated limitation, not a fix: US (0x1f)
+// would separate the fields unambiguously and Linux tmux does not pass that
+// byte through a format string, which broke discovery entirely.
+func TestParsePanes_ATabInASessionNameDropsTheRow(t *testing.T) {
+	t.Parallel()
+	got := parsePanes("%1\t100\tmy\twork\t7\t/home/u/proj\n")
+
+	for _, p := range got {
+		if p.window == "work" || p.session == "my" {
+			t.Errorf("a row whose fields had shifted was kept and mislabelled: %+v", p)
+		}
 	}
 }
 
@@ -378,8 +391,8 @@ func TestParsePanes_ASeparatorlessTabInANameChangesNothing(t *testing.T) {
 func TestDiscover_OrdersWhatItFinds(t *testing.T) {
 	t.Parallel()
 	panes := parsePanes(strings.Join([]string{
-		"%1\x1f100\x1fother\x1f1\x1f/elsewhere",
-		"%2\x1f200\x1fmine\x1f1\x1f/repo",
+		"%1\t100\tother\t1\t/elsewhere",
+		"%2\t200\tmine\t1\t/repo",
 		"",
 	}, "\n"))
 	procs := parseProcs("100 1 claude\n200 1 claude\n")
@@ -414,8 +427,8 @@ func TestSortAgents_OrdersWindowsNumerically(t *testing.T) {
 func TestSessionOf_ReadsTheOwnSessionFromTheListing(t *testing.T) {
 	t.Parallel()
 	panes := parsePanes(strings.Join([]string{
-		"%1\x1f100\x1fwork\x1f0\x1f/a",
-		"%7\x1f700\x1fmine\x1f3\x1f/b",
+		"%1\t100\twork\t0\t/a",
+		"%7\t700\tmine\t3\t/b",
 		"",
 	}, "\n"))
 

@@ -95,12 +95,16 @@ var runners = map[string]bool{
 
 // fieldSep separates the fields of one pane listing.
 //
-// A tab was the obvious choice and the wrong one: a path may contain spaces,
-// but a tmux *session name* may contain a tab, and one there shifted every
-// field after it — `ses<TAB>name` parsed as session `ses`, window `name` and
-// pid where the directory should be. US (0x1f) is a separator no shell will
-// put in a name, and tmux passes it through a format string verbatim.
-const fieldSep = "\x1f"
+// A tab, because it is the one that works. US (0x1f) was tried, to stop a tab
+// in a *session name* shifting every field after it — and on Linux tmux does
+// not pass that byte through a format string, so every row came back
+// unparseable and discovery found nothing at all. A theoretical problem
+// traded for a real one; the tab is back and the limitation is stated instead.
+//
+// A tab in a session name therefore still shifts the fields, and parsePanes
+// drops such a row rather than mislabelling it. A tab in the *path* is safe,
+// because the path is the last field and is not split.
+const fieldSep = "\t"
 
 var paneFormat = strings.Join([]string{
 	"#{pane_id}", "#{pane_pid}", "#{session_name}",
@@ -180,6 +184,14 @@ func parsePanes(out string) []pane {
 		}
 		pid, err := strconv.Atoi(strings.TrimSpace(f[1]))
 		if err != nil {
+			continue
+		}
+		// window_index is always a number, so a non-numeric one means the
+		// fields have shifted — a tab inside a session name, which the
+		// separator cannot distinguish. Dropping the row is right: a pane
+		// labelled with someone else's window is worse than a pane missing
+		// from the list.
+		if _, err := strconv.Atoi(strings.TrimSpace(f[3])); err != nil {
 			continue
 		}
 		panes = append(panes, pane{id: f[0], pid: pid, session: f[2], window: f[3], dir: f[4]})
