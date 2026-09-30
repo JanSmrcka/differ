@@ -23,10 +23,7 @@ func TestConfig_TheREADMEDocumentsEveryKey(t *testing.T) {
 	// mentioning a key in prose somewhere else is not the same as showing it.
 	// tab_width was named once, in a sentence about tabs, and absent from the
 	// block; a laxer version of this test passed on that.
-	sample := between(readme, "```json", "```")
-	if sample == "" {
-		t.Fatal("the README has no JSON sample config block")
-	}
+	sample := sampleConfig(t, readme)
 
 	var missing []string
 	for _, key := range configKeys() {
@@ -53,10 +50,7 @@ func TestConfig_TheREADMEInventsNoKeys(t *testing.T) {
 
 	// The sample config block is the authoritative listing; anything quoted
 	// there has to be a key.
-	sample := between(readme, "```json", "```")
-	if sample == "" {
-		t.Fatal("the README has no JSON sample config block")
-	}
+	sample := sampleConfig(t, readme)
 	for _, line := range strings.Split(sample, "\n") {
 		key, _, ok := strings.Cut(strings.TrimSpace(line), ":")
 		if !ok {
@@ -94,14 +88,29 @@ func readReadme(t *testing.T) string {
 	return string(raw)
 }
 
-func between(s, open, close string) string {
-	_, rest, ok := strings.Cut(s, open)
+// sampleConfig returns the JSON block under the line naming the config file.
+//
+// Anchored on that heading rather than on "the first ```json block", of which
+// the README has five. Taking the first was correct only by accident, and
+// failed in the wrong direction: an earlier block containing all the keys
+// would leave the real sample unchecked while both tests passed.
+func sampleConfig(t *testing.T, readme string) string {
+	t.Helper()
+	const anchor = "Config file:"
+	_, after, ok := strings.Cut(readme, anchor)
 	if !ok {
-		return ""
+		t.Fatalf("the README no longer says %q, so the sample config cannot be found", anchor)
 	}
-	body, _, ok := strings.Cut(rest, close)
+	_, block, ok := strings.Cut(after, "```json")
 	if !ok {
-		return ""
+		t.Fatalf("no JSON block follows %q", anchor)
+	}
+	body, _, ok := strings.Cut(block, "```")
+	if !ok {
+		t.Fatal("the sample config block is never closed")
+	}
+	if !strings.Contains(body, `"theme"`) {
+		t.Fatalf("the block after %q does not look like a config: %q", anchor, body)
 	}
 	return body
 }

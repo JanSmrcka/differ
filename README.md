@@ -32,9 +32,13 @@ staging, committing, branch switching and a commit log browser.
 > vhs assets/demo.tape         # writes assets/demo.gif
 > ```
 >
-> It walks the real loop: an agent's changes, into review mode, down to the
-> line that is wrong, a comment, then `S` to send it back and `H` to confirm it
-> arrived. Once recorded, `assets/demo.gif` replaces the image above.
+> It walks the real loop in the layout above: an agent's pane on the left,
+> differ on the right, down to the line that is wrong — a `catch` that swallows
+> a read error and returns `null` — a comment, then `S` to send it across and
+> `H` to confirm it arrived. Every keystroke in the tape was checked against a
+> real tmux session rather than counted by eye. Once recorded,
+> `assets/demo.gif` replaces the image above, which still shows the old
+> two-panel viewer.
 
 ## Install
 
@@ -88,16 +92,17 @@ S                    # send every pending comment to the agent
 
 What that buys you over `git diff`:
 
-- **It remembers where you got to.** Each file is unreviewed, read, commented
-  or changed, and the bar keeps the count. Coming back after lunch, you know
-  what is left.
+- **It remembers where you got to.** Each file is `unreviewed`, `read`,
+  `commented`, `sent` or `changed`, and the bar keeps the count. Coming back
+  after lunch, you know what is left.
 - **Comments are attached to lines, not to your memory.** They render inline
   under the line they are about, and stay `pending` until you send them.
 - **The changeset moving under you is handled rather than ignored.** If the
   agent rewrites a file while you are reading it, the diff is not swapped out
-  from under you — the bar says `diff moved — R to reload`, and your comments
-  are re-anchored when you ask for it. A file that changed after you read it
-  goes back to unreviewed, so the count cannot lie to you.
+  from under you: your comments are re-anchored against the new content, so one
+  whose line has gone is marked `stale` rather than left pointing at whatever
+  took its place. A file that changed after you read it is marked `changed`,
+  and stops counting as reviewed — so the ratio cannot quietly lie to you.
 - **Sending is one keystroke.** `s` for one comment, `S` for all of them. Where
   they go is `feedback_target`: the agent's tmux pane, the clipboard, or
   stdout. `H` shows what was sent and whether it arrived.
@@ -575,6 +580,9 @@ Worth knowing if you are changing it:
 - `internal/feedback` — where a review goes: clipboard, stdout or tmux.
 - `internal/editor` — decides *and* performs "open this file in an editor".
 - `internal/theme` — colour values only, no lipgloss.
+- `internal/config` — the config struct, and load/save of
+  `~/.config/differ/config.json`.
+- `internal/testutil` — temporary git repositories and diff fixtures, for tests.
 - `internal/ui` — the Bubble Tea models, the diff parser and the renderer.
 
 `CLAUDE.md` carries the rules that are not obvious from the code, including a
@@ -594,5 +602,6 @@ long list of things that looked right and were not.
 - Commit flow with AI-generated messages
 - Commit log browser with diff preview
 - Compare against any branch/tag/commit ref
-- Auto-refresh (2s polling)
+- Auto-refresh: the repository is probed once a second, and the rebuild only
+  runs when something moved
 - Single binary, no runtime dependencies
