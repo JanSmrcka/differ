@@ -16,8 +16,10 @@ import (
 // what says the rest of the screen is not taking input. Both no-boxes sweeps
 // render the base view, with nothing open.
 //
-// lipgloss does the work — Place centres, RoundedBorder frames. Bubble Tea has
-// no modal of its own; there is nothing to add to go.mod for this.
+// lipgloss does the work — PlaceHorizontal centres, RoundedBorder frames, and
+// placeModal does the vertical placement itself because the box has to keep
+// out of the cursor's way rather than sit in the middle. Bubble Tea has no
+// modal of its own; there is nothing to add to go.mod for this.
 
 const (
 	// modalShare is how much of the terminal a modal asks for.
@@ -67,20 +69,16 @@ func (m Model) renderModal(title string, body []string, closing string, height, 
 	// was all chrome: you typed into a comment and nothing appeared, and at 8
 	// and 9 the closing line went too, so nothing said how to get out. The
 	// footer editor this replaced guaranteed a row, and minHeight is 8.
-	// One ceiling, at the end. Bounding the body here as well was a term no
-	// input could reach — the callers fit the body to modalBodyRoom first, so
-	// want is never the larger number — and raising it left every screen
-	// identical.
-	want := len(body) + modalChrome
-	room := max(want, modalChrome+1)
-	// Never more than half the content area, border included. A box that
-	// fills the screen cannot move out of the cursor's way, and the whole
-	// claim of a modal over a footer is that you can still see the line you
-	// are writing about. Forgetting the border here left a nine-row box in a
-	// fifteen-row area, which cannot clear a cursor in the middle of it.
-	if half := height/2 - modalBorderRows; room > half && half >= modalChrome+1 {
-		room = half
-	}
+	// One expression, and no floor of its own: boxRows already guarantees a
+	// row, and a `max(want, modalChrome+1)` here was inert — with an empty
+	// body it bought one blank row nothing on screen depends on, and
+	// removing it changed no size and no test.
+	//
+	// boxRows keeps the box to half the content area, border included. A box
+	// that fills the screen cannot move out of the cursor's way, and the
+	// whole claim of a modal over a footer is that you can still see the
+	// line you are writing about.
+	room := min(len(body)+modalChrome, boxRows(height))
 	// The ceiling last, so it wins over the floor. With the floor applied
 	// afterwards a height too small for a whole box produced one too tall for
 	// it, and placeModal then cut the bottom border off: at six rows the box
@@ -182,18 +180,120 @@ func overlayRow(bottom, top string, width int) string {
 	}
 
 	// What is right of the box stays. Blanking it wiped 67 columns of diff on
-	// every covered row at 220 columns, for no reason — and the doc comment
-	// above claimed it kept both edges.
+	// every covered row at 220 columns, for no reason.
+	//
+	// Cut with dropColumns, not by measuring MaxWidth's output and trimming
+	// that prefix off. MaxWidth re-emits the string with its own escapes and
+	// a reset, so the prefix it returns is not a byte prefix of the original
+	// whenever the row has more than one styled run — which is every real
+	// row: line numbers, marker, syntax colours. TrimPrefix then stripped
+	// nothing, the tail was the whole row, and what appeared right of the box
+	// was the row's *beginning* repeated. That reads as real diff, which is
+	// worse than the blank it replaced.
 	used := lead + lipgloss.Width(box)
 	right := ""
 	if used < width {
-		whole := lipgloss.NewStyle().MaxWidth(used).Render(bottom)
-		if tail := strings.TrimPrefix(bottom, whole); tail != "" && lipgloss.Width(whole) == used {
-			right = lipgloss.NewStyle().MaxWidth(width - used).Render(tail)
-		}
+		right = clipRow(dropColumns(bottom, used), width-used)
 		right = padTo(right, width-used)
 	}
 	return left + box + right
+}
+
+// dropColumns returns row without its first n display columns, keeping the
+// styling that was in force at the cut.
+//
+// The escapes are not columns, so they are collected as the scan passes them
+// and re-emitted in front of the tail; without that the tail would be printed
+// in whatever colour the previous row left behind. The cut itself is made on
+// the visible text alone, by lipgloss, so a grapheme cluster is never split —
+// an underline between the runes of a ZWJ emoji is the trap that made
+// lipgloss.Width measure one glyph as two.
+func dropColumns(row string, n int) string {
+	if n <= 0 {
+		return row
+	}
+	plain, spans := splitANSI(row)
+	kept := lipgloss.NewStyle().MaxWidth(n).Render(plain)
+	skip := len(kept)
+	if lipgloss.Width(plain) <= n {
+		return ""
+	}
+
+	var style, out strings.Builder
+	seen := 0
+	for _, sp := range spans {
+		if sp.escape {
+			if seen < skip {
+				style.WriteString(sp.text)
+			} else {
+				out.WriteString(sp.text)
+			}
+			continue
+		}
+		if seen+len(sp.text) <= skip {
+			seen += len(sp.text)
+			continue
+		}
+		if seen < skip {
+			out.WriteString(sp.text[skip-seen:])
+			seen = skip
+			continue
+		}
+		out.WriteString(sp.text)
+	}
+	return style.String() + out.String()
+}
+
+// rowSpan is one run of a row: either an escape sequence, which occupies no
+// columns, or visible text. Named for the row rather than `span`, which
+// intraline.go already uses for a run of emphasis.
+type rowSpan struct {
+	text   string
+	escape bool
+}
+
+// splitANSI separates a row into its escape sequences and its visible text,
+// returning the visible text on its own as well so it can be measured and cut
+// without them.
+func splitANSI(row string) (string, []rowSpan) {
+	var plain strings.Builder
+	var spans []rowSpan
+	for i := 0; i < len(row); {
+		if row[i] == 0x1b {
+			j := escapeEnd(row, i)
+			spans = append(spans, rowSpan{text: row[i:j], escape: true})
+			i = j
+			continue
+		}
+		j := i
+		for j < len(row) && row[j] != 0x1b {
+			j++
+		}
+		spans = append(spans, rowSpan{text: row[i:j]})
+		plain.WriteString(row[i:j])
+		i = j
+	}
+	return plain.String(), spans
+}
+
+// escapeEnd is the index just past the escape sequence starting at i.
+//
+// Everything this package emits comes from lipgloss or chroma and is a CSI
+// sequence ending in a letter; anything else is consumed as two bytes so the
+// scan cannot stall.
+func escapeEnd(row string, i int) int {
+	if i+1 >= len(row) {
+		return len(row)
+	}
+	if row[i+1] != '[' {
+		return i + 2
+	}
+	for j := i + 2; j < len(row); j++ {
+		if c := row[j]; (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') {
+			return j + 1
+		}
+	}
+	return len(row)
 }
 
 // modal is the box on top, or "" when nothing is asking.
@@ -253,11 +353,25 @@ const panelHeaderRows = 2
 // after the border, the title and the closing line — and after the cap that
 // keeps it out of the cursor's way.
 func modalBodyRoomAt(height int) int {
-	room := max(min(height-2, height), modalChrome+1)
-	if half := height/2 - modalBorderRows; half >= modalChrome+1 && room > half {
-		room = half
-	}
-	return max(room-modalChrome, 1)
+	return max(boxRows(height)-modalChrome, 1)
+}
+
+// boxRows is how many rows of the box are content: never more than half the
+// area, never fewer than one row of body, and never more than the area.
+//
+// One function, used both to size the body and to draw it. They were two
+// expressions that disagreed: the drawn box was capped to half the area and
+// the body was not, so at short heights fitOverlay was handed more rows than
+// the box would show and replaced the overflow with a count — the picker's
+// highlighted row among them.
+//
+// The half cap applies at every height. Its guard used to be `half >=
+// modalChrome+1`, which switched it off entirely below a content height of
+// fourteen, so at terminal heights 17 and 18 — the first two the box is
+// drawn at — it took the whole area and covered the line being commented on.
+func boxRows(height int) int {
+	half := max(height/2-modalBorderRows, modalChrome+1)
+	return max(min(half, height-modalBorderRows), 1)
 }
 
 func (m Model) modalBodyRoom(height int) int { return modalBodyRoomAt(height) }

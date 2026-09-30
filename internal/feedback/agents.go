@@ -18,8 +18,7 @@ import (
 // every other. With several agents running there was no way to say which, and
 // no way to see which differ would pick.
 //
-// Discovery is three processes for the whole scan, whatever the number of panes
-// (two outside tmux, where there is no own session to ask about):
+// Discovery is two processes for the whole scan, whatever the number of panes:
 // one tmux listing and one ps listing.
 
 // Agent is a tmux pane with a coding agent running in it.
@@ -53,26 +52,45 @@ var agentTools = []string{"claude", "codex", "gemini", "copilot", "opencode", "a
 var aliases = map[string]string{
 	"claude-code": "claude",
 	"gemini-cli":  "gemini",
+	// aider's own documented invocation is `uvx --from aider-chat aider`,
+	// and the package it comes from is aider-chat.
+	"aider-chat": "aider",
 }
 
-// passThrough are subcommands that still lead to the thing being run.
-var passThrough = map[string]bool{"exec": true, "x": true}
+// passThrough are subcommands and flags that still lead to the thing being
+// run.
+//
+// `uv run aider`, `uv tool run aider`, `pipx run aider` and `poetry run
+// aider` all do run the agent — "run" was in notRunning for `npm run
+// <script>`, so every one of them was missed. The two are told apart by what
+// follows: npm's script name is not an agent's name unless someone named a
+// script after one, and `npm run aider` reaching aider is a better failure
+// than `uv run aider` reaching nothing.
+var passThrough = map[string]bool{
+	"exec": true, "x": true, "tool": true,
+	"--from": true, "-y": true,
+}
 
-// notRunning are the subcommands that do something *to* a package rather than
-// run it. Installing an agent is not running one, and `npm run aider` runs a
-// script that happens to share the name.
-var notRunning = map[string]bool{
-	"install": true, "add": true, "remove": true, "uninstall": true,
-	"update": true, "upgrade": true, "run": true, "pip": true, "test": true,
+// runMeansExecute names the runners whose `run` executes a package rather
+// than a script defined in a manifest.
+//
+// `uv run aider`, `uv tool run aider`, `pipx run aider` and `poetry run
+// aider` all start the agent, and "run" being unconditionally in notRunning
+// missed every one. `npm run aider` is a script that happens to share the
+// name and is not.
+var runMeansExecute = map[string]bool{
+	"uv": true, "uvx": true, "pipx": true, "poetry": true,
 }
 
 // runners are the commands that launch something else, and so may name an
 // agent in their arguments rather than being one.
 var runners = map[string]bool{
 	"node": true, "npm": true, "npx": true, "bun": true, "bunx": true,
-	"deno": true, "pnpm": true, "yarn": true,
+	"deno": true, "pnpm": true, "yarn": true, "poetry": true,
 	"python": true, "python3": true, "uv": true, "uvx": true, "pipx": true,
 	"sh": true, "bash": true, "zsh": true, "fish": true, "env": true,
+	// gh copilot: the agent is the subcommand, not the executable.
+	"gh": true,
 }
 
 // fieldSep separates the fields of one pane listing.
@@ -108,10 +126,28 @@ func Agents(ctx context.Context, repoRoot string) ([]Agent, error) {
 	if err != nil {
 		return nil, err
 	}
-	return discover(
-		parsePanes(string(panesOut)), parseProcs(string(procsOut)),
-		os.Getenv("TMUX_PANE"), OwnSession(ctx), repoRoot,
-	), nil
+	self := os.Getenv("TMUX_PANE")
+	panes := parsePanes(string(panesOut))
+	return discover(panes, parseProcs(string(procsOut)),
+		self, sessionOf(panes, self), repoRoot), nil
+}
+
+// sessionOf names the session a pane is in, from the listing already in hand.
+//
+// This used to be OwnSession, a third `tmux display-message`. The listing
+// covers every pane on the server, differ's own included, so the answer was
+// already there — and issue #84's "the whole scan is two subprocesses" was
+// not met while it was being asked for separately.
+func sessionOf(panes []pane, self string) string {
+	if self == "" {
+		return ""
+	}
+	for _, p := range panes {
+		if p.id == self {
+			return p.session
+		}
+	}
+	return ""
 }
 
 // discover is everything Agents does once the two commands have answered:
@@ -220,6 +256,23 @@ func findAgents(panes []pane, procs procTable, self string) []Agent {
 	return found
 }
 
+// oneShot reports whether a command line runs an agent non-interactively,
+// so there is no session to paste a review into.
+//
+// `claude -p` is differ's own default commit_msg_cmd: a second differ
+// generating a commit message made its pane look like an agent for those few
+// seconds, and a review pasted there goes into a process that has already
+// read its stdin. `--help`, `doctor` and the like are the same shape.
+func oneShot(fields []string) bool {
+	for _, arg := range fields[1:] {
+		switch arg {
+		case "-p", "--print", "--help", "-h", "--version", "doctor", "mcp":
+			return true
+		}
+	}
+	return false
+}
+
 // toolUnder walks the tree from pid and names the first agent it finds.
 func (t procTable) toolUnder(pid int) string {
 	seen := map[int]bool{}
@@ -248,6 +301,9 @@ func agentTool(command string) string {
 	if len(fields) == 0 {
 		return ""
 	}
+	if oneShot(fields) {
+		return ""
+	}
 	exe := filepath.Base(strings.TrimPrefix(fields[0], "-"))
 	if tool := toolNamed(exe); tool != "" {
 		return tool
@@ -263,12 +319,15 @@ func agentTool(command string) string {
 	// and claude is a file vim was opening.
 	for _, arg := range fields[1:] {
 		switch {
-		case strings.HasPrefix(arg, "-"), strings.Contains(arg, "="):
-			continue // a flag, or env's KEY=VALUE
-		case notRunning[arg]:
-			// This command line is about a package, not a process:
-			// `pip install aider`, `npm run aider`.
+		case arg == "run":
+			if runMeansExecute[exe] {
+				continue
+			}
+			// npm and friends: a script from the manifest, which is not the
+			// agent even when it shares its name.
 			return ""
+		case strings.HasPrefix(arg, "-") && !passThrough[arg], strings.Contains(arg, "="):
+			continue // a flag, or env's KEY=VALUE
 		case passThrough[arg]:
 			continue // `npm exec <pkg>`
 		}
@@ -285,7 +344,15 @@ func agentTool(command string) string {
 			continue // one runner invoking another
 		}
 		// Whatever this is, it is what the runner runs, and it is not an
-		// agent.
+		// agent. `uv pip install aider` stops at "pip" and never reaches
+		// "aider"; so does `pipx install aider` at "install".
+		//
+		// There used to be a notRunning table of subcommands here as well —
+		// install, add, upgrade, pip — and it was doing nothing: this return
+		// already stops at the first token that is not a tool and not a
+		// runner, which is every one of them, and deleting the whole branch
+		// left the suite green. A table that looks like it is making a
+		// decision and is not is worse than no table.
 		return ""
 	}
 	return ""
@@ -320,23 +387,6 @@ func SortAgents(agents []Agent, ownSession, repoRoot string) {
 func underRoot(dir, root string) bool {
 	rel, err := filepath.Rel(root, dir)
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
-}
-
-// OwnSession names the tmux session differ is running in, or "".
-//
-// Read from $TMUX_PANE rather than assumed, and empty outside tmux — and
-// empty inside a display-popup too, where tmux does not set it. An empty
-// answer only costs the ordering its first preference.
-func OwnSession(ctx context.Context) string {
-	pane := os.Getenv("TMUX_PANE")
-	if pane == "" {
-		return ""
-	}
-	out, err := exec.CommandContext(ctx, "tmux", "display-message", "-p", "-t", pane, "#{session_name}").Output()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(out))
 }
 
 // toolNamed maps an executable's own name to the agent it is, or "".

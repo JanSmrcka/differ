@@ -2,6 +2,8 @@ package ui
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -13,6 +15,10 @@ import (
 
 func withAgents(t *testing.T, m Model, agents ...feedback.Agent) Model {
 	t.Helper()
+	// The picker has to be open: a scan that lands in a closed one is
+	// ignored, which is what stops a failure the user escaped out of taking
+	// over the bar three seconds later.
+	m.showAgents = true
 	updated, _ := m.Update(agentsLoadedMsg{agents: agents})
 	return updated.(Model)
 }
@@ -303,24 +309,6 @@ func TestAgentPicker_ChoosingChangesWhereASendGoes(t *testing.T) {
 	}
 }
 
-// And a target that cannot be resolved is reported, not silently kept.
-func TestAgentPicker_AnUnresolvableChoiceSaysSo(t *testing.T) {
-	t.Parallel()
-	tr := testutil.NewRepo(t)
-	tr.CommitFile("a.ts", "one\n", "first")
-	tr.Modify("a.ts", "two\n")
-	m := settle(t, liveModel(t, tr), tea.WindowSizeMsg{Width: 120, Height: 30})
-	m, _ = m.openAgentPicker()
-	m = withAgents(t, m, twoAgents()...)
-	m, _ = m.confirmAgent()
-
-	// Whatever happened, the model and what it would send agree: either a
-	// working target, or a recorded reason.
-	if m.target == nil && m.targetErr == nil {
-		t.Error("no target and no reason why")
-	}
-}
-
 // The highlighted agent has to be on screen. The list had no offset, so
 // fitOverlay dropped the overflow and printed "… N more" — press j past the
 // edge and nothing is highlighted anywhere, then enter chooses an agent you
@@ -435,6 +423,16 @@ func TestAgentPicker_AFailedScanKeepsTheSendFailure(t *testing.T) {
 	if m.problem != sent {
 		t.Errorf("the send failure was replaced by the scan's: %v", m.problem)
 	}
+	// And the bar still says it. Overwriting the status took away both the
+	// line saying the review did not arrive and the `!` offering the rest,
+	// which is the failure problem.line exists to prevent.
+	if !strings.Contains(m.View(), "!") {
+		t.Errorf("the bar no longer offers the details:\n%s", m.View())
+	}
+	if !strings.Contains(m.statusSegment(), "sending the review failed") {
+		t.Errorf("the bar says %q, which does not say the review did not arrive",
+			m.statusSegment())
+	}
 }
 
 // A tmux server that has gone entirely is not a pane that has gone. differ's
@@ -478,6 +476,188 @@ func TestAgentPicker_ConfirmingNothingChangesNothing(t *testing.T) {
 		}
 		if cmd != nil {
 			t.Errorf("cursor %d: confirming an empty picker saved the config", cursor)
+		}
+	}
+}
+
+// Two agents in one window share their session:window label and usually
+// their directory too, so the pane id is shown to tell them apart. Nothing
+// reached that branch: making labelIsAmbiguous always false left the suite
+// green, and the README documents the behaviour.
+func TestAgentPicker_TwoAgentsInOneWindowShowTheirPaneIds(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("a.ts", "one\n", "first")
+	tr.Modify("a.ts", "two\n")
+	m := settle(t, liveModel(t, tr), tea.WindowSizeMsg{Width: 120, Height: 30})
+
+	m = withAgents(t, m,
+		feedback.Agent{Pane: "%5", Session: "web", Window: "2", Tool: "opencode", Dir: "/repo"},
+		feedback.Agent{Pane: "%6", Session: "web", Window: "2", Tool: "claude", Dir: "/repo"},
+		feedback.Agent{Pane: "%9", Session: "solo", Window: "1", Tool: "claude", Dir: "/repo"},
+	)
+	m.agentsScanned = true
+
+	view := m.View()
+	for _, pane := range []string{"%5", "%6"} {
+		if !strings.Contains(view, pane) {
+			t.Errorf("the two agents in web:2 are not told apart — %s is absent:\n%s", pane, view)
+		}
+	}
+	// And a label that is not ambiguous is left alone: a pane id on every
+	// row is noise.
+	if strings.Contains(view, "%9") {
+		t.Errorf("an unambiguous label was given a pane id anyway:\n%s", view)
+	}
+}
+
+// Scanning and having found none are different answers and say so — a
+// picker that has not finished looking must not read as an empty tmux.
+func TestAgentPicker_ScanningDoesNotLookLikeFoundNone(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("a.ts", "one\n", "first")
+	tr.Modify("a.ts", "two\n")
+	base := settle(t, liveModel(t, tr), tea.WindowSizeMsg{Width: 120, Height: 30})
+
+	scanning := base
+	scanning.showAgents, scanning.agentsScanned = true, false
+	found := base
+	found.showAgents, found.agentsScanned = true, true
+
+	if a, b := scanning.agentClosing(), found.agentClosing(); a == b {
+		t.Errorf("scanning and found-none both close with %q", a)
+	}
+	if a, b := scanning.View(), found.View(); a == b {
+		t.Error("scanning and found-none draw the same box")
+	}
+	if !strings.Contains(scanning.View(), "looking") {
+		t.Errorf("a scan in progress does not say it is looking:\n%s", scanning.View())
+	}
+}
+
+// j and k move through the list. They are in the keymap and the bar
+// advertises them; making them do nothing left the suite green.
+func TestAgentPicker_JAndKMoveTheCursor(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("a.ts", "one\n", "first")
+	tr.Modify("a.ts", "two\n")
+	m := settle(t, liveModel(t, tr), tea.WindowSizeMsg{Width: 120, Height: 30})
+	m = withAgents(t, m, twoAgents()...)
+	m.agentsScanned, m.agentCursor = true, 0
+
+	down, _ := m.agentPickerKey("j")
+	if down.agentCursor != 1 {
+		t.Errorf("j left the cursor at %d, want 1", down.agentCursor)
+	}
+	up, _ := down.agentPickerKey("k")
+	if up.agentCursor != 0 {
+		t.Errorf("k left the cursor at %d, want 0", up.agentCursor)
+	}
+	// And it clamps rather than wrapping at both ends.
+	top, _ := m.agentPickerKey("k")
+	if top.agentCursor != 0 {
+		t.Errorf("k at the top wrapped to %d", top.agentCursor)
+	}
+	bottom := down
+	for range 5 {
+		bottom, _ = bottom.agentPickerKey("j")
+	}
+	if bottom.agentCursor != len(m.agents)-1 {
+		t.Errorf("j past the bottom left the cursor at %d, want %d",
+			bottom.agentCursor, len(m.agents)-1)
+	}
+}
+
+// A choice that cannot be resolved has to say so. The test that named this
+// used a pane that resolves fine and asserted only that one of target or
+// targetErr was set, which is true whatever the code does.
+func TestAgentPicker_AChoiceThatCannotBeResolvedIsReported(t *testing.T) {
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("a.ts", "one\n", "first")
+	tr.Modify("a.ts", "two\n")
+	m := settle(t, liveModel(t, tr), tea.WindowSizeMsg{Width: 120, Height: 30})
+	m = withAgents(t, m, twoAgents()...)
+	m.agentsScanned, m.agentCursor = true, 0
+
+	// No tmux on PATH, so the pane cannot be resolved however valid it looks.
+	t.Setenv("PATH", t.TempDir())
+
+	after, cmd := m.confirmAgent()
+
+	if after.targetErr == nil {
+		t.Fatal("an unresolvable choice reported no error")
+	}
+	if after.problem == nil {
+		t.Error("the failure did not go through fail, so `!` says nothing about it")
+	}
+	if cmd != nil {
+		t.Error("an unresolvable choice was still saved to the config")
+	}
+}
+
+// enter while the scan is still running must not throw it away. The picker
+// closed first, so the list arrived a moment later, found it shut and was
+// discarded: no picker, no list, and nothing on screen to say why.
+func TestAgentPicker_EnterDuringTheScanWaitsForIt(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("a.ts", "one\n", "first")
+	tr.Modify("a.ts", "two\n")
+	m := settle(t, liveModel(t, tr), tea.WindowSizeMsg{Width: 120, Height: 30})
+	m.showAgents, m.agentsScanned = true, false
+
+	pressed, _ := m.agentPickerKey("enter")
+	if !pressed.showAgents {
+		t.Fatal("enter closed a picker that had not finished looking")
+	}
+
+	// And the list, when it lands, is still installed.
+	updated, _ := pressed.Update(agentsLoadedMsg{agents: twoAgents()})
+	after := updated.(Model)
+	if len(after.agents) != 2 {
+		t.Errorf("the scan's result was discarded: %d agents", len(after.agents))
+	}
+}
+
+// The README's picker is what differ draws. Its first version showed aligned
+// columns and `~`-abbreviated paths, neither of which the renderer produces.
+func TestAgentPicker_TheREADMEShowsWhatIsDrawn(t *testing.T) {
+	t.Parallel()
+	raw, err := os.ReadFile(filepath.Join("..", "..", "README.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, after, ok := strings.Cut(string(raw), "### Choosing the agent")
+	if !ok {
+		t.Fatal("the README no longer has a section about choosing the agent")
+	}
+	_, block, _ := strings.Cut(after, "```\n")
+	shown, _, _ := strings.Cut(block, "```")
+
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("a.ts", "one\n", "first")
+	tr.Modify("a.ts", "two\n")
+	m := settle(t, liveModel(t, tr), tea.WindowSizeMsg{Width: 120, Height: 30})
+	m = withAgents(t, m,
+		feedback.Agent{Pane: "%2", Session: "differ", Window: "2", Tool: "claude", Dir: "/Users/you/git/private/differ"},
+		feedback.Agent{Pane: "%4", Session: "ELI-panda", Window: "2", Tool: "claude", Dir: "/Users/you/git/work/ELI-panda"},
+		feedback.Agent{Pane: "%5", Session: "personal-web", Window: "2", Tool: "opencode", Dir: "/Users/you/git/private/personal-web"},
+		feedback.Agent{Pane: "%6", Session: "personal-web", Window: "2", Tool: "claude", Dir: "/Users/you/git/private/personal-web"},
+	)
+	m.agentsScanned = true
+
+	// Every agent row the README shows has to appear in the box, spacing and
+	// all — which is what catches a hand-tidied screenshot.
+	drawn, _ := splitANSI(m.View())
+	for _, line := range strings.Split(shown, "\n") {
+		row := strings.TrimSpace(line)
+		if row == "" || !strings.Contains(row, ":") || strings.HasPrefix(row, "j/k") {
+			continue
+		}
+		if !strings.Contains(drawn, row) {
+			t.Errorf("the README shows a row differ does not draw:\n  %q\nin:\n%s", row, drawn)
 		}
 	}
 }

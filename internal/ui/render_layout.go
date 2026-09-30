@@ -370,8 +370,11 @@ func (m Model) renderCommentBar() string {
 	head := m.renderBar(lipgloss.NewStyle(),
 		m.styles.HelpKey.Render(m.commentTitle()+" ")+m.styles.HelpDesc.Render("· "+commentClosing))
 	m.commentInput.SetHeight(1)
-	if w := m.width - 2; w > 4 {
-		m.commentInput.SetWidth(w)
-	}
+	// commentEditorWidth, not m.width-2: this function set its own width and
+	// the model kept another, so the textarea's viewport was scrolled to a
+	// soft-wrapped row that did not exist after the resize — type 170
+	// characters at 220 columns and the row rendered as a bare marker with
+	// nothing in it.
+	m.commentInput.SetWidth(m.commentEditorWidth())
 	return lipgloss.JoinVertical(lipgloss.Left, head, m.commentInput.View())
 }

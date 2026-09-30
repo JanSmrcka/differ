@@ -447,9 +447,10 @@ shown, so you can fix the target and send again.
 ```
  agent
 
-▍ differ:2            claude      ~/git/private/differ
-  ELI-panda:2         claude      ~/git/work/ELI-panda
-  personal-web:2      opencode    ~/git/private/personal-web
+▍ differ:2  claude  /Users/you/git/private/differ
+  ELI-panda:2  claude  /Users/you/git/work/ELI-panda
+  personal-web:2 %5  opencode  /Users/you/git/private/personal-web
+  personal-web:2 %6  claude  /Users/you/git/private/personal-web
 
  j/k · enter chooses · esc cancels
 ```
@@ -461,10 +462,16 @@ one working in this repository.
 Discovery **walks each pane's process tree** rather than reading its current
 command: an agent started through `npx`, a shell function or a wrapper script
 does not show up as the pane's command. It looks for `claude`, `codex`,
-`gemini`, `copilot`, `opencode` and `aider`, and the whole scan is three
-subprocesses however many panes there are — one tmux listing, one `ps`, and
-one more to ask tmux which session differ itself is in, which is what puts
-the agent beside you first. Outside tmux it is two.
+`gemini`, `copilot`, `opencode` and `aider`, and the whole scan is two
+subprocesses however many panes there are: one `tmux list-panes -a` and one
+`ps`. The session differ itself is in — which is what puts the agent beside
+you first — comes out of that same listing.
+
+It finds the documented invocation of each: `npx @anthropic-ai/claude-code`,
+`uvx --from aider-chat aider`, `uv run aider`, `gh copilot`. A one-shot is
+not offered — `claude -p` is differ's own default commit-message command, and
+pasting a review into it would write to a process that has already read its
+input.
 
 The choice takes effect immediately, not at the next start: it re-resolves
 where feedback goes as well as writing the config.

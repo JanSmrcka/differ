@@ -401,3 +401,228 @@ func TestModal_ABodyTooLongForTheRoomIsStillABox(t *testing.T) {
 		}
 	}
 }
+
+// What is right of the box is the row's own continuation, not its beginning
+// repeated.
+//
+// Round 1 replaced "blank to the right" with "wrong to the right": the cut
+// was made by rendering MaxWidth and trimming that as a byte prefix, and
+// MaxWidth re-emits the string with its own escapes, so nothing was trimmed
+// on any row with more than one styled run — which is every real row. The
+// duplicate reads as real diff, which is worse than a blank.
+//
+// Not t.Parallel: the colour profile is global and a dozen tests assert on
+// unescaped strings.
+func TestModal_TheRowRightOfTheBoxIsItsOwnContinuation(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(0) // TrueColor, so lipgloss actually emits
+	defer lipgloss.SetColorProfile(prev)
+
+	red := lipgloss.NewStyle().Foreground(lipgloss.Color("#ff0000"))
+	blue := lipgloss.NewStyle().Foreground(lipgloss.Color("#0000ff"))
+	bottom := red.Render("AAAAAAAAAA") + "BBBBBBBBBB" + blue.Render("CCCCCCCCCC")
+
+	got := overlayRow(bottom, strings.Repeat(" ", 10)+"╭────╮", 30)
+
+	plain, _ := splitANSI(got)
+	if want := "AAAAAAAAAA╭────╮BBBBCCCCCCCCCC"; plain != want {
+		t.Errorf("composited row = %q, want %q", plain, want)
+	}
+	if lipgloss.Width(got) != 30 {
+		t.Errorf("composited row is %d columns, want 30", lipgloss.Width(got))
+	}
+
+	// And the tail keeps the colour it had. The escapes are not columns, so
+	// they have to be collected as the cut is made and re-emitted in front
+	// of what survives; without that the tail prints in whatever colour the
+	// previous row left behind.
+	blueTail := blue.Render("CCCCCCCCCC")
+	escapes := blueTail[:strings.Index(blueTail, "C")]
+	if escapes == "" {
+		t.Fatal("lipgloss emitted no escapes; the colour profile did not take")
+	}
+	if !strings.Contains(got, escapes) {
+		t.Errorf("the tail lost its colour: %q does not carry %q", got, escapes)
+	}
+
+	// Cutting into the middle of a styled run keeps that run's colour too,
+	// which is the case where the style in force is not at a run boundary.
+	mid := overlayRow(bottom, strings.Repeat(" ", 2)+"╭╮", 30)
+	redEscapes := red.Render("A")[:strings.Index(red.Render("A"), "A")]
+	if !strings.Contains(dropColumns(bottom, 4), redEscapes) {
+		t.Errorf("a cut inside a styled run lost the style: %q", dropColumns(bottom, 4))
+	}
+	if lipgloss.Width(mid) != 30 {
+		t.Errorf("row cut mid-run is %d columns, want 30", lipgloss.Width(mid))
+	}
+}
+
+// And through View(), because overlayRow being right in isolation is not the
+// claim: blanking the covered row entirely inside modalOver left the suite
+// green, since nothing asserted on a composited row at all.
+func TestModal_TheDiffIsStillThereBesideTheBox(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	// Lines long enough to reach past the right edge of the box, and every
+	// one of them changed, so the hunk fills the panel: otherwise the
+	// columns beside the box are blank and blank is the correct answer
+	// there, which would make this test pass on nothing.
+	var b, after strings.Builder
+	for i := range 60 {
+		b.WriteString(strings.Repeat("the quick brown fox jumps over the lazy dog ", 6) + strconv.Itoa(i) + "\n")
+		after.WriteString(strings.Repeat("the quick brown CAT sleeps beside a lazy dog ", 6) + strconv.Itoa(i) + "\n")
+	}
+	tr.CommitFile("src.ts", b.String(), "first")
+	tr.Modify("src.ts", after.String())
+
+	m := settle(t, liveModel(t, tr), tea.WindowSizeMsg{Width: 200, Height: 40})
+	m = settle(t, m, key("r"))
+	before := m.View()
+
+	updated, _ := m.updateReviewMode(key("c"))
+	drawn := updated.(Model).View()
+
+	_, _, first, last := boxGeometry(t, drawn)
+	if first < 0 {
+		t.Fatal("no box drawn")
+	}
+	beforeRows := strings.Split(before, "\n")
+	afterRows := strings.Split(drawn, "\n")
+
+	lead, boxWidth, _, _ := boxGeometry(t, drawn)
+	var kept int
+	for i := first; i <= last; i++ {
+		// Whatever was right of the box on this row must still be right of
+		// it, and must not be a repeat of what is left of it.
+		right := dropColumns(afterRows[i], lead+boxWidth)
+		plainRight, _ := splitANSI(right)
+		plainBefore, _ := splitANSI(dropColumns(beforeRows[i], lead+boxWidth))
+		if strings.TrimSpace(plainRight) == "" {
+			continue
+		}
+		kept++
+		if strings.TrimSpace(plainRight) != strings.TrimSpace(plainBefore) {
+			t.Errorf("row %d right of the box reads %q, and before the box "+
+				"was drawn it read %q", i, plainRight, plainBefore)
+		}
+	}
+	if kept == 0 {
+		t.Error("nothing was kept right of the box, so this test checked nothing")
+	}
+}
+
+// Every height differ promises to draw the box in has to keep the line
+// visible. The cap was switched off entirely below a content height of
+// fourteen, so at 17 and 18 — the first two heights the box is drawn at —
+// it took the whole area and covered the line being commented on.
+func TestModal_LeavesTheLineVisibleAtEveryHeightItDrawsAt(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	var b, after strings.Builder
+	for i := range 200 {
+		b.WriteString("line " + strconv.Itoa(i) + "\n")
+		if i == 100 {
+			after.WriteString("THE LINE I AM COMMENTING ON\n")
+			continue
+		}
+		after.WriteString("line " + strconv.Itoa(i) + "\n")
+	}
+	tr.CommitFile("src.ts", b.String(), "first")
+	tr.Modify("src.ts", after.String())
+
+	for h := commentModalMinHeight; h <= 40; h++ {
+		m := settle(t, liveModel(t, tr), tea.WindowSizeMsg{Width: 120, Height: h})
+		m = settle(t, m, key("r"))
+		m = cursorOnContent(t, m, "THE LINE I AM COMMENTING ON")
+
+		if !strings.Contains(m.View(), "THE LINE I AM COMMENTING ON") {
+			continue // the cursor's line is not on screen to begin with
+		}
+		updated, _ := m.updateReviewMode(key("c"))
+		if !strings.Contains(updated.(Model).View(), "THE LINE I AM COMMENTING ON") {
+			t.Errorf("h=%d: the box covers the line being commented on:\n%s",
+				h, updated.(Model).View())
+		}
+	}
+}
+
+// cursorOnContent puts the diff cursor on the line holding text.
+func cursorOnContent(t *testing.T, m Model, text string) Model {
+	t.Helper()
+	parsed := m.renderer.Parsed()
+	for i, dl := range parsed.Lines {
+		if strings.Contains(dl.Content, text) {
+			return m.setCursor(i)
+		}
+	}
+	t.Fatalf("no diff line contains %q", text)
+	return m
+}
+
+// The footer editor — the form small terminals get instead of the box — has
+// to show what you type too. It set its own width while the model kept
+// another, so the textarea's viewport scrolled to a soft-wrapped row that no
+// longer existed after the resize: at 220 columns, 170 characters rendered
+// as a bare marker with nothing in it.
+func TestModal_TheFooterEditorShowsWhatYouType(t *testing.T) {
+	t.Parallel()
+	for _, w := range []int{80, 120, 220} {
+		m := modalModel(t, w, commentModalMinHeight-3)
+		updated, _ := m.updateReviewMode(key("c"))
+		m = updated.(Model)
+		if m.modal(m.contentHeight()) != "" {
+			t.Fatalf("w=%d: this size draws a box, so it is not the footer path", w)
+		}
+
+		// Typed, not SetValue: the textarea moves its own viewport on input,
+		// and the bug being tested for is whether what it moves matches what
+		// is drawn.
+		// A distinct character at each checkpoint. "x" is on screen from the
+		// first keystroke onwards, so asserting on it would pass whatever
+		// the editor drew.
+		marks := map[int]string{40: "A", 100: "B", 170: "C", 400: "D"}
+		typed := m
+		for i := range 400 {
+			ch := "x"
+			if mark, ok := marks[i+1]; ok {
+				ch = mark
+			}
+			updated, _ := typed.updateReviewMode(key(ch))
+			typed = updated.(Model)
+			if mark, ok := marks[i+1]; ok && !strings.Contains(typed.View(), mark) {
+				t.Errorf("w=%d: %d characters in and what was just typed (%q) "+
+					"is not on screen:\n%s", w, i+1, mark, typed.View())
+			}
+		}
+	}
+}
+
+// renderModal's body floor and placeModal's trim are both guards its callers
+// make unreachable — the body is pre-fitted and the box is capped to half the
+// area, so neither can be reached through View(). Removing either left the
+// suite green. They are what stands between a caller that gets the
+// arithmetic wrong and a box with no content or a frame taller than the
+// screen, so they are checked where they can be reached: directly.
+func TestModal_TheGuardsAgainstACallersArithmetic(t *testing.T) {
+	t.Parallel()
+	m := modalModel(t, 120, 30)
+
+	// An empty body still gets a box with a way out of it.
+	out := m.renderModal(" empty", nil, "esc cancels", 24, -1)
+	if !strings.Contains(out, "esc cancels") {
+		t.Errorf("an empty body lost the closing line:\n%s", out)
+	}
+	if _, _, first, last := boxGeometry(t, out); first < 0 || last <= first {
+		t.Errorf("an empty body drew no complete box:\n%s", out)
+	}
+
+	// A box taller than the room it is placed in is trimmed to it, rather
+	// than making the frame overflow the terminal.
+	tall := strings.TrimRight(strings.Repeat("│ x\n", 40), "\n")
+	for _, height := range []int{5, 12, 30} {
+		placed := placeModal(tall, 120, height, -1)
+		if got := len(strings.Split(placed, "\n")); got != height {
+			t.Errorf("height=%d: placeModal returned %d rows", height, got)
+		}
+	}
+}

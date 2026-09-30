@@ -166,6 +166,13 @@ func TestAgents_FindsAnAgentInARealTmuxSession(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Its own tmux server. On the shared one this test's session is visible
+	// to internal/editor's tmux tests, which run in a parallel package and
+	// look for a window running an editor — the two packages fought over one
+	// server and failed each other intermittently.
+	t.Setenv("TMUX_TMPDIR", shortTmuxDir(t))
+	t.Setenv("TMUX", "")
+
 	_ = exec.Command("tmux", "kill-session", "-t", name).Run()
 	// sh -c keeps a shell as the pane's process and the fake agent as its
 	// child, which is the shape this is about.
@@ -173,7 +180,7 @@ func TestAgents_FindsAnAgentInARealTmuxSession(t *testing.T) {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Skipf("could not start a tmux session: %v\n%s", err, out)
 	}
-	t.Cleanup(func() { _ = exec.Command("tmux", "kill-session", "-t", name).Run() })
+	t.Cleanup(func() { _ = exec.Command("tmux", "kill-server").Run() })
 	time.Sleep(400 * time.Millisecond) // let the child appear in ps
 
 	found, err := Agents(context.Background(), "")
@@ -394,37 +401,99 @@ func TestSortAgents_OrdersWindowsNumerically(t *testing.T) {
 	}
 }
 
-// OwnSession is what decides which agents sort first, and it had no test at
-// all: making it always return "" left the suite green.
-func TestOwnSession_IsEmptyOutsideTmux(t *testing.T) {
-	if os.Getenv("TMUX") != "" {
-		t.Skip("running inside tmux; this test is about the outside case")
+// The own session comes out of the pane listing rather than a third
+// subprocess. Asking tmux separately meant issue #84's "the whole scan is
+// two subprocesses" was not met, while the answer was already in hand: the
+// listing covers every pane on the server, differ's own included.
+func TestSessionOf_ReadsTheOwnSessionFromTheListing(t *testing.T) {
+	t.Parallel()
+	panes := parsePanes(strings.Join([]string{
+		"%1\x1f100\x1fwork\x1f0\x1f/a",
+		"%7\x1f700\x1fmine\x1f3\x1f/b",
+		"",
+	}, "\n"))
+
+	if got := sessionOf(panes, "%7"); got != "mine" {
+		t.Errorf("sessionOf(%%7) = %q, want mine", got)
 	}
-	if got := OwnSession(context.Background()); got != "" {
-		t.Errorf("OwnSession() = %q outside tmux, want empty", got)
+	if got := sessionOf(panes, ""); got != "" {
+		t.Errorf("sessionOf with no own pane = %q, want empty", got)
+	}
+	if got := sessionOf(panes, "%99"); got != "" {
+		t.Errorf("sessionOf for a pane not in the listing = %q, want empty", got)
 	}
 }
 
-// OwnSession is what makes the agent beside you sort first, and it had no
-// test: making it always return "" left the suite green. Its answer can only
-// come from a real tmux server, so this asks one.
-func TestOwnSession_NamesTheSessionThePaneIsIn(t *testing.T) {
-	if _, err := exec.LookPath("tmux"); err != nil {
-		t.Skip("tmux not installed")
-	}
-	name := "differ-test-own-" + strconv.Itoa(os.Getpid())
-	if err := exec.Command("tmux", "new-session", "-d", "-s", name, "sleep 30").Run(); err != nil {
-		t.Skipf("cannot start a tmux session: %v", err)
-	}
-	defer func() { _ = exec.Command("tmux", "kill-session", "-t", name).Run() }()
+// The real invocations of each agent, taken from their own documentation.
+// Every one of these was missed: "run" was unconditionally treated as doing
+// something *to* a package, and aider's package is named aider-chat.
+func TestAgentTool_FindsTheDocumentedInvocations(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ command, want string }{
+		{"uvx --from aider-chat aider", "aider"},
+		{"uv run aider", "aider"},
+		{"uv tool run aider", "aider"},
+		{"pipx run aider", "aider"},
+		{"poetry run aider", "aider"},
+		{"gh copilot suggest", "copilot"},
 
-	out, err := exec.Command("tmux", "list-panes", "-t", name, "-F", "#{pane_id}").Output()
-	if err != nil {
-		t.Fatalf("list-panes: %v", err)
+		// And `run` still means a manifest script where it does.
+		{"npm run aider", ""},
+		{"yarn run codex", ""},
+		{"pnpm run claude", ""},
+	} {
+		if got := agentTool(tc.command); got != tc.want {
+			t.Errorf("agentTool(%q) = %q, want %q", tc.command, got, tc.want)
+		}
 	}
-	t.Setenv("TMUX_PANE", strings.TrimSpace(string(out)))
+}
 
-	if got := OwnSession(context.Background()); got != name {
-		t.Errorf("OwnSession() = %q, want %q", got, name)
+// A one-shot agent is not a session to paste into — and `claude -p` is
+// differ's own default commit_msg_cmd, so a second differ writing a commit
+// message appeared in the picker for those seconds. A review pasted there
+// goes into a process that has already read its stdin.
+func TestAgentTool_AOneShotInvocationIsNotASession(t *testing.T) {
+	t.Parallel()
+	for _, command := range []string{
+		"claude -p generate a commit message",
+		"claude --print hello",
+		"claude --help",
+		"claude doctor",
+		"claude mcp list",
+		"codex --version",
+	} {
+		if got := agentTool(command); got != "" {
+			t.Errorf("agentTool(%q) = %q, want none — there is no session there", command, got)
+		}
+	}
+	// The interactive forms are still found.
+	for _, command := range []string{"claude", "claude --model opus", "codex"} {
+		if got := agentTool(command); got == "" {
+			t.Errorf("agentTool(%q) found no agent", command)
+		}
+	}
+}
+
+// Installing an agent is not running one, and what stops it is the
+// fall-through: the scan gives up at the first argument that is neither a
+// tool nor a runner.
+//
+// A notRunning table of subcommands used to sit in front of this and was
+// doing nothing — every fixture it was written for is stopped by the
+// fall-through anyway, so deleting the whole branch left the suite green.
+// These cases pin the mechanism that actually decides.
+func TestAgentTool_InstallingIsToldFromRunning(t *testing.T) {
+	t.Parallel()
+	for _, command := range []string{
+		"uv pip install aider",
+		"pipx install aider",
+		"npm install -g @anthropic-ai/claude-code",
+		"yarn add opencode",
+		"uv sync aider",
+	} {
+		if got := agentTool(command); got != "" {
+			t.Errorf("agentTool(%q) = %q — installing an agent is not running one",
+				command, got)
+		}
 	}
 }

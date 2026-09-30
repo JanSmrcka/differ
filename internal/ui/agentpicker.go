@@ -20,11 +20,11 @@ import (
 // agentKey opens the picker. A for agent; the review keys are taken.
 const agentKey = "A"
 
-// agentScanTimeout bounds the discovery. It is three subprocesses, but tmux on a
+// agentScanTimeout bounds the discovery. It is two subprocesses, but tmux on a
 // wedged server can block, and the picker must not.
 const agentScanTimeout = 3 * time.Second
 
-// openAgentPicker shows the picker and starts looking. Discovery runs three
+// openAgentPicker shows the picker and starts looking. Discovery runs two
 // subprocesses, so it happens off the update loop.
 func (m Model) openAgentPicker() (Model, tea.Cmd) {
 	m.showAgents = true
@@ -72,7 +72,12 @@ func (m Model) handleAgentsLoaded(msg agentsLoadedMsg) (tea.Model, tea.Cmd) {
 			// The picker only opened because a send failed. Reporting the
 			// scan through fail would replace that problem, and `!` would
 			// then no longer say why the review did not arrive.
-			m.statusMsg = "could not look for agents"
+			//
+			// The bar is left alone as well: overwriting it took away both
+			// the line saying the review did not arrive and the `!` that
+			// offers the rest, which is the failure problem.line exists to
+			// prevent. The scan's own failure is the lesser event and the
+			// closed picker already shows it produced nothing.
 			return m, nil
 		}
 		return m.fail("looking for agents", msg.err), nil
@@ -93,6 +98,13 @@ func (m Model) handleAgentsLoaded(msg agentsLoadedMsg) (tea.Model, tea.Cmd) {
 // Choosing a pane and leaving feedback_target on clipboard would be a picker
 // that does nothing, so the two are set together.
 func (m Model) confirmAgent() (Model, tea.Cmd) {
+	// Nothing to confirm yet. Closing the picker first threw the scan away:
+	// the list arrived a moment later, found the picker shut and was
+	// discarded, so enter during "looking for agents…" left no picker, no
+	// list and nothing said.
+	if !m.agentsScanned {
+		return m, nil
+	}
 	m.showAgents = false
 	if m.agentCursor < 0 || m.agentCursor >= len(m.agents) {
 		return m, nil

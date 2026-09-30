@@ -137,15 +137,15 @@ func (m Model) handleFeedbackSent(msg feedbackSentMsg) (tea.Model, tea.Cmd) {
 	m.recordDelivery(msg)
 	if msg.err != nil {
 		// Comments stay pending: the user can retry or switch target.
-		m = m.fail("send", msg.err)
+		m = m.fail("sending the review", msg.err)
 		// A pane that has gone is not a failure to read about, it is a choice
 		// to make again — so the picker opens rather than leaving the user to
 		// work out that the agent they chose has exited.
 		if paneIsGone(msg.err) {
-			// Keep the failure that caused this. The picker's own scan can
-			// fail too, and letting it through fail() replaced the reason the
-			// review never arrived with a reason about tmux listings.
-			m = m.fail("sending the review", msg.err)
+			// The failure above is kept as it is. It was reported a second
+			// time here, under another action name, and the first result was
+			// thrown away — the picker's scan must not replace it either,
+			// which is what agentsAfterSendFailure says.
 			mm, cmd := m.openAgentPicker()
 			mm.agentsAfterSendFailure = true
 			return mm, cmd
