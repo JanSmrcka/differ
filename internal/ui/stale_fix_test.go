@@ -19,6 +19,7 @@ func TestHunkComment_SurvivesReanchorWhenHunkStartsWithARemoval(t *testing.T) {
 
 	m := diffModel(t, "multi_hunk", 20)
 	m.renderer = NewDiffRenderer(parsed, "a.ts", m.styles, m.theme, 80)
+	m.rendererPath = "a.ts"
 	m.files[0].change.Path = "a.ts"
 	m.session = review.NewSession()
 	m = m.setCursor(parsed.FirstCommentableLine())
@@ -31,7 +32,7 @@ func TestHunkComment_SurvivesReanchorWhenHunkStartsWithARemoval(t *testing.T) {
 
 	// Re-anchor against the very same diff: nothing changed, so nothing should
 	// go stale.
-	m.session.Reanchor("a.ts", diffLocations(parsed))
+	m.session.Reanchor("a.ts", review.Anchored{Locations: diffLocations(parsed), Locate: review.LocateLine})
 
 	got, _ := m.session.Get(stored.ID)
 	if got.State != review.StateStale {

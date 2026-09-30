@@ -270,6 +270,7 @@ func TestParseNewFile_TruncatedHunkCommentExcludesTheMarker(t *testing.T) {
 	}
 	m := diffModel(t, "multi_hunk", 20)
 	m.renderer = NewDiffRenderer(ParseNewFile(b.String()), "big.txt", m.styles, m.theme, 80)
+	m.rendererPath = "big.txt"
 	m.files[0].change.Path = "big.txt"
 	m = m.setCursor(0)
 

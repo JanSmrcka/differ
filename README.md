@@ -269,6 +269,70 @@ letter while the editor is open.
 While the diff is held, `e` opens the file without jumping to a line — the line
 numbers belong to a version that is no longer on disk.
 
+What the agent receives, per comment: a reference, then the hunk the comment is
+about, then what you wrote.
+
+```
+@src/session.ts :L8
+File: src/session.ts
+Line: 8 (new)
+
+Changed code:
+ import { readFile } from "node:fs/promises";
+ 
+ export async function loadSession(path: string) {
+-  const raw = await readFile(path, "utf8");
+-  return JSON.parse(raw);
++  try {
++    const raw = await readFile(path, "utf8");
++    return JSON.parse(raw);
++  } catch {
++    return null;
++  }
+ }
+
+Comment:
+this drops the error instead of returning it — the caller cannot tell
+```
+
+The reference is the form `sidekick.nvim` emits, and **the space before the
+colon matters**: its commit `d570e1f` ("different format that should work for
+most cli tools") added the space and the `L` together, because `@path:9` made
+the agent's @-mention resolver read the whole token as a filename and attach
+nothing.
+
+Claude Code's Neovim integration does not use this form at all — it sends
+`at_mentioned` as JSON-RPC over a websocket, with `filePath` and a line range.
+That is a different channel; differ writes text into the agent's terminal.
+
+How much of a reference a comment gets depends on what still resolves against
+the file on disk:
+
+| | |
+|---|---|
+| the line resolves | `@src/cache.ts :L12` |
+| only the file does | `@src/cache.ts` |
+| nothing does | no reference; the prose still says where it was |
+
+The middle case covers more than deleted code. Under `-s` and `differ commit`
+the diff's **new** side is the index, not the working tree — so differ asks
+whether the two hold the same bytes, and only degrades when they do not:
+stage a change, then edit above it, and the diff still says line 3 while the
+code has moved to line 8, so you get `@path`. Stage, review and commit
+without touching the file in between and the line reference stands. An
+old-side line number never resolves either, and neither does a path
+containing a space, which the agent's resolver would read as two tokens. In
+each case the file is usually still there, and `sidekick.nvim` has a bare
+`@path` form for exactly that — attaching the file and losing the line beats
+attaching nothing.
+
+Which entry the cursor is on decides this, not the flag differ started with:
+git lists a file with both staged and unstaged changes twice, and walking
+from one to the other re-resolves a comment into the other's line numbers.
+
+The hunk is differ's addition: for a review it is more useful for the agent to
+see what changed than to go and read the file.
+
 In the comment editor: `ctrl+s` saves, `esc` cancels. Comments are multiline,
 shown inline under the line they refer to, and marked `pending` until sent.
 They live for the session only — nothing is written to disk or to git.
