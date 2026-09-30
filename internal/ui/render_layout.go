@@ -339,11 +339,9 @@ func (m Model) commentTitle() string {
 // was built as though it could always have them — at height 8 the content area
 // came out at -1 and View panicked in make([]string, -1). A modal is bounded
 // by the room it is given instead, and the diff stays visible around it.
-func (m Model) commentRows() []string {
-	inner := m.modalWidth() - 2*modalPadding - 2
-	if inner > 4 {
-		m.commentInput.SetWidth(inner - 2)
-	}
+func (m Model) commentRows(room int) []string {
+	m.commentInput.SetWidth(m.commentEditorWidth())
+	m.commentInput.SetHeight(max(min(room, commentEditorHeight), 1))
 	return strings.Split(m.commentInput.View(), "\n")
 }
 
@@ -361,4 +359,19 @@ func (m Model) commitBarContent() string {
 
 func (m Model) branchCreateContent() string {
 	return m.styles.HelpKey.Render(" new branch: ") + m.branchInput.View() + "  " + m.styles.HelpDesc.Render("esc cancel · enter create")
+}
+
+// renderCommentBar is the comment editor in the footer, for terminals too
+// short to draw it as a box.
+//
+// One row of head and one of input: the smallest thing that still shows what
+// you are typing and how to get out.
+func (m Model) renderCommentBar() string {
+	head := m.renderBar(lipgloss.NewStyle(),
+		m.styles.HelpKey.Render(m.commentTitle()+" ")+m.styles.HelpDesc.Render("· "+commentClosing))
+	m.commentInput.SetHeight(1)
+	if w := m.width - 2; w > 4 {
+		m.commentInput.SetWidth(w)
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, head, m.commentInput.View())
 }

@@ -461,8 +461,16 @@ one working in this repository.
 Discovery **walks each pane's process tree** rather than reading its current
 command: an agent started through `npx`, a shell function or a wrapper script
 does not show up as the pane's command. It looks for `claude`, `codex`,
-`gemini`, `copilot`, `opencode` and `aider`, and the whole scan is two
-subprocesses however many panes there are.
+`gemini`, `copilot`, `opencode` and `aider`, and the whole scan is three
+subprocesses however many panes there are — one tmux listing, one `ps`, and
+one more to ask tmux which session differ itself is in, which is what puts
+the agent beside you first. Outside tmux it is two.
+
+The choice takes effect immediately, not at the next start: it re-resolves
+where feedback goes as well as writing the config.
+
+Two agents in one window are told apart by their pane id, which is shown only
+when the session and window alone would be ambiguous.
 
 If the pane you chose has since exited, the picker reopens rather than leaving
 you to work out why a send failed. It never starts an agent — it chooses among

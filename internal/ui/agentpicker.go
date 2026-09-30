@@ -20,14 +20,15 @@ import (
 // agentKey opens the picker. A for agent; the review keys are taken.
 const agentKey = "A"
 
-// agentScanTimeout bounds the discovery. It is two subprocesses, but tmux on a
+// agentScanTimeout bounds the discovery. It is three subprocesses, but tmux on a
 // wedged server can block, and the picker must not.
 const agentScanTimeout = 3 * time.Second
 
-// openAgentPicker shows the picker and starts looking. Discovery runs two
+// openAgentPicker shows the picker and starts looking. Discovery runs three
 // subprocesses, so it happens off the update loop.
 func (m Model) openAgentPicker() (Model, tea.Cmd) {
 	m.showAgents = true
+	m.agentsAfterSendFailure = false
 	m.agents, m.agentsScanned = nil, false
 	m.showHelp, m.showHistory, m.showProblem = false, false, false
 	if m.showThemes {
@@ -48,10 +49,9 @@ func (m Model) scanAgentsCmd() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), agentScanTimeout)
 		defer cancel()
-		found, err := feedback.Agents(ctx)
-		// Asked here rather than kept on the model: differ can be moved
-		// between tmux sessions while it runs.
-		feedback.SortAgents(found, feedback.OwnSession(ctx), root)
+		// The root is passed rather than the ordering done here: forgetting
+		// the one call left the picker unsorted with every test green.
+		found, err := feedback.Agents(ctx, root)
 		return agentsLoadedMsg{agents: found, err: err}
 	}
 }
@@ -59,8 +59,22 @@ func (m Model) scanAgentsCmd() tea.Cmd {
 // handleAgentsLoaded installs the list, with the cursor on the agent already
 // chosen if it is still there.
 func (m Model) handleAgentsLoaded(msg agentsLoadedMsg) (tea.Model, tea.Cmd) {
+	if !m.showAgents {
+		// The scan takes up to three seconds and the user can leave before it
+		// answers. A failure they are no longer waiting for is not worth the
+		// status bar, and a list is not worth installing into a closed
+		// picker.
+		return m, nil
+	}
 	if msg.err != nil {
 		m.showAgents = false
+		if m.agentsAfterSendFailure {
+			// The picker only opened because a send failed. Reporting the
+			// scan through fail would replace that problem, and `!` would
+			// then no longer say why the review did not arrive.
+			m.statusMsg = "could not look for agents"
+			return m, nil
+		}
 		return m.fail("looking for agents", msg.err), nil
 	}
 	m.agents, m.agentsScanned = msg.agents, true
@@ -80,13 +94,24 @@ func (m Model) handleAgentsLoaded(msg agentsLoadedMsg) (tea.Model, tea.Cmd) {
 // that does nothing, so the two are set together.
 func (m Model) confirmAgent() (Model, tea.Cmd) {
 	m.showAgents = false
-	if m.agentCursor >= len(m.agents) {
+	if m.agentCursor < 0 || m.agentCursor >= len(m.agents) {
 		return m, nil
 	}
 	chosen := m.agents[m.agentCursor]
 	m.cfg.TmuxTarget = chosen.Pane
 	m.cfg.FeedbackTarget = "tmux"
+	// Re-resolve, or the choice changes nothing until a restart. m.target is
+	// the object send() uses and it was built once in NewModel, so writing the
+	// config alone left the bar saying "sending to claude" while the review
+	// went to the clipboard.
+	m.target, m.targetErr = feedback.Resolve(feedback.Config{
+		Target:     m.cfg.FeedbackTarget,
+		TmuxTarget: m.cfg.TmuxTarget,
+	})
 	m.statusMsg = "sending to " + chosen.Tool + " in " + chosen.Label()
+	if m.targetErr != nil {
+		return m.fail("choosing an agent", m.targetErr), nil
+	}
 
 	cfg := m.cfg
 	return m, func() tea.Msg { return savePrefDoneMsg{err: config.Save(cfg)} }
@@ -115,7 +140,7 @@ func (m Model) agentClosing() string {
 }
 
 // agentRows is the picker's content.
-func (m Model) agentRows() []string {
+func (m Model) agentRows(room int) []string {
 	width := m.modalWidth() - 2*modalPadding - 2
 	if !m.agentsScanned {
 		return []string{"", " looking for agents…"}
@@ -135,11 +160,25 @@ func (m Model) agentRows() []string {
 		}
 	}
 
-	rows := make([]string, 0, len(m.agents))
-	for i, a := range m.agents {
-		label := "  " + a.Label()
+	// Scrolled, like the file list. Without an offset fitOverlay dropped the
+	// overflow and printed how many rows it had dropped, so pressing j past
+	// the edge left nothing highlighted anywhere and enter then chose an
+	// agent that was not on screen.
+	first := scrollOffset(m.agentCursor, len(m.agents), room)
+	last := min(first+room, len(m.agents))
+
+	rows := make([]string, 0, last-first)
+	for i := first; i < last; i++ {
+		a := m.agents[i]
+		// The pane id disambiguates two agents in one window, which share a
+		// session:window label and usually a directory too.
+		name := a.Label()
+		if m.labelIsAmbiguous(a) {
+			name += " " + a.Pane
+		}
+		label := "  " + name
 		if i == m.agentCursor {
-			label = m.styles.Accent.Render(focusBar) + m.styles.PanelLabelFocus.Render(" "+a.Label())
+			label = m.styles.Accent.Render(focusBar) + m.styles.PanelLabelFocus.Render(" "+name)
 		}
 		if a.Pane == m.cfg.TmuxTarget {
 			label += m.styles.HelpDesc.Render("  ·  in use")
@@ -172,4 +211,34 @@ func (m Model) agentPickerKey(key string) (Model, tea.Cmd) {
 		return m.cancelAgentPicker()
 	}
 	return m, nil
+}
+
+// scrollOffset is the first row to draw so that cursor is among the room rows
+// on screen.
+//
+// The same arithmetic as the file list and the log browser; a third copy is
+// not worth a package, but a third divergence would be.
+func scrollOffset(cursor, total, room int) int {
+	if room <= 0 || total <= room {
+		return 0
+	}
+	first := cursor - room/2
+	if first < 0 {
+		first = 0
+	}
+	if first > total-room {
+		first = total - room
+	}
+	return first
+}
+
+// labelIsAmbiguous reports whether another agent shows the same label.
+func (m Model) labelIsAmbiguous(a feedback.Agent) bool {
+	seen := 0
+	for _, other := range m.agents {
+		if other.Label() == a.Label() {
+			seen++
+		}
+	}
+	return seen > 1
 }

@@ -33,12 +33,12 @@ func TestFindAgents_WalksTheProcessTree(t *testing.T) {
 	}, "\n"))
 
 	panes := parsePanes(strings.Join([]string{
-		"%1\t100\twork\t0\t/home/u/proj",
-		"%2\t200\twork\t1\t/home/u/proj",
-		"%3\t300\twork\t2\t/home/u/proj",
+		"%1\x1f100\x1fwork\x1f0\x1f/home/u/proj",
+		"%2\x1f200\x1fwork\x1f1\x1f/home/u/proj",
+		"%3\x1f300\x1fwork\x1f2\x1f/home/u/proj",
 	}, "\n"))
 
-	got := findAgents(panes, procs)
+	got := findAgents(panes, procs, "")
 	if len(got) != 2 {
 		t.Fatalf("found %d agents, want 2: %+v", len(got), got)
 	}
@@ -176,7 +176,7 @@ func TestAgents_FindsAnAgentInARealTmuxSession(t *testing.T) {
 	t.Cleanup(func() { _ = exec.Command("tmux", "kill-session", "-t", name).Run() })
 	time.Sleep(400 * time.Millisecond) // let the child appear in ps
 
-	found, err := Agents(context.Background())
+	found, err := Agents(context.Background(), "")
 	if err != nil {
 		t.Fatalf("Agents: %v", err)
 	}
@@ -192,4 +192,239 @@ func TestAgents_FindsAnAgentInARealTmuxSession(t *testing.T) {
 		}
 	}
 	t.Errorf("no agent found in session %q; got %+v", name, found)
+}
+
+// The shapes an npm-installed agent actually has.
+//
+// The runner list exists because Claude Code is often `node .../claude` — but
+// the npm package's real forms are `@anthropic-ai/claude-code`, whose basename
+// is claude-code, and `.../claude-code/cli.js`. Both were missed. codex worked
+// only by the accident that its scope is `@openai/codex`, so the basename
+// happened to be the tool name.
+func TestAgentTool_FindsTheNpmInstalledShapes(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ cmd, want string }{
+		{"npx @anthropic-ai/claude-code", "claude"},
+		{"npx -y @anthropic-ai/claude-code", "claude"},
+		{"node /usr/local/lib/node_modules/@anthropic-ai/claude-code/cli.js", "claude"},
+		{"npm exec @anthropic-ai/claude-code", "claude"},
+		{"npx @openai/codex", "codex"},
+		{"claude-code", "claude"},
+		// Still not agents.
+		{"vim claude-code.md", ""},
+		{"grep -r claude-code .", ""},
+		{"npm install @anthropic-ai/claude-code", ""},
+	} {
+		if got := agentTool(tc.cmd); got != tc.want {
+			t.Errorf("agentTool(%q) = %q, want %q", tc.cmd, got, tc.want)
+		}
+	}
+}
+
+// A runner's arguments are read, but not its subcommands: installing an agent
+// is not running one.
+func TestAgentTool_InstallingAnAgentIsNotRunningOne(t *testing.T) {
+	t.Parallel()
+	for _, cmd := range []string{
+		"python3 -m pip install aider",
+		"uv pip install aider",
+		"npm run aider",
+		"npm install -g @anthropic-ai/claude-code",
+		"yarn add opencode",
+		"env vim claude",
+	} {
+		if got := agentTool(cmd); got != "" {
+			t.Errorf("agentTool(%q) = %q, want none", cmd, got)
+		}
+	}
+}
+
+// differ's own pane is never offered. tmuxTarget refuses to send there, and
+// that refusal is not one that reopens the picker — so offering it, and
+// sorting it first, was offering the one choice that can never work.
+func TestFindAgents_NeverOffersDiffersOwnPane(t *testing.T) {
+	t.Parallel()
+	procs := parseProcs("  100     1 claude\n  200     1 claude\n")
+	panes := parsePanes("%1\x1f100\x1fwork\x1f0\x1f/repo\n%2\x1f200\x1fwork\x1f1\x1f/repo\n")
+
+	got := findAgents(panes, procs, "%1")
+	if len(got) != 1 {
+		t.Fatalf("found %d agents, want 1: %+v", len(got), got)
+	}
+	if got[0].Pane == "%1" {
+		t.Error("differ's own pane was offered")
+	}
+}
+
+// Windows sort by index. As strings, 1, 2 and 10 come out 1, 10, 2.
+func TestSortAgents_OrdersWindowsByNumber(t *testing.T) {
+	t.Parallel()
+	agents := []Agent{
+		{Pane: "%c", Session: "s", Window: "10"},
+		{Pane: "%a", Session: "s", Window: "2"},
+		{Pane: "%b", Session: "s", Window: "1"},
+	}
+	SortAgents(agents, "", "")
+	var order []string
+	for _, a := range agents {
+		order = append(order, a.Window)
+	}
+	for i, want := range []string{"1", "2", "10"} {
+		if order[i] != want {
+			t.Fatalf("window order = %v, want [1 2 10]", order)
+		}
+	}
+}
+
+// The npm-installed Claude Code is the shape the runner list exists for, and
+// it was the shape the runner list missed: review round 1 found
+// `npx @anthropic-ai/claude-code` and `node .../claude-code/cli.js` both
+// naming nothing, while `npx -y @openai/codex` worked only because that
+// package's basename happens to be the tool's name.
+func TestAgentTool_FindsTheNpmShapesOfEachAgent(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ command, want string }{
+		{"npx @anthropic-ai/claude-code", "claude"},
+		{"node /usr/local/lib/node_modules/@anthropic-ai/claude-code/cli.js", "claude"},
+		{"npx -y @openai/codex", "codex"},
+		{"node /usr/local/bin/claude", "claude"},
+		{"-zsh", ""},
+		{"python3 -m pip install aider", ""},
+		{"npm run aider", ""},
+		{"env vim claude", ""},
+	} {
+		if got := agentTool(tc.command); got != tc.want {
+			t.Errorf("agentTool(%q) = %q, want %q", tc.command, got, tc.want)
+		}
+	}
+}
+
+// A login shell is `-zsh`, and stripping that leading dash is the whole
+// reason a pane's own shell is recognised as a shell. Nothing named it.
+func TestAgentTool_ALoginShellIsStillThatShell(t *testing.T) {
+	t.Parallel()
+	if got := agentTool("-claude"); got != "claude" {
+		t.Errorf("agentTool(%q) = %q, want claude — the login-shell dash is not part of the name", "-claude", got)
+	}
+}
+
+// ps prints the command in a column, and the column has to be cut by
+// position. Searching for the third field found its first occurrence anywhere
+// in the line, so a command beginning with digits the pid also contains was
+// sliced from the wrong place — and the mangled command named no agent, which
+// silently dropped every process under it.
+func TestParseProcs_CutsTheCommandColumnByPosition(t *testing.T) {
+	t.Parallel()
+	table := parseProcs("51234     1 1234 --foo\n  600   500 claude\n")
+
+	if got := table.command[51234]; got != "1234 --foo" {
+		t.Errorf("command[51234] = %q, want %q", got, "1234 --foo")
+	}
+	if got := table.command[600]; got != "claude" {
+		t.Errorf("command[600] = %q", got)
+	}
+}
+
+// A pane row means what its field positions say, so a short row is not a row
+// to salvage — and the last field, the path, keeps any separator inside it
+// rather than becoming a sixth.
+func TestParsePanes_TakesOnlyWholeRows(t *testing.T) {
+	t.Parallel()
+	got := parsePanes(strings.Join([]string{
+		"%1\x1f100\x1fwork\x1f0\x1f/home/u/proj",
+		"%2\x1f200\x1fwork",
+		"%3\x1f300\x1fwork\x1f2",
+		"",
+	}, "\n"))
+
+	if len(got) != 1 || got[0].id != "%1" {
+		t.Fatalf("parsePanes kept %d rows: %+v", len(got), got)
+	}
+}
+
+// A tmux session name may contain a tab. With a tab separator one there
+// shifted every field after it, so the window index landed in the session and
+// the pid landed in the window — and the pane was silently dropped or
+// mislabelled. The separator is one no name will hold.
+func TestParsePanes_ASeparatorlessTabInANameChangesNothing(t *testing.T) {
+	t.Parallel()
+	got := parsePanes("%1\x1f100\x1fmy\twork\x1f7\x1f/home/u/my proj\n")
+
+	if len(got) != 1 {
+		t.Fatalf("parsePanes kept %d rows", len(got))
+	}
+	if got[0].session != "my\twork" || got[0].window != "7" || got[0].dir != "/home/u/my proj" {
+		t.Errorf("parsed %+v — the tab in the session name moved the other fields", got[0])
+	}
+}
+
+// Discovery has to hand the picker a sorted list. SortAgents was tested on
+// its own and called from one line in the UI: removing that line left an
+// unsorted picker and the suite green, so the ordering is now part of
+// discovery and tested through it.
+func TestDiscover_OrdersWhatItFinds(t *testing.T) {
+	t.Parallel()
+	panes := parsePanes(strings.Join([]string{
+		"%1\x1f100\x1fother\x1f1\x1f/elsewhere",
+		"%2\x1f200\x1fmine\x1f1\x1f/repo",
+		"",
+	}, "\n"))
+	procs := parseProcs("100 1 claude\n200 1 claude\n")
+
+	got := discover(panes, procs, "", "mine", "/repo")
+
+	if len(got) != 2 {
+		t.Fatalf("discover found %d agents: %+v", len(got), got)
+	}
+	if got[0].Pane != "%2" {
+		t.Errorf("the agent in differ's own session should come first, got %q", got[0].Pane)
+	}
+}
+
+// Windows are numbered, and a string compare put 10 before 2.
+func TestSortAgents_OrdersWindowsNumerically(t *testing.T) {
+	t.Parallel()
+	agents := []Agent{
+		{Pane: "%a", Session: "s", Window: "10", Tool: "claude"},
+		{Pane: "%b", Session: "s", Window: "2", Tool: "claude"},
+	}
+	SortAgents(agents, "", "")
+	if agents[0].Window != "2" {
+		t.Errorf("window order = %q then %q, want 2 then 10", agents[0].Window, agents[1].Window)
+	}
+}
+
+// OwnSession is what decides which agents sort first, and it had no test at
+// all: making it always return "" left the suite green.
+func TestOwnSession_IsEmptyOutsideTmux(t *testing.T) {
+	if os.Getenv("TMUX") != "" {
+		t.Skip("running inside tmux; this test is about the outside case")
+	}
+	if got := OwnSession(context.Background()); got != "" {
+		t.Errorf("OwnSession() = %q outside tmux, want empty", got)
+	}
+}
+
+// OwnSession is what makes the agent beside you sort first, and it had no
+// test: making it always return "" left the suite green. Its answer can only
+// come from a real tmux server, so this asks one.
+func TestOwnSession_NamesTheSessionThePaneIsIn(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not installed")
+	}
+	name := "differ-test-own-" + strconv.Itoa(os.Getpid())
+	if err := exec.Command("tmux", "new-session", "-d", "-s", name, "sleep 30").Run(); err != nil {
+		t.Skipf("cannot start a tmux session: %v", err)
+	}
+	defer func() { _ = exec.Command("tmux", "kill-session", "-t", name).Run() }()
+
+	out, err := exec.Command("tmux", "list-panes", "-t", name, "-F", "#{pane_id}").Output()
+	if err != nil {
+		t.Fatalf("list-panes: %v", err)
+	}
+	t.Setenv("TMUX_PANE", strings.TrimSpace(string(out)))
+
+	if got := OwnSession(context.Background()); got != name {
+		t.Errorf("OwnSession() = %q, want %q", got, name)
+	}
 }

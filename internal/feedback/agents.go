@@ -18,7 +18,8 @@ import (
 // every other. With several agents running there was no way to say which, and
 // no way to see which differ would pick.
 //
-// Discovery is two processes for the whole scan, whatever the number of panes:
+// Discovery is three processes for the whole scan, whatever the number of panes
+// (two outside tmux, where there is no own session to ask about):
 // one tmux listing and one ps listing.
 
 // Agent is a tmux pane with a coding agent running in it.
@@ -42,6 +43,29 @@ func (a Agent) Label() string {
 // rather than loosening the match.
 var agentTools = []string{"claude", "codex", "gemini", "copilot", "opencode", "aider"}
 
+// aliases are the other names an agent's executable goes by.
+//
+// An npm-installed Claude Code is `@anthropic-ai/claude-code`, whose basename
+// is claude-code, or `.../claude-code/cli.js`. The runner list was added
+// because "Claude Code is often node .../claude" and then did not cover the
+// shapes the npm package actually has; codex worked only because its scope is
+// `@openai/codex`, so its basename happened to be the tool name.
+var aliases = map[string]string{
+	"claude-code": "claude",
+	"gemini-cli":  "gemini",
+}
+
+// passThrough are subcommands that still lead to the thing being run.
+var passThrough = map[string]bool{"exec": true, "x": true}
+
+// notRunning are the subcommands that do something *to* a package rather than
+// run it. Installing an agent is not running one, and `npm run aider` runs a
+// script that happens to share the name.
+var notRunning = map[string]bool{
+	"install": true, "add": true, "remove": true, "uninstall": true,
+	"update": true, "upgrade": true, "run": true, "pip": true, "test": true,
+}
+
 // runners are the commands that launch something else, and so may name an
 // agent in their arguments rather than being one.
 var runners = map[string]bool{
@@ -51,11 +75,26 @@ var runners = map[string]bool{
 	"sh": true, "bash": true, "zsh": true, "fish": true, "env": true,
 }
 
-// paneFormat is tab-separated because a pane's path can contain spaces.
-var paneFormat = "#{pane_id}\t#{pane_pid}\t#{session_name}\t#{window_index}\t#{pane_current_path}"
+// fieldSep separates the fields of one pane listing.
+//
+// A tab was the obvious choice and the wrong one: a path may contain spaces,
+// but a tmux *session name* may contain a tab, and one there shifted every
+// field after it — `ses<TAB>name` parsed as session `ses`, window `name` and
+// pid where the directory should be. US (0x1f) is a separator no shell will
+// put in a name, and tmux passes it through a format string verbatim.
+const fieldSep = "\x1f"
 
-// Agents lists every pane on the tmux server running a coding agent.
-func Agents(ctx context.Context) ([]Agent, error) {
+var paneFormat = strings.Join([]string{
+	"#{pane_id}", "#{pane_pid}", "#{session_name}",
+	"#{window_index}", "#{pane_current_path}",
+}, fieldSep)
+
+// Agents lists every pane on the tmux server running a coding agent, in the
+// order the picker should offer them.
+//
+// The ordering is done here rather than by the caller: it was, and removing
+// the caller's one line left an unsorted picker and the suite green.
+func Agents(ctx context.Context, repoRoot string) ([]Agent, error) {
 	if _, err := exec.LookPath("tmux"); err != nil {
 		return nil, fmt.Errorf("tmux is not installed — there is nothing to pick from")
 	}
@@ -69,7 +108,19 @@ func Agents(ctx context.Context) ([]Agent, error) {
 	if err != nil {
 		return nil, err
 	}
-	return findAgents(parsePanes(string(panesOut)), parseProcs(string(procsOut))), nil
+	return discover(
+		parsePanes(string(panesOut)), parseProcs(string(procsOut)),
+		os.Getenv("TMUX_PANE"), OwnSession(ctx), repoRoot,
+	), nil
+}
+
+// discover is everything Agents does once the two commands have answered:
+// pair each pane with its agent, then order them. Pure, so the picker's whole
+// input can be tested without a tmux server.
+func discover(panes []pane, procs procTable, self, ownSession, repoRoot string) []Agent {
+	found := findAgents(panes, procs, self)
+	SortAgents(found, ownSession, repoRoot)
+	return found
 }
 
 // pane is one row of the tmux listing.
@@ -84,8 +135,11 @@ type pane struct {
 func parsePanes(out string) []pane {
 	var panes []pane
 	for _, line := range strings.Split(out, "\n") {
-		f := strings.Split(strings.TrimRight(line, "\r"), "\t")
-		if len(f) < 5 {
+		// SplitN, so a separator inside the last field — the path — stays in
+		// it rather than making a sixth. Exactly five: a short row is a row
+		// whose fields do not mean what their positions say.
+		f := strings.SplitN(strings.TrimRight(line, "\r"), fieldSep, 5)
+		if len(f) != 5 {
 			continue
 		}
 		pid, err := strconv.Atoi(strings.TrimSpace(f[1]))
@@ -119,17 +173,43 @@ func parseProcs(out string) procTable {
 			continue
 		}
 		t.children[ppid] = append(t.children[ppid], pid)
-		// The command is everything after the two numbers, kept whole: an
-		// argument can contain spaces and the executable is the first word.
-		t.command[pid] = strings.TrimSpace(line[strings.Index(line, fields[2]):])
+		t.command[pid] = commandColumn(line)
 	}
 	return t
 }
 
+// commandColumn returns everything after the pid and ppid columns, kept whole:
+// an argument can contain spaces and the executable is the first word.
+//
+// Cut by position, not by searching for the third field. strings.Index finds
+// the *first* occurrence anywhere in the line, so a command that begins with
+// digits already present in the pid sliced from the wrong place:
+// "51234     1 1234 --foo" yielded the command "1234     1 1234 --foo", whose
+// first word is then a number, so the process matched no agent and every
+// child of it was lost with it.
+func commandColumn(line string) string {
+	rest := line
+	for range 2 {
+		rest = strings.TrimLeft(rest, " \t")
+		i := strings.IndexAny(rest, " \t")
+		if i < 0 {
+			return ""
+		}
+		rest = rest[i:]
+	}
+	return strings.TrimSpace(rest)
+}
+
 // findAgents pairs each pane with the agent running under it, if any.
-func findAgents(panes []pane, procs procTable) []Agent {
+func findAgents(panes []pane, procs procTable, self string) []Agent {
 	var found []Agent
 	for _, p := range panes {
+		// Never differ's own pane. tmuxTarget refuses to send there, and that
+		// refusal is not one that reopens the picker — so offering it, and
+		// sorting it first, was offering the one choice that can never work.
+		if self != "" && p.id == self {
+			continue
+		}
 		if tool := procs.toolUnder(p.pid); tool != "" {
 			found = append(found, Agent{
 				Pane: p.id, Session: p.session, Window: p.window,
@@ -169,10 +249,8 @@ func agentTool(command string) string {
 		return ""
 	}
 	exe := filepath.Base(strings.TrimPrefix(fields[0], "-"))
-	for _, tool := range agentTools {
-		if exe == tool {
-			return tool
-		}
+	if tool := toolNamed(exe); tool != "" {
+		return tool
 	}
 	// A runner names the agent in its arguments: Claude Code is often
 	// `node /usr/local/bin/claude`. Only runners get their arguments read —
@@ -180,16 +258,35 @@ func agentTool(command string) string {
 	if !runners[exe] {
 		return ""
 	}
+	// The *first* runnable argument, not any of them. Scanning all of them
+	// made `env vim claude` an agent: env is a runner, vim is what it runs,
+	// and claude is a file vim was opening.
 	for _, arg := range fields[1:] {
-		if strings.HasPrefix(arg, "-") {
-			continue
+		switch {
+		case strings.HasPrefix(arg, "-"), strings.Contains(arg, "="):
+			continue // a flag, or env's KEY=VALUE
+		case notRunning[arg]:
+			// This command line is about a package, not a process:
+			// `pip install aider`, `npm run aider`.
+			return ""
+		case passThrough[arg]:
+			continue // `npm exec <pkg>`
 		}
 		base := filepath.Base(arg)
-		for _, tool := range agentTools {
-			if base == tool {
-				return tool
-			}
+		if tool := toolNamed(base); tool != "" {
+			return tool
 		}
+		// `.../claude-code/cli.js` — the entry point is named after node, so
+		// the directory holding it names the agent.
+		if tool := toolNamed(filepath.Base(filepath.Dir(arg))); tool != "" {
+			return tool
+		}
+		if runners[base] {
+			continue // one runner invoking another
+		}
+		// Whatever this is, it is what the runner runs, and it is not an
+		// agent.
+		return ""
 	}
 	return ""
 }
@@ -214,7 +311,9 @@ func SortAgents(agents []Agent, ownSession, repoRoot string) {
 		if agents[i].Session != agents[j].Session {
 			return agents[i].Session < agents[j].Session
 		}
-		return agents[i].Window < agents[j].Window
+		// By number, not by string: windows 1, 2 and 10 sort as 1, 10, 2 the
+		// other way, and the issue asks for the index.
+		return windowIndex(agents[i].Window) < windowIndex(agents[j].Window)
 	})
 }
 
@@ -238,4 +337,24 @@ func OwnSession(ctx context.Context) string {
 		return ""
 	}
 	return strings.TrimSpace(string(out))
+}
+
+// toolNamed maps an executable's own name to the agent it is, or "".
+func toolNamed(name string) string {
+	for _, tool := range agentTools {
+		if name == tool {
+			return tool
+		}
+	}
+	return aliases[name]
+}
+
+// windowIndex reads a tmux window index, or a large number so that anything
+// unparseable sorts last rather than first.
+func windowIndex(s string) int {
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return 1 << 30
+	}
+	return n
 }

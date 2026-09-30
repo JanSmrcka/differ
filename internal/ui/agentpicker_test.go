@@ -2,6 +2,7 @@ package ui
 
 import (
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -263,5 +264,220 @@ func TestAgentPicker_TheBranchListArrivingClosesIt(t *testing.T) {
 	}
 	if strings.Contains(m.View(), "looking for agents") {
 		t.Errorf("the picker is still on screen:\n%s", m.View())
+	}
+}
+
+// Choosing has to change where a send actually goes.
+//
+// confirmAgent wrote m.cfg and saved the file, and nothing re-resolved
+// m.target — the feedback.Target that send() uses, built once in NewModel. So
+// the bar said "sending to claude in differ:2", the config said tmux, and the
+// review went to the clipboard until differ was restarted. The test that was
+// here asserted on m.cfg, which is the proxy, and carried the comment
+// "writing only the pane would be a picker that does nothing" while the
+// picker did nothing.
+func TestAgentPicker_ChoosingChangesWhereASendGoes(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("a.ts", "one\n", "first")
+	tr.Modify("a.ts", "two\n")
+	m := settle(t, liveModel(t, tr), tea.WindowSizeMsg{Width: 120, Height: 30})
+
+	// A default install: no feedback_target, so the live target is the
+	// clipboard.
+	m.cfg.FeedbackTarget = ""
+	m.target, m.targetErr = feedback.Resolve(feedback.Config{})
+	if m.target == nil || m.target.Name() == "tmux" {
+		t.Fatalf("expected a non-tmux target to begin with, got %v", m.target)
+	}
+
+	m, _ = m.openAgentPicker()
+	m = withAgents(t, m, twoAgents()...)
+	m, _ = m.confirmAgent()
+
+	if m.target == nil {
+		t.Fatal("choosing an agent left no target at all")
+	}
+	if m.target.Name() != "tmux" {
+		t.Errorf("a send would still go to %q after choosing a tmux pane", m.target.Name())
+	}
+}
+
+// And a target that cannot be resolved is reported, not silently kept.
+func TestAgentPicker_AnUnresolvableChoiceSaysSo(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("a.ts", "one\n", "first")
+	tr.Modify("a.ts", "two\n")
+	m := settle(t, liveModel(t, tr), tea.WindowSizeMsg{Width: 120, Height: 30})
+	m, _ = m.openAgentPicker()
+	m = withAgents(t, m, twoAgents()...)
+	m, _ = m.confirmAgent()
+
+	// Whatever happened, the model and what it would send agree: either a
+	// working target, or a recorded reason.
+	if m.target == nil && m.targetErr == nil {
+		t.Error("no target and no reason why")
+	}
+}
+
+// The highlighted agent has to be on screen. The list had no offset, so
+// fitOverlay dropped the overflow and printed "… N more" — press j past the
+// edge and nothing is highlighted anywhere, then enter chooses an agent you
+// cannot see. This machine has six agents across four sessions, so a short
+// terminal reaches it today.
+func TestAgentPicker_TheHighlightedAgentIsAlwaysOnScreen(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("a.ts", "one\n", "first")
+	tr.Modify("a.ts", "two\n")
+
+	many := make([]feedback.Agent, 12)
+	for i := range many {
+		many[i] = feedback.Agent{
+			Pane:    "%" + strconv.Itoa(i),
+			Session: "s" + strconv.Itoa(i),
+			Window:  "1",
+			Tool:    "claude",
+			Dir:     "/repo",
+		}
+	}
+
+	for _, h := range []int{14, 20, 24, 30} {
+		m := settle(t, liveModel(t, tr), tea.WindowSizeMsg{Width: 120, Height: h})
+		m, _ = m.openAgentPicker()
+		m = withAgents(t, m, many...)
+
+		for cursor := 0; cursor < len(many); cursor++ {
+			m.agentCursor = cursor
+			view := m.View()
+			want := many[cursor].Session + ":1"
+			if !strings.Contains(view, want) {
+				t.Errorf("h=%d cursor=%d: the highlighted agent %q is not on screen",
+					h, cursor, want)
+				break
+			}
+		}
+	}
+}
+
+// A modal over an overlay is two things asking at once. The picker closes the
+// others on the way up, and dropping that left the suite green.
+func TestAgentPicker_ClosesTheOverlaysItCoversUp(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("a.ts", "one\n", "first")
+	tr.Modify("a.ts", "two\n")
+	base := settle(t, liveModel(t, tr), tea.WindowSizeMsg{Width: 120, Height: 30})
+
+	for _, tc := range []struct {
+		name string
+		open func(Model) Model
+		shut func(Model) bool
+	}{
+		{"help", func(m Model) Model { m.showHelp = true; return m }, func(m Model) bool { return m.showHelp }},
+		{"history", func(m Model) Model { m.showHistory = true; return m }, func(m Model) bool { return m.showHistory }},
+		{"problem", func(m Model) Model { m.showProblem = true; return m }, func(m Model) bool { return m.showProblem }},
+	} {
+		m, _ := tc.open(base).openAgentPicker()
+		if !m.showAgents {
+			t.Fatalf("%s: the picker did not open", tc.name)
+		}
+		if tc.shut(m) {
+			t.Errorf("%s: the picker opened on top of it", tc.name)
+		}
+	}
+}
+
+// The scan takes up to three seconds and the user can leave before it
+// answers. Neither its list nor its failure belongs to a picker that is no
+// longer open — a failure took over the status bar seconds after esc.
+func TestAgentPicker_AScanTheUserLeftIsIgnored(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("a.ts", "one\n", "first")
+	tr.Modify("a.ts", "two\n")
+	m := settle(t, liveModel(t, tr), tea.WindowSizeMsg{Width: 120, Height: 30})
+	m.showAgents = false
+
+	updated, _ := m.Update(agentsLoadedMsg{err: errors.New("tmux list-panes: exit status 1")})
+	after := updated.(Model)
+
+	if after.problem != nil {
+		t.Errorf("a scan nobody is waiting for reported %v", after.problem)
+	}
+	if strings.Contains(after.statusMsg, "agent") {
+		t.Errorf("it took over the status bar: %q", after.statusMsg)
+	}
+	if len(after.agents) != 0 {
+		t.Error("it installed a list into a closed picker")
+	}
+}
+
+// When the picker opened because a send failed, a scan that also fails must
+// not replace the stored problem: `!` would then say why tmux could not be
+// listed and no longer why the review did not arrive.
+func TestAgentPicker_AFailedScanKeepsTheSendFailure(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("a.ts", "one\n", "first")
+	tr.Modify("a.ts", "two\n")
+	m := settle(t, liveModel(t, tr), tea.WindowSizeMsg{Width: 120, Height: 30})
+
+	gone := errors.New(`tmux target "%99" does not match a pane — check tmux_target`)
+	updated, _ := m.Update(feedbackSentMsg{ids: []string{"c1"}, target: "tmux", err: gone})
+	m = updated.(Model)
+	sent := m.problem
+
+	updated, _ = m.Update(agentsLoadedMsg{err: errors.New("tmux list-panes: exit status 1")})
+	m = updated.(Model)
+
+	if m.problem != sent {
+		t.Errorf("the send failure was replaced by the scan's: %v", m.problem)
+	}
+}
+
+// A tmux server that has gone entirely is not a pane that has gone. differ's
+// own wrapper said "is not available" for any display-message failure, so a
+// dead server reopened a picker whose scan then failed for the same reason.
+func TestPaneIsGone_OnlyForTmuxsOwnWordsAboutAPane(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		err  string
+		want bool
+	}{
+		{`tmux target "%4478" does not match a pane — check tmux_target`, true},
+		{`tmux target "%1" is not available: can't find pane: %1`, true},
+		{`tmux target "%1" is not available: no server running on /tmp/tmux-501/default`, false},
+		{`tmux target "%1" is not available: exit status 1`, false},
+		{"pbcopy: exit status 1", false},
+	} {
+		if got := paneIsGone(errors.New(tc.err)); got != tc.want {
+			t.Errorf("paneIsGone(%q) = %v, want %v", tc.err, got, tc.want)
+		}
+	}
+}
+
+// enter on a picker with nothing in it must do nothing rather than index an
+// empty slice. Both ends: a cursor can only be negative through a bug, and
+// this guard is what stands between that bug and a panic inside a tea.Cmd.
+func TestAgentPicker_ConfirmingNothingChangesNothing(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("a.ts", "one\n", "first")
+	tr.Modify("a.ts", "two\n")
+	base := settle(t, liveModel(t, tr), tea.WindowSizeMsg{Width: 120, Height: 30})
+
+	for _, cursor := range []int{-1, 0, 5} {
+		m := base
+		m.showAgents, m.agentsScanned, m.agentCursor = true, true, cursor
+		after, cmd := m.confirmAgent()
+
+		if after.cfg.TmuxTarget != "" || after.cfg.FeedbackTarget != "" {
+			t.Errorf("cursor %d: confirming an empty picker wrote %+v", cursor, after.cfg)
+		}
+		if cmd != nil {
+			t.Errorf("cursor %d: confirming an empty picker saved the config", cursor)
+		}
 	}
 }

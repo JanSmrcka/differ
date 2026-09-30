@@ -230,17 +230,24 @@ func (m Model) renderFooter() string {
 	// that wanted more than one row, and it is a modal now — the commit bar
 	// and the branch-name bar are one line each, so the footer is at most two
 	// with the status row.
-	segment := m.statusSegment()
-
 	var input string
 	switch {
+	case m.commenting && m.height < commentModalMinHeight:
+		// Too short for a box. The footer form needs two rows and is what
+		// this replaced, so it is still here for terminals the modal cannot
+		// serve.
+		input = m.renderCommentBar()
 	case m.mode == modeCommit:
 		input = m.renderCommitBar()
 	case m.mode == modeBranchPicker && m.branchCreating:
 		input = m.renderBranchCreateBar()
 	default:
-		return m.renderHintBar() // already carries the status row
+		return m.renderHintBar() // already carries the status row, and asks
+		// for it itself — computing it above ran the whole thing twice on
+		// every frame of the common path.
 	}
+
+	segment := m.statusSegment()
 
 	// An open input replaces the hints, but not the status: "comment is empty
 	// — esc to cancel" and "ai msg failed" are only reachable here, and the

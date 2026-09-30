@@ -503,7 +503,7 @@ func (m Model) fitInputsToPanels() Model {
 	// widest one, so a textarea left at its old width made the whole frame
 	// that wide — thirty rows of 149 columns in a 120-column terminal.
 	if m.commenting {
-		m.commentInput.SetWidth(max(m.diffWidth()-4, 1))
+		m.commentInput.SetWidth(m.commentEditorWidth())
 	}
 	return m
 }

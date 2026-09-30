@@ -183,6 +183,12 @@ type Model struct {
 	agentsScanned bool
 	agentCursor   int
 
+	// agentsAfterSendFailure records that the picker was opened because a
+	// send failed, so a scan that then fails does not overwrite the stored
+	// problem: the send failure is the one worth reading, and the scan
+	// failure is a consequence of it.
+	agentsAfterSendFailure bool
+
 	// Whether a probe is out, and for how many ticks. tea.Tick does not wait
 	// for the previous one, and git can block rather than fail.
 	probing     bool

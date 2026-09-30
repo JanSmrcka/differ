@@ -74,6 +74,14 @@ func (m Model) renderCommandBar() string {
 	if m.width <= 0 {
 		return ""
 	}
+	// A modal owns the keyboard, so the bar must not advertise keys that
+	// would only type a character into it. With the comment editor open it
+	// was still offering "c comment  C hunk comment  r exit review", every
+	// one of which inserts a letter; with the picker open it offered the
+	// file-list keys, all of which it swallows.
+	if m.showAgents || m.showThemes || m.commenting {
+		return m.renderBar(m.styles.HelpDesc, " "+m.modalKeys())
+	}
 	items := m.barBindings()
 
 	// Help and quit are pinned to the end and never dropped — but only where
@@ -235,4 +243,18 @@ func modeName(mode viewMode) string {
 	default:
 		return "files"
 	}
+}
+
+// modalKeys is what the bar says while a modal is open: the keys that modal
+// answers, and nothing else.
+func (m Model) modalKeys() string {
+	switch {
+	case m.commenting:
+		return commentClosing
+	case m.showAgents:
+		return m.agentClosing()
+	case m.showThemes:
+		return "j/k · enter keeps · esc cancels"
+	}
+	return ""
 }

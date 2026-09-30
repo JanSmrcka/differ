@@ -142,7 +142,12 @@ func (m Model) handleFeedbackSent(msg feedbackSentMsg) (tea.Model, tea.Cmd) {
 		// to make again — so the picker opens rather than leaving the user to
 		// work out that the agent they chose has exited.
 		if paneIsGone(msg.err) {
+			// Keep the failure that caused this. The picker's own scan can
+			// fail too, and letting it through fail() replaced the reason the
+			// review never arrived with a reason about tmux listings.
+			m = m.fail("sending the review", msg.err)
 			mm, cmd := m.openAgentPicker()
+			mm.agentsAfterSendFailure = true
 			return mm, cmd
 		}
 		return m, nil
@@ -211,6 +216,12 @@ func (m Model) filesOf(ids []string) []string {
 // Matched on tmux's wording, the same way the git hints are: tmux has no exit
 // code for it, and an unmatched failure still gets reported — it just does not
 // reopen the picker.
+//
+// Only tmux's wording. "is not available" was in this list and is differ's
+// own wrapper around *any* display-message failure, so a tmux server that had
+// gone away entirely reopened the picker, whose scan then failed for the same
+// reason. resolveTmuxPane now carries tmux's stderr, so the real message —
+// "can't find pane" against "no server running" — is what decides.
 func paneIsGone(err error) bool {
 	if err == nil {
 		return false
@@ -220,7 +231,6 @@ func paneIsGone(err error) bool {
 		"can't find pane",
 		"pane not found",
 		"does not match a pane",
-		"is not available",
 		"no such pane",
 	} {
 		if strings.Contains(text, said) {

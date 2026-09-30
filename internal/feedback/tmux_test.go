@@ -149,3 +149,25 @@ func TestTmuxTarget_ResolvePaneReportsEmptyResultAsInvalid(t *testing.T) {
 		t.Error("an unresolvable target must be an error, not an empty pane id")
 	}
 }
+
+// An explicit pane works from outside tmux; only the default needs a client.
+//
+// "{last}" means "the pane this session last looked at", which has no meaning
+// without a client — but load-buffer and paste-buffer address the tmux
+// *server*, so differ running in a plain terminal can send into a pane in
+// tmux. Refusing that made the agent picker useless from outside tmux: you
+// choose a pane by id and differ replies that it is not in tmux.
+func TestTmuxTarget_AnExplicitPaneDoesNotNeedAClient(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not installed")
+	}
+	t.Setenv("TMUX", "")
+	t.Setenv("TMUX_PANE", "")
+
+	if _, err := newTmuxTarget("%1"); err != nil {
+		t.Errorf("an explicit pane was refused outside tmux: %v", err)
+	}
+	if _, err := newTmuxTarget(""); err == nil {
+		t.Error("the default target was accepted outside tmux, where it means nothing")
+	}
+}
