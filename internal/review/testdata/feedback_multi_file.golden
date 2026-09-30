@@ -1,6 +1,5 @@
 Review feedback: 2 comments
 
-@src/api/client.ts:L10
 File: src/api/client.ts
 Line: 10 (old)
 
@@ -13,7 +12,7 @@ Same problem here.
 
 ---
 
-@src/auth/login.ts:L43
+@src/auth/login.ts :L43
 File: src/auth/login.ts
 Line: 43 (new)
 

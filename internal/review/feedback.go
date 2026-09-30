@@ -65,7 +65,9 @@ func FormatComment(c Comment) string {
 	// Claude Code reads the file from it. The lines below stay because the
 	// hunk is the more useful thing for a review: the agent sees what changed
 	// without going and looking.
-	fmt.Fprintf(&b, "%s\n", Reference(c))
+	if ref := Reference(c); ref != "" {
+		fmt.Fprintf(&b, "%s\n", ref)
+	}
 	fmt.Fprintf(&b, "File: %s\n", c.File)
 	fmt.Fprintf(&b, "%s (%s)\n", lineLabel(c), sideLabel(c.Side))
 
@@ -88,18 +90,29 @@ func lineLabel(c Comment) string {
 	return fmt.Sprintf("Line: %d", c.StartLine)
 }
 
-// Reference locates a comment the way an editor integration expects:
-// "@path:L12", or "@path:L12-L20" for a range.
+// Reference locates a comment the way a CLI agent's @-mention resolver expects:
+// "@path :L12", or "@path :L12-L20" for a range.
 //
-// The line numbers are the comment's own side, so a comment on deleted code
-// references the old file rather than a line that does not exist in the new
-// one. The path is repository-relative, which is what the comment already
-// carries.
+// The space before the colon is load-bearing, not decoration. sidekick.nvim
+// emits exactly this, and its commit d570e1f ("different format that should
+// work for most cli tools") added the space and the L prefix together, because
+// "@path:12" made the resolver read the whole token as a filename, fail to
+// stat it, and attach nothing. Adopting the L without the space lands back on
+// the broken shape.
+//
+// Empty for a comment on deleted code. The reference resolves against the file
+// as it is now, so an old-side line number points at whatever occupies that
+// line today — unrelated code, or nothing at all in a deleted file. Pointing
+// somewhere wrong is worse than not pointing: the File and Line lines below
+// still say where it was, and say "(old)".
 func Reference(c Comment) string {
-	if c.EndLine > c.StartLine {
-		return fmt.Sprintf("@%s:L%d-L%d", c.File, c.StartLine, c.EndLine)
+	if c.Side == SideOld {
+		return ""
 	}
-	return fmt.Sprintf("@%s:L%d", c.File, c.StartLine)
+	if c.EndLine > c.StartLine {
+		return fmt.Sprintf("@%s :L%d-L%d", c.File, c.StartLine, c.EndLine)
+	}
+	return fmt.Sprintf("@%s :L%d", c.File, c.StartLine)
 }
 
 // sideLabel says which version of the file the line numbers refer to, so a

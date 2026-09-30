@@ -269,16 +269,17 @@ letter while the editor is open.
 While the diff is held, `e` opens the file without jumping to a line — the line
 numbers belong to a version that is no longer on disk.
 
-What the agent receives, per comment: a reference in the form an editor
-integration understands, then the hunk the comment is about, then what you
-wrote.
+What the agent receives, per comment: a reference, then the hunk the comment is
+about, then what you wrote.
 
 ```
-@src/session.ts:L9
+@src/session.ts :L9
 File: src/session.ts
 Line: 9 (new)
 
 Changed code:
+ export async function loadSession(path: string) {
+-  const raw = await readFile(path, "utf8");
 +  } catch {
 +    return null;
 
@@ -286,10 +287,23 @@ Comment:
 this drops the error instead of returning it — the caller cannot tell
 ```
 
-The reference is what `sidekick.nvim` and Claude Code's editor integration
-already use, so the agent can jump straight there. The hunk is differ's
-addition: for a review it is more useful for the agent to see what changed
-than to go and read the file.
+The reference is the form `sidekick.nvim` emits, and **the space before the
+colon matters**: its commit `d570e1f` ("different format that should work for
+most cli tools") added the space and the `L` together, because `@path:9` made
+the agent's @-mention resolver read the whole token as a filename and attach
+nothing.
+
+Claude Code's Neovim integration does not use this form at all — it sends
+`at_mentioned` as JSON-RPC over a websocket, with `filePath` and a line range.
+That is a different channel; differ writes text into the agent's terminal.
+
+A comment on deleted code carries no reference. The reference resolves against
+the file as it is now, so an old-side line number would land on whatever
+occupies that line today — the `File:` and `Line: N (old)` lines still say
+where it was.
+
+The hunk is differ's addition: for a review it is more useful for the agent to
+see what changed than to go and read the file.
 
 In the comment editor: `ctrl+s` saves, `esc` cancels. Comments are multiline,
 shown inline under the line they refer to, and marked `pending` until sent.

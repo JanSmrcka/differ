@@ -182,17 +182,12 @@ func TestFormatComment_CarriesAReferenceTheAgentUnderstands(t *testing.T) {
 		{
 			name: "one line on the new side",
 			c:    Comment{File: "src/cache.ts", Side: SideNew, StartLine: 12, EndLine: 12, Body: "x"},
-			want: "@src/cache.ts:L12",
+			want: "@src/cache.ts :L12",
 		},
 		{
 			name: "a range",
 			c:    Comment{File: "src/cache.ts", Side: SideNew, StartLine: 12, EndLine: 20, Body: "x"},
-			want: "@src/cache.ts:L12-L20",
-		},
-		{
-			name: "a deletion references the old side",
-			c:    Comment{File: "src/gone.ts", Side: SideOld, StartLine: 7, EndLine: 7, Body: "x"},
-			want: "@src/gone.ts:L7",
+			want: "@src/cache.ts :L12-L20",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -216,7 +211,7 @@ func TestFormatComment_TheReferenceIsItsOwnLine(t *testing.T) {
 
 	var found bool
 	for _, line := range strings.Split(got, "\n") {
-		if strings.TrimSpace(line) == "@src/cache.ts:L12" {
+		if strings.TrimSpace(line) == "@src/cache.ts :L12" {
 			found = true
 		}
 	}
@@ -228,5 +223,64 @@ func TestFormatComment_TheReferenceIsItsOwnLine(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("the payload lost %q:\n%s", want, got)
 		}
+	}
+}
+
+// The space before the colon is the whole point of the format.
+//
+// sidekick.nvim's commit d570e1f ("different format that should work for most
+// cli tools") added the space and the L prefix together: "@path:12" made the
+// agent's @-mention resolver read the whole token as a filename, fail to stat
+// it, and attach nothing. An earlier version of this code took the L and left
+// the space out, which is the broken shape with extra characters.
+func TestReference_KeepsTheSpaceCliToolsNeed(t *testing.T) {
+	t.Parallel()
+	got := Reference(Comment{File: "src/cache.ts", Side: SideNew, StartLine: 12, EndLine: 12})
+	const want = "@src/cache.ts :L12"
+	if got != want {
+		t.Errorf("Reference = %q, want %q", got, want)
+	}
+	if strings.Contains(got, "ts:L") {
+		t.Errorf("the path is glued to the location: %q", got)
+	}
+}
+
+// A comment on deleted code carries no reference.
+//
+// The reference resolves against the file as it is now, so an old-side line
+// number lands on whatever occupies that line today — unrelated code, or
+// nothing at all in a deleted file. Two comments in one payload, one on a
+// removed line and one on a context line, produced byte-identical references
+// to different things.
+func TestReference_SaysNothingAboutDeletedCode(t *testing.T) {
+	t.Parallel()
+	old := Comment{File: "src/gone.ts", Side: SideOld, StartLine: 7, EndLine: 7, Body: "why?"}
+	if got := Reference(old); got != "" {
+		t.Errorf("Reference for deleted code = %q, want none", got)
+	}
+
+	// The payload still says where it was, and which side.
+	body := FormatComment(old)
+	for _, want := range []string{"File: src/gone.ts", "Line: 7 (old)", "why?"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the payload lost %q:\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, "@src/gone.ts") {
+		t.Errorf("a reference was emitted for deleted code:\n%s", body)
+	}
+}
+
+// StartLine is what a single-line reference reports. Using EndLine passes
+// today only because Session.Add normalises them to be equal.
+func TestReference_ASingleLineReportsItsStartLine(t *testing.T) {
+	t.Parallel()
+	got := Reference(Comment{File: "a.ts", Side: SideNew, StartLine: 5, EndLine: 9})
+	if got != "@a.ts :L5-L9" {
+		t.Errorf("Reference = %q", got)
+	}
+	// And with them equal, the single-line form.
+	if got := Reference(Comment{File: "a.ts", Side: SideNew, StartLine: 5, EndLine: 5}); got != "@a.ts :L5" {
+		t.Errorf("Reference = %q, want @a.ts :L5", got)
 	}
 }

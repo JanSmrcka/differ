@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jansmrcka/differ/internal/git"
 	"github.com/jansmrcka/differ/internal/review"
 	"github.com/jansmrcka/differ/internal/testutil"
 )
@@ -173,5 +174,34 @@ func TestDiffFixtureCoverage_CommentOnEveryFixture(t *testing.T) {
 				t.Error("could not build a comment on this fixture")
 			}
 		})
+	}
+}
+
+// A hunk that only deletes has no new-side range, so the comment has to take
+// the old side. Without that the reference came out as ":L0", which is not a
+// line — and nothing tested it: the reference tests build Comment values by
+// hand, and nothing drove a C hunk comment over a pure deletion.
+func TestHunkComment_APureDeletionTakesTheOldSide(t *testing.T) {
+	t.Parallel()
+	// A hunk that removes three lines and adds none.
+	const raw = "@@ -4,3 +3,0 @@\n-gone one\n-gone two\n-gone three\n"
+	_, th := testStyles()
+	m := newTestModel(t, []fileItem{{change: git.FileChange{Path: "doomed.ts", Status: git.StatusModified}}})
+	m.renderer = NewDiffRenderer(ParseDiff(raw), "doomed.ts", NewStyles(th), th, 80)
+	m.diffCursor = 1 // a removed line
+
+	c, ok := m.buildHunkComment()
+	if !ok {
+		t.Fatal("no hunk comment could be built")
+	}
+	if c.Side != review.SideOld {
+		t.Errorf("side = %v, want old — the hunk has no new-side lines", c.Side)
+	}
+	if c.StartLine < 1 {
+		t.Errorf("StartLine = %d; a line number below 1 is not a line", c.StartLine)
+	}
+	// And so the reference, if any, is not nonsense.
+	if ref := review.Reference(c); strings.Contains(ref, "L0") {
+		t.Errorf("reference points at line zero: %q", ref)
 	}
 }
