@@ -555,6 +555,31 @@ func parseLog(out string) []Commit {
 // It is how "has what is staged changed?" is answered exactly. The line counts
 // from a numstat cannot answer it: staging moves lines between the staged and
 // unstaged halves of the same file without changing their total.
+// WorktreeMatchesIndex reports whether a path's working-tree content is
+// byte-identical to what is staged for it.
+//
+// It is the question "does a line number from the --cached diff also address
+// the file on disk?". `differ commit` and `-s` show the index, so a line
+// reference into it is only safe when the two agree — which is the ordinary
+// case: stage, review, commit, with nothing edited in between.
+//
+// `git diff --quiet` exits 1 when there is a difference and 0 when there is
+// none, so an error that is not an exit status is reported as "cannot say",
+// and the caller degrades rather than guessing.
+func (r *Repo) WorktreeMatchesIndex(path string) (bool, error) {
+	if _, err := r.run("diff", "--no-ext-diff", "--quiet", "--", path); err != nil {
+		var exit *exec.ExitError
+		if errors.As(err, &exit) && exit.ExitCode() == 1 {
+			return false, nil
+		}
+		if strings.Contains(err.Error(), "exit status 1") {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
 func (r *Repo) IndexHashes() (map[string]string, error) {
 	out, err := r.run("ls-files", "--stage", "-z")
 	if err != nil {

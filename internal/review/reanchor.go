@@ -20,6 +20,22 @@ type Location struct {
 	Content string
 }
 
+// Anchored is one file's current diff: where its lines are, and how
+// precisely those line numbers address the file on disk.
+//
+// Locate travels with the locations because reanchoring moves a comment into
+// the coordinate system of whatever diff was just read, and that is not
+// always the one the comment was written in. A file with both staged and
+// unstaged changes is listed twice; walking from one entry to the other
+// re-resolved the comment against the other's line numbers while Locate
+// still said the line resolved, so the agent was handed a `:L3` addressing a
+// line that was at 8 on disk — the exact failure the staged arm of locateFor
+// exists to prevent, arriving by navigation instead.
+type Anchored struct {
+	Locations []Location
+	Locate    Locate
+}
+
 // Reanchor re-resolves one file's comments against the current diff.
 //
 // A comment whose anchor text is still present on the same side follows it,
@@ -32,7 +48,8 @@ type Location struct {
 // land on the same line. Beyond that distance the match is treated as a
 // different block and the comment goes stale: identical text is not evidence
 // that it is the same code.
-func (s *Session) Reanchor(file string, current []Location) {
+func (s *Session) Reanchor(file string, d Anchored) {
+	current := d.Locations
 	claimed := map[int]bool{}
 	for i := range s.comments {
 		c := &s.comments[i]
@@ -55,6 +72,9 @@ func (s *Session) Reanchor(file string, current []Location) {
 			c.StartLine += delta
 			c.EndLine += delta
 		}
+		// The line numbers are now this diff's, so how precisely they address
+		// the file is this diff's answer too.
+		c.Locate = d.Locate
 		s.restore(c)
 	}
 }

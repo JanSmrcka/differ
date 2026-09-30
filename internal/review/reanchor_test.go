@@ -35,7 +35,7 @@ func TestReanchor_FollowsContentWhenLinesShift(t *testing.T) {
 		Anchor: "  return user", Body: "note"})
 
 	// Two lines were inserted above, so the anchor is now at 12.
-	s.Reanchor("a.ts", lines(newLine(9, "other"), newLine(12, "  return user")))
+	s.Reanchor("a.ts", Anchored{Locations: lines(newLine(9, "other"), newLine(12, "  return user")), Locate: LocateLine})
 
 	got := stateOf(t, s, c.ID)
 	if got.State != StatePending {
@@ -50,7 +50,7 @@ func TestReanchor_UnchangedDiffLeavesEverythingAlone(t *testing.T) {
 	s, c := seed(t, Comment{File: "a.ts", Side: SideNew, StartLine: 10, EndLine: 10,
 		Anchor: "  return user", Body: "note"})
 
-	s.Reanchor("a.ts", lines(newLine(10, "  return user")))
+	s.Reanchor("a.ts", Anchored{Locations: lines(newLine(10, "  return user")), Locate: LocateLine})
 
 	got := stateOf(t, s, c.ID)
 	if got.State != StatePending || got.StartLine != 10 {
@@ -63,7 +63,7 @@ func TestReanchor_ModifiedAnchorGoesStale(t *testing.T) {
 	s, c := seed(t, Comment{File: "a.ts", Side: SideNew, StartLine: 10, EndLine: 10,
 		Anchor: "  return user", Body: "note"})
 
-	s.Reanchor("a.ts", lines(newLine(10, "  return await user")))
+	s.Reanchor("a.ts", Anchored{Locations: lines(newLine(10, "  return await user")), Locate: LocateLine})
 
 	if got := stateOf(t, s, c.ID); got.State != StateStale {
 		t.Errorf("State = %v, want stale", got.State)
@@ -74,7 +74,7 @@ func TestReanchor_DeletedAnchorGoesStale(t *testing.T) {
 	s, c := seed(t, Comment{File: "a.ts", Side: SideNew, StartLine: 10, EndLine: 10,
 		Anchor: "  return user", Body: "note"})
 
-	s.Reanchor("a.ts", lines(newLine(10, "something else")))
+	s.Reanchor("a.ts", Anchored{Locations: lines(newLine(10, "something else")), Locate: LocateLine})
 
 	if got := stateOf(t, s, c.ID); got.State != StateStale {
 		t.Errorf("State = %v, want stale", got.State)
@@ -86,7 +86,7 @@ func TestReanchor_NeverAttachesToDifferentContent(t *testing.T) {
 	s, c := seed(t, Comment{File: "a.ts", Side: SideNew, StartLine: 10, EndLine: 10,
 		Anchor: "  return user", Body: "note"})
 
-	s.Reanchor("a.ts", lines(newLine(10, "totally different"), newLine(11, "also different")))
+	s.Reanchor("a.ts", Anchored{Locations: lines(newLine(10, "totally different"), newLine(11, "also different")), Locate: LocateLine})
 
 	got := stateOf(t, s, c.ID)
 	if got.State != StateStale {
@@ -104,7 +104,7 @@ func TestReanchor_AmbiguousAnchorPicksTheNearest(t *testing.T) {
 	s, c := seed(t, Comment{File: "a.ts", Side: SideNew, StartLine: 20, EndLine: 20,
 		Anchor: "}", Body: "note"})
 
-	s.Reanchor("a.ts", lines(newLine(4, "}"), newLine(21, "}"), newLine(60, "}")))
+	s.Reanchor("a.ts", Anchored{Locations: lines(newLine(4, "}"), newLine(21, "}"), newLine(60, "}")), Locate: LocateLine})
 
 	got := stateOf(t, s, c.ID)
 	if got.State != StatePending {
@@ -120,7 +120,7 @@ func TestReanchor_RespectsSide(t *testing.T) {
 		Anchor: "  await persist(data)", Body: "note"})
 
 	// The same text exists, but only on the new side.
-	s.Reanchor("a.ts", lines(newLine(5, "  await persist(data)")))
+	s.Reanchor("a.ts", Anchored{Locations: lines(newLine(5, "  await persist(data)")), Locate: LocateLine})
 
 	if got := stateOf(t, s, c.ID); got.State != StateStale {
 		t.Errorf("State = %v, want stale — the old side no longer has that line", got.State)
@@ -132,10 +132,10 @@ func TestReanchor_OldSideCommentFollowsOldSideLine(t *testing.T) {
 	s, c := seed(t, Comment{File: "a.ts", Side: SideOld, StartLine: 5, EndLine: 5,
 		Anchor: "  await persist(data)", Body: "note"})
 
-	s.Reanchor("a.ts", lines(
+	s.Reanchor("a.ts", Anchored{Locations: lines(
 		newLine(5, "  await persist(data)"), // same text, wrong side
 		oldLine(8, "  await persist(data)"), // the real match
-	))
+	), Locate: LocateLine})
 
 	got := stateOf(t, s, c.ID)
 	if got.State != StatePending {
@@ -151,7 +151,7 @@ func TestReanchor_RangeCommentShiftsWholeSpan(t *testing.T) {
 	s, c := seed(t, Comment{File: "a.ts", Side: SideNew, StartLine: 10, EndLine: 14,
 		Anchor: "func main() {", Body: "note"})
 
-	s.Reanchor("a.ts", lines(newLine(13, "func main() {")))
+	s.Reanchor("a.ts", Anchored{Locations: lines(newLine(13, "func main() {")), Locate: LocateLine})
 
 	got := stateOf(t, s, c.ID)
 	if got.StartLine != 13 || got.EndLine != 17 {
@@ -165,7 +165,7 @@ func TestReanchor_SentCommentKeepsItsState(t *testing.T) {
 		Anchor: "  return user", Body: "note"})
 	s.MarkSent([]string{c.ID})
 
-	s.Reanchor("a.ts", lines(newLine(12, "  return user")))
+	s.Reanchor("a.ts", Anchored{Locations: lines(newLine(12, "  return user")), Locate: LocateLine})
 
 	if got := stateOf(t, s, c.ID); got.State != StateSent {
 		t.Errorf("State = %v, want sent", got.State)
@@ -178,12 +178,12 @@ func TestReanchor_RecoversWhenTheAnchorReappears(t *testing.T) {
 	s, c := seed(t, Comment{File: "a.ts", Side: SideNew, StartLine: 10, EndLine: 10,
 		Anchor: "  return user", Body: "note"})
 
-	s.Reanchor("a.ts", lines(newLine(10, "gone")))
+	s.Reanchor("a.ts", Anchored{Locations: lines(newLine(10, "gone")), Locate: LocateLine})
 	if got := stateOf(t, s, c.ID); got.State != StateStale {
 		t.Fatalf("State = %v, want stale", got.State)
 	}
 
-	s.Reanchor("a.ts", lines(newLine(11, "  return user")))
+	s.Reanchor("a.ts", Anchored{Locations: lines(newLine(11, "  return user")), Locate: LocateLine})
 	got := stateOf(t, s, c.ID)
 	if got.State != StatePending {
 		t.Errorf("State = %v, want pending again", got.State)
@@ -198,8 +198,8 @@ func TestReanchor_RecoveredSentCommentReturnsToSent(t *testing.T) {
 		Anchor: "  return user", Body: "note"})
 	s.MarkSent([]string{c.ID})
 
-	s.Reanchor("a.ts", lines(newLine(10, "gone")))
-	s.Reanchor("a.ts", lines(newLine(10, "  return user")))
+	s.Reanchor("a.ts", Anchored{Locations: lines(newLine(10, "gone")), Locate: LocateLine})
+	s.Reanchor("a.ts", Anchored{Locations: lines(newLine(10, "  return user")), Locate: LocateLine})
 
 	if got := stateOf(t, s, c.ID); got.State != StateSent {
 		t.Errorf("State = %v, want sent", got.State)
@@ -211,7 +211,7 @@ func TestReanchor_OnlyTouchesTheNamedFile(t *testing.T) {
 	a := s.Add(Comment{File: "a.ts", Side: SideNew, StartLine: 1, EndLine: 1, Anchor: "x", Body: "a"})
 	b := s.Add(Comment{File: "b.ts", Side: SideNew, StartLine: 1, EndLine: 1, Anchor: "y", Body: "b"})
 
-	s.Reanchor("a.ts", lines(newLine(1, "x")))
+	s.Reanchor("a.ts", Anchored{Locations: lines(newLine(1, "x")), Locate: LocateLine})
 
 	if got := stateOf(t, s, b.ID); got.State != StatePending {
 		t.Errorf("b.ts comment State = %v — Reanchor touched another file", got.State)
@@ -226,7 +226,7 @@ func TestReanchor_OnlyTouchesTheNamedFile(t *testing.T) {
 func TestReanchor_EmptyAnchorIsLeftAlone(t *testing.T) {
 	s, c := seed(t, Comment{File: "a.ts", Side: SideNew, StartLine: 3, EndLine: 3, Body: "note"})
 
-	s.Reanchor("a.ts", lines(newLine(1, "x")))
+	s.Reanchor("a.ts", Anchored{Locations: lines(newLine(1, "x")), Locate: LocateLine})
 
 	got := stateOf(t, s, c.ID)
 	if got.State != StatePending || got.StartLine != 3 {
@@ -255,7 +255,7 @@ func TestStaleReason_ExplainsWhy(t *testing.T) {
 	s, c := seed(t, Comment{File: "a.ts", Side: SideNew, StartLine: 10, EndLine: 10,
 		Anchor: "  return user", Body: "note"})
 
-	s.Reanchor("a.ts", lines(newLine(10, "changed")))
+	s.Reanchor("a.ts", Anchored{Locations: lines(newLine(10, "changed")), Locate: LocateLine})
 
 	got := stateOf(t, s, c.ID)
 	if got.StaleReason == "" {
@@ -268,7 +268,7 @@ func TestStaleCount(t *testing.T) {
 	s.Add(Comment{File: "a.ts", Side: SideNew, StartLine: 1, EndLine: 1, Anchor: "x", Body: "a"})
 	s.Add(Comment{File: "a.ts", Side: SideNew, StartLine: 2, EndLine: 2, Anchor: "y", Body: "b"})
 
-	s.Reanchor("a.ts", lines(newLine(1, "x")))
+	s.Reanchor("a.ts", Anchored{Locations: lines(newLine(1, "x")), Locate: LocateLine})
 
 	if got := s.StaleCount(); got != 1 {
 		t.Errorf("StaleCount = %d, want 1", got)

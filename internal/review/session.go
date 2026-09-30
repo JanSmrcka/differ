@@ -46,6 +46,42 @@ const (
 )
 
 // Comment is one piece of review feedback about a range of lines in a file.
+// Locate says how precisely a comment can point at the file as it is now.
+//
+// The question is not which side of the diff the comment is on, which was the
+// first answer and the wrong one. It is whether the line number resolves
+// against the file on disk:
+//
+//   - Under -s and `differ commit` the diff's *new* side is the index, not the
+//     working tree. Staging a change and then editing above it puts the code
+//     eight lines down while the diff still says three, so a new-side
+//     reference lands on unrelated code — the very failure that dropping
+//     old-side references was meant to avoid.
+//   - An old-side line number describes the file before the change, so it
+//     never resolves. But the file itself usually still exists, and
+//     sidekick.nvim emits a bare "@path" with no location for exactly that.
+//     Attaching the file and losing the line beats attaching nothing.
+//   - A file that has been deleted, or has left the changeset, has nothing to
+//     point at.
+type Locate int
+
+const (
+	// LocateUnknown is the zero value, and deliberately not LocateLine.
+	//
+	// A Comment built without setting this — a fixture, or one decoded from a
+	// stored review written before the field existed — would otherwise claim
+	// its line resolves, which is the one thing that must not be assumed. It
+	// degrades to the file, so an unset value costs a line number rather than
+	// pointing at the wrong one.
+	LocateUnknown Locate = iota
+	// LocateLine: the path and the line both address the file on disk.
+	LocateLine
+	// LocateFile: the file is there, the line numbers are not the worktree's.
+	LocateFile
+	// LocateNone: there is nothing on disk to point at.
+	LocateNone
+)
+
 type Comment struct {
 	ID   string
 	File string
@@ -76,6 +112,10 @@ type Comment struct {
 	// StaleReason says why a comment no longer matches the diff, so the user
 	// can judge whether to re-create or discard it.
 	StaleReason string
+	// Locate says how precisely the agent can be pointed at this comment.
+	// Set where the comment is built, because only there is it known whether
+	// the line numbers address the working tree.
+	Locate Locate
 
 	// seq is the creation order, used to break ties between comments on the
 	// same line. IDs are strings ("c9", "c10"), so comparing them would order

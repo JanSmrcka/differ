@@ -114,7 +114,7 @@ type commitDoneMsg struct{ err error }
 // reanchorMsg carries each commented file's current line positions, so
 // comments on files that are not on screen can be re-resolved too.
 type reanchorMsg struct {
-	locations map[string][]review.Location
+	locations map[string]review.Anchored
 }
 
 // feedbackSentMsg reports the outcome of a delivery attempt. ids names the
