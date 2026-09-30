@@ -103,6 +103,12 @@ func TestTmuxTarget_RefusesToSendToItself(t *testing.T) {
 }
 
 func TestTmuxTarget_DefaultTargetIsTheLastActivePane(t *testing.T) {
+	// Both conditions. Guarding on $TMUX alone meant that with tmux off PATH
+	// but the variable still set — a stripped container, a binary moved — this
+	// failed where every other tmux test skipped.
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not installed")
+	}
 	if os.Getenv("TMUX") == "" {
 		t.Skip("not running inside tmux")
 	}

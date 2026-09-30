@@ -3,6 +3,7 @@ package git
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/jansmrcka/differ/internal/testutil"
@@ -623,4 +624,84 @@ func TestPushSetUpstream(t *testing.T) {
 	if info.Upstream == "" {
 		t.Error("upstream should be configured after PushSetUpstream")
 	}
+}
+
+// Push and Pull had no test anywhere, which the release checklist claimed
+// otherwise about. They are the two operations where an untested path costs the
+// most: both talk to a remote, and both are bound to a single keystroke.
+func TestPush_SendsCommitsToTheRemote(t *testing.T) {
+	t.Parallel()
+	bare := testutil.NewBareRepo(t)
+	repo := setupTestRepo(t)
+	addCommit(t, repo, "f.txt", "v1", "init")
+	gitRun(t, repo.Dir(), "remote", "add", "origin", bare)
+	if err := repo.PushSetUpstream("origin", "master"); err != nil {
+		t.Fatal(err)
+	}
+
+	addCommit(t, repo, "f.txt", "v2", "second")
+	if info := repo.UpstreamStatus(); info.Ahead != 1 {
+		t.Fatalf("expected to be 1 ahead before pushing, got %d", info.Ahead)
+	}
+
+	if err := repo.Push(); err != nil {
+		t.Fatalf("Push: %v", err)
+	}
+	if info := repo.UpstreamStatus(); info.Ahead != 0 {
+		t.Errorf("still %d ahead after Push", info.Ahead)
+	}
+}
+
+// A push with nowhere to go has to say so in git's words, not "exit status 1".
+func TestPush_WithoutAnUpstreamReportsWhy(t *testing.T) {
+	t.Parallel()
+	repo := setupTestRepo(t)
+	addCommit(t, repo, "f.txt", "v1", "init")
+
+	err := repo.Push()
+	if err == nil {
+		t.Fatal("pushing with no remote succeeded")
+	}
+	if strings.Contains(err.Error(), "exit status") {
+		t.Errorf("the error is an exit code rather than git's words: %v", err)
+	}
+}
+
+func TestPull_BringsCommitsDownFromTheRemote(t *testing.T) {
+	t.Parallel()
+	bare := testutil.NewBareRepo(t)
+
+	// One clone pushes a commit; the other has to see it after Pull.
+	author := setupTestRepo(t)
+	addCommit(t, author, "f.txt", "v1", "init")
+	gitRun(t, author.Dir(), "remote", "add", "origin", bare)
+	if err := author.PushSetUpstream("origin", "master"); err != nil {
+		t.Fatal(err)
+	}
+
+	reader := setupTestRepo(t)
+	gitRun(t, reader.Dir(), "remote", "add", "origin", bare)
+	gitRun(t, reader.Dir(), "fetch", "origin")
+	gitRun(t, reader.Dir(), "checkout", "-B", "master", "origin/master")
+
+	addCommit(t, author, "f.txt", "v2", "second from the other clone")
+	if err := author.Push(); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := reader.Pull(); err != nil {
+		t.Fatalf("Pull: %v", err)
+	}
+	if got := readFileIn(t, reader, "f.txt"); got != "v2" {
+		t.Errorf("after Pull the file reads %q, want %q", got, "v2")
+	}
+}
+
+func readFileIn(t *testing.T, repo *Repo, name string) string {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(repo.Dir(), name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(raw)
 }

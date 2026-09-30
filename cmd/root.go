@@ -61,8 +61,11 @@ line and send the result to a coding agent.`,
   differ review -s       # review the staged changes
   differ log             # browse recent commits
   differ commit          # review what is staged, then commit`,
-	Version: version,
-	RunE:    runDiff,
+	// Version is assigned in init, not here: this literal is evaluated when
+	// the package variable is initialised, which is before init runs — so the
+	// build-info fallback below never reached Cobra and `go install …@latest`
+	// reported "dev" forever.
+	RunE: runDiff,
 }
 
 var reviewCmd = &cobra.Command{
@@ -96,11 +99,8 @@ var commitCmd = &cobra.Command{
 }
 
 func init() {
-	if version == "dev" {
-		if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
-			version = info.Main.Version
-		}
-	}
+	info, ok := debug.ReadBuildInfo()
+	setVersion(resolveVersion(version, info, ok))
 
 	// Usage belongs to a bad command line, not to a repository that turned
 	// out to have no such ref: printing it over a runtime failure buries the
@@ -316,4 +316,27 @@ func runLog(cmd *cobra.Command, args []string) error {
 	p := tea.NewProgram(model, tea.WithAltScreen())
 	_, err = p.Run()
 	return err
+}
+
+// resolveVersion picks what --version reports.
+//
+// ldflags win: a release build is told exactly what it is. Otherwise the
+// module version the binary was built from, which is what `go install
+// github.com/jansmrcka/differ@latest` leaves behind. "(devel)" means a local
+// build of an untagged tree, which is less informative than "dev".
+func resolveVersion(ldflags string, info *debug.BuildInfo, ok bool) string {
+	if ldflags != "dev" {
+		return ldflags
+	}
+	if ok && info != nil && info.Main.Version != "" && info.Main.Version != "(devel)" {
+		return info.Main.Version
+	}
+	return ldflags
+}
+
+// setVersion keeps the package variable and what Cobra prints in step. They
+// were set in two places, one of which ran first and won.
+func setVersion(v string) {
+	version = v
+	rootCmd.Version = v
 }
