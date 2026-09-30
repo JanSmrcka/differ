@@ -35,6 +35,11 @@ type LogModel struct {
 	tabWidth int
 	commits  []git.Commit
 	cursor   int
+	// offset is the first commit drawn. Without it viewList drew
+	// commits[:contentHeight] while the cursor could reach the hundredth, so
+	// in a short terminal G selected a row nobody could see and enter opened a
+	// commit whose hash appeared nowhere on screen.
+	offset   int
 	mode     logMode
 	viewport viewport.Model
 	width    int
@@ -242,14 +247,39 @@ func (m LogModel) renderHeader() string {
 }
 
 func (m LogModel) viewList() string {
+	m = m.clampLogScroll()
 	var rows []string
-	for i, c := range m.commits {
-		if i >= m.contentHeight() {
-			break
-		}
-		rows = append(rows, m.renderCommitLine(c, i == m.cursor))
+	end := min(m.offset+m.contentHeight(), len(m.commits))
+	for i := m.offset; i < end; i++ {
+		rows = append(rows, m.renderCommitLine(m.commits[i], i == m.cursor))
 	}
 	return m.frame(strings.Join(rows, "\n"))
+}
+
+// clampLogScroll keeps the cursor inside the drawn window, and the window
+// inside the list.
+//
+// The same arithmetic as clampFileScroll, for the same reason: a list longer
+// than the panel needs somewhere to say which part of it is on screen.
+func (m LogModel) clampLogScroll() LogModel {
+	h := m.contentHeight()
+	if h <= 0 || len(m.commits) == 0 {
+		m.offset = 0
+		return m
+	}
+	if m.cursor < m.offset {
+		m.offset = m.cursor
+	}
+	if m.cursor >= m.offset+h {
+		m.offset = m.cursor - h + 1
+	}
+	if max := len(m.commits) - h; m.offset > max {
+		m.offset = max
+	}
+	if m.offset < 0 {
+		m.offset = 0
+	}
+	return m
 }
 
 func (m LogModel) renderCommitLine(c git.Commit, selected bool) string {
@@ -257,9 +287,14 @@ func (m LogModel) renderCommitLine(c git.Commit, selected bool) string {
 	date := m.styles.HelpDesc.Render(c.Date)
 	line := fmt.Sprintf("%s  %s  %s", hash, c.Subject, date)
 	if selected {
-		return m.styles.FileSelected.Width(m.width).Render(line)
+		// The same marker the changed-file list and the diff use. Bold and a
+		// foreground were the only difference before, so stripped of colour
+		// the selected row was byte-identical to the others — and the one
+		// column of padding on FileSelected made the list jitter as the cursor
+		// moved, because the unselected rows had none.
+		return m.styles.FileSelected.Width(m.width).Render(cursorMarker + line)
 	}
-	return lipgloss.NewStyle().Width(m.width).Render(line)
+	return lipgloss.NewStyle().Width(m.width).Render(" " + line)
 }
 
 func (m LogModel) viewDiff() string {

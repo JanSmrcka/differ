@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -682,9 +683,10 @@ func TestNotify_TheNoticeIsOnlyOfferedWhereItWorks(t *testing.T) {
 	}
 }
 
-// What just happened comes after the notice: the notice says the screen is not
-// showing the repository, and every other word in that row describes the
-// screen.
+// An ordinary status message comes after the notice — the notice says the
+// screen is not showing the repository, and everything else in that row
+// describes the screen. A *failure* is the exception and goes first; see
+// TestNotify_AFailureIsNotCrowdedOutByTheNotice.
 func TestNotify_TheNoticeComesFirstInTheBar(t *testing.T) {
 	t.Parallel()
 	tr := testutil.NewRepo(t)
@@ -1128,7 +1130,7 @@ func TestNotify_ANilKeyMapIsNotAdopted(t *testing.T) {
 		t.Fatal("no keys to begin with")
 	}
 
-	m = m.noteChangedFiles(nil)
+	m = m.noteChangedFiles(nil, false)
 	if len(m.fileKeys) != len(before) {
 		t.Errorf("a nil key map replaced %d keys with %d", len(before), len(m.fileKeys))
 	}
@@ -1366,5 +1368,274 @@ func TestView_TheHeaderFollowsABranchChange(t *testing.T) {
 	m = settle(t, m, branchCreatedMsg{name: "fresh"})
 	if got := m.branchName(); got != "fresh" {
 		t.Errorf("after a create the header says %q, want %q", got, "fresh")
+	}
+}
+
+// A diff load must be matched to the file it was read for, not to an index
+// into a list that the next refresh replaces.
+//
+// diffLoadedMsg carried only index, so: reviewer on b.ts with a pending
+// comment, presses n (cursor 0→1, load for c.ts in flight), a refresh lands
+// carrying a newly-modified a.ts which sorts first. The cursor stays at 1,
+// which is now b.ts, and the in-flight load arrives with index == cursor and
+// is installed — so the panel shows c.ts's diff labelled b.ts, b.ts's comments
+// are drawn on c.ts's rows, and Reanchor runs b.ts's comments against c.ts's
+// parse and marks a perfectly valid one stale.
+func TestNotify_ALoadIsMatchedToItsFileNotItsIndex(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	for _, n := range []string{"b.ts", "c.ts", "d.ts"} {
+		tr.CommitFile(n, "one\ntwo\n", "add "+n)
+	}
+	tr.CommitFile("a.ts", "one\ntwo\n", "add a")
+	for _, n := range []string{"b.ts", "c.ts", "d.ts"} {
+		tr.Modify(n, "one\n"+strings.ToUpper(n)+" CHANGED\n")
+	}
+
+	m := reviewing(t, tr)
+	for m.currentFilePath() != "b.ts" {
+		updated, _ := m.updateReviewMode(key("n"))
+		mm := updated.(Model)
+		if mm.currentFilePath() == m.currentFilePath() {
+			t.Fatal("could not reach b.ts")
+		}
+		m = settle(t, mm, nil)
+		m = settle(t, m, m.loadDiffCmd(true)())
+	}
+	m = m.cursorTo(t, "B.TS CHANGED")
+	updated, _ := m.startComment()
+	m = updated.(Model)
+	m.commentInput.SetValue("a comment about b.ts")
+	updated, _ = m.saveComment()
+	m = updated.(Model)
+	if m.session.StaleCount() != 0 {
+		t.Fatal("the comment is stale already")
+	}
+
+	t.Logf("after saving: stale=%d cursor=%d path=%q renderer=%q",
+		m.session.StaleCount(), m.cursor, m.currentFilePath(), m.rendererPath)
+
+	// n, keeping the load in flight.
+	updated, nav := m.updateReviewMode(key("n"))
+	m = updated.(Model)
+	pending := cmdMsg(nav)
+	t.Logf("after n:  stale=%d cursor=%d path=%q renderer=%q",
+		m.session.StaleCount(), m.cursor, m.currentFilePath(), m.rendererPath)
+
+	// a.ts joins the changeset and sorts before everything.
+	tr.Modify("a.ts", "one\nA CHANGED\n")
+	updated, _ = m.Update(m.refreshFilesCmd()())
+	m = updated.(Model)
+	t.Logf("after refresh: stale=%d cursor=%d path=%q renderer=%q",
+		m.session.StaleCount(), m.cursor, m.currentFilePath(), m.rendererPath)
+
+	// The in-flight load lands.
+	updated, _ = m.Update(pending)
+	m = updated.(Model)
+
+	if m.rendererPath != m.currentFilePath() {
+		t.Errorf("the panel shows %q while the list highlights %q",
+			m.rendererPath, m.currentFilePath())
+	}
+	if m.session.StaleCount() != 0 {
+		t.Errorf("a valid comment on b.ts was marked stale: %d stale",
+			m.session.StaleCount())
+	}
+}
+
+// The count must not lie about the file the reviewer is on.
+//
+// noteChangedFiles excluded the cursor's path, on the reasoning that "whatever
+// arrives for it is what the user is looking at, so it cannot be out of date
+// to its own reader". #46 made that false: the diff is held, so the file on
+// screen *is* out of date to its reader — and nothing marked it. Read a file,
+// have the agent rewrite it, move on without reloading, and it still counted
+// as reviewed.
+func TestNotify_TheFileOnScreenIsMarkedChangedWhenItIsHeld(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("a.ts", "one\ntwo\n", "first")
+	tr.CommitFile("b.ts", "one\ntwo\n", "second")
+	tr.Modify("a.ts", "one\nCHANGED\n")
+	tr.Modify("b.ts", "one\nOTHER\n")
+
+	m := reviewing(t, tr)
+	read := m.currentFilePath()
+	before := m.reviewProgress()
+	if before.Reviewed == 0 {
+		t.Fatal("the file on screen does not count as read to begin with")
+	}
+
+	// The agent rewrites the file being read. The diff is held.
+	tr.Modify(read, "one\nREWRITTEN\nAND LONGER\n")
+	m = settle(t, m, m.refreshFilesCmd()())
+	if !m.diffStale() {
+		t.Fatal("the diff was not held, so this is not the case under test")
+	}
+
+	after := m.reviewProgress()
+	if after.Changed == 0 {
+		t.Errorf("the file was rewritten under the reviewer and nothing marked it: "+
+			"%d/%d reviewed, %d changed", after.Reviewed, after.Total, after.Changed)
+	}
+	if after.Reviewed >= before.Reviewed {
+		t.Errorf("the ratio did not move: %d/%d before, %d/%d after",
+			before.Reviewed, before.Total, after.Reviewed, after.Total)
+	}
+}
+
+// And leaving the file without reloading must not launder the signal away.
+func TestNotify_MovingOnDoesNotClearAnUnreloadedChange(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("a.ts", "one\ntwo\n", "first")
+	tr.CommitFile("b.ts", "one\ntwo\n", "second")
+	tr.Modify("a.ts", "one\nCHANGED\n")
+	tr.Modify("b.ts", "one\nOTHER\n")
+
+	m := reviewing(t, tr)
+	read := m.currentFilePath()
+	tr.Modify(read, "one\nREWRITTEN\nAND LONGER\n")
+	m = settle(t, m, m.refreshFilesCmd()())
+
+	// n, without pressing R.
+	m = settle(t, m, key("n"))
+	if m.currentFilePath() == read {
+		t.Fatal("n did not move off the file")
+	}
+
+	if got := m.session.ChangedSinceViewed(read); !got {
+		t.Errorf("%q was rewritten unread and moving on cleared the mark", read)
+	}
+}
+
+// The bar must not offer a key that does nothing where it is shown.
+//
+// `!` is answered outside the typing guard, so in the branch picker, the
+// branch-name input, the commit input and the comment editor it goes into the
+// text field. A duplicate-branch failure was telling the user to press it
+// while it typed an exclamation mark into the filter.
+func TestProblem_DetailsAreOnlyOfferedWhereTheKeyWorks(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("src.ts", "one\n", "first")
+	tr.Modify("src.ts", "two\n")
+	base := settle(t, liveModel(t, tr), tea.WindowSizeMsg{Width: 120, Height: 30})
+
+	boom := errors.New("fatal: a branch named 'x' already exists")
+
+	for _, tc := range []struct {
+		name   string
+		typing bool
+		set    func(m Model) Model
+	}{
+		{"file list", false, func(m Model) Model { m.mode = modeFileList; return m }},
+		{"diff", false, func(m Model) Model { m.mode = modeDiff; return m }},
+		{"branch picker", true, func(m Model) Model { m.mode = modeBranchPicker; return m }},
+		{"branch create", true, func(m Model) Model {
+			m.mode = modeBranchPicker
+			m.branchCreating = true
+			return m
+		}},
+		{"commit input", true, func(m Model) Model { m.mode = modeCommit; return m }},
+		{"comment editor", true, func(m Model) Model { m.commenting = true; return m }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			m := tc.set(base)
+			m = m.fail("creating the branch", boom)
+			if m.problem == nil {
+				t.Fatal("the failure was not retained")
+			}
+			offered := strings.Contains(m.statusMsg, "! details")
+			if offered == tc.typing {
+				t.Errorf("typing=%v but the bar %s offer ! details: %q",
+					tc.typing, map[bool]string{true: "does", false: "does not"}[offered], m.statusMsg)
+			}
+		})
+	}
+}
+
+// Toggling split view must not swap a held diff either. handleResize and
+// applyTheme both re-render for this reason; v did a full re-read from disk
+// and took the notice with it.
+func TestNotify_SplitToggleDoesNotSwapAHeldDiff(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("src.ts", "one\ntwo\n", "first")
+	tr.Modify("src.ts", "one\nCHANGED\n")
+
+	m := reviewing(t, tr)
+	tr.Modify("src.ts", "one\nREWRITTEN\n")
+	m = settle(t, m, m.refreshFilesCmd()())
+	if !m.diffStale() {
+		t.Fatal("the diff was not held")
+	}
+
+	updated, cmd := m.updateDiffMode(key("v"))
+	m = settle(t, updated.(Model), cmdMsg(cmd))
+
+	if got := m.renderer.Content(m.diffCursor); strings.Contains(got, "REWRITTEN") {
+		t.Errorf("v swapped the held diff:\n%s", got)
+	}
+	if !m.diffStale() {
+		t.Error("v cleared the notice without the reviewer seeing what moved")
+	}
+}
+
+// Editor failures go through fail, like everything else. They were assigned to
+// statusMsg raw, so a tmux error — which internal/editor appends stderr to on
+// purpose — arrived in the one-line bar verbatim and `!` said nothing had gone
+// wrong.
+func TestProblem_EditorFailuresGoThroughFail(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("src.ts", "one\n", "first")
+	tr.Modify("src.ts", "two\n")
+	m := settle(t, liveModel(t, tr), tea.WindowSizeMsg{Width: 120, Height: 30})
+
+	raw := errors.New("tmux list-panes -a -F #{pane_id}: exit status 1:\nno server running\non /tmp/tmux-501/default")
+	updated, _ := m.Update(editorPlanMsg{err: raw})
+	m = updated.(Model)
+
+	if m.problem == nil {
+		t.Fatal("the failure was not retained, so ! would say nothing went wrong")
+	}
+	if strings.Contains(m.statusMsg, "\n") {
+		t.Errorf("a multi-line error went into the one-line bar: %q", m.statusMsg)
+	}
+	if !strings.Contains(m.statusMsg, "editor") {
+		t.Errorf("the bar does not say what differ was doing: %q", m.statusMsg)
+	}
+}
+
+// A failure must survive the notice. The notice is up to 56 columns and was
+// placed ahead of statusMsg, then the joined row was cut to the terminal — so
+// at eighty columns a failed send lost its "! details" and below seventy-two
+// it was invisible. A failure is the one thing in this row that has to be
+// acted on.
+func TestNotify_AFailureIsNotCrowdedOutByTheNotice(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("src.ts", "one\ntwo\nthree\n", "first")
+	tr.Modify("src.ts", "one\nCHANGED\nthree\n")
+
+	for i, width := range []int{40, 50, 60, 72, 80, 100, 120} {
+		m := reviewing(t, tr)
+		m = settle(t, m, tea.WindowSizeMsg{Width: width, Height: 30})
+		// Different content each time: the repository is shared across the
+		// loop, so rewriting it to the same thing twice leaves the second
+		// iteration with nothing to notice.
+		tr.Modify("src.ts", "one\nREWRITTEN "+strings.Repeat("x", i+1)+"\nAND MORE\nthree\n")
+		m = settle(t, m, m.refreshFilesCmd()())
+		if !m.diffStale() {
+			t.Fatalf("%d: the diff was not held", width)
+		}
+		m = m.fail("sending", errors.New("tmux: no server running"))
+
+		segment := m.statusSegment()
+		if !strings.Contains(segment, "sending failed") {
+			t.Errorf("%d cols: the failure is not in the bar: %q", width, segment)
+		}
 	}
 }

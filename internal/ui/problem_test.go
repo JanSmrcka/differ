@@ -37,11 +37,11 @@ func TestProblem_AGitFailureIsConciseAndSaysWhatToDo(t *testing.T) {
 	if p.hint == "" {
 		t.Error("no hint about what to do")
 	}
-	if strings.Contains(p.line(), "\n") {
-		t.Errorf("the status line is multi-line:\n%s", p.line())
+	if strings.Contains(p.line(true), "\n") {
+		t.Errorf("the status line is multi-line:\n%s", p.line(true))
 	}
-	if strings.Contains(p.line(), "index.lock") {
-		t.Errorf("git's own words leaked into the status line: %q", p.line())
+	if strings.Contains(p.line(true), "index.lock") {
+		t.Errorf("git's own words leaked into the status line: %q", p.line(true))
 	}
 	// But they are kept, because sometimes they are the only useful thing.
 	if !strings.Contains(p.detail, "index.lock") {
@@ -114,8 +114,8 @@ func TestProblem_AnUnknownFailureIsStillOneLine(t *testing.T) {
 	t.Parallel()
 	p := describe("commit", errors.New("something nobody anticipated\nacross two lines"))
 
-	if strings.Contains(p.line(), "\n") {
-		t.Errorf("the status line is multi-line: %q", p.line())
+	if strings.Contains(p.line(true), "\n") {
+		t.Errorf("the status line is multi-line: %q", p.line(true))
 	}
 	if !strings.Contains(p.detail, "two lines") {
 		t.Error("the full text was not kept")
@@ -527,7 +527,7 @@ func TestProblem_ALongFallbackHintIsCapped(t *testing.T) {
 // otherwise free.
 func TestProblem_TheAffordanceComesBeforeTheHint(t *testing.T) {
 	t.Parallel()
-	line := describe("push", errors.New("fatal: Could not read from remote repository.")).line()
+	line := describe("push", errors.New("fatal: Could not read from remote repository.")).line(true)
 	bang, hint := strings.Index(line, "!"), strings.Index(line, "access to the remote")
 	if bang < 0 || hint < 0 {
 		t.Fatalf("line is missing the affordance or the hint: %q", line)

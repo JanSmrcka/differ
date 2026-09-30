@@ -268,6 +268,7 @@ func (m Model) loadDiffCmd(resetScroll bool) tea.Cmd {
 			return diffLoadedMsg{
 				errContent:  styles.DiffHunkHeader.Render("Error: " + err.Error()),
 				index:       idx,
+				path:        filename,
 				resetScroll: resetScroll,
 				themeGen:    gen,
 			}
@@ -294,6 +295,7 @@ func (m Model) loadDiffCmd(resetScroll bool) tea.Cmd {
 		return diffLoadedMsg{
 			renderer:    r,
 			index:       idx,
+			path:        filename,
 			resetScroll: resetScroll,
 			themeGen:    gen,
 			// Read here, next to the content, rather than looked up from the
@@ -472,7 +474,7 @@ func (m Model) rerenderCmd() tea.Cmd {
 		r.SetTabWidth(tabWidth)
 		r.SetSplit(splitMode)
 		return diffLoadedMsg{
-			renderer: r, index: idx, resetScroll: false,
+			renderer: r, index: idx, path: filename, resetScroll: false,
 			key: key, themeGen: gen, rerender: true,
 		}
 	}

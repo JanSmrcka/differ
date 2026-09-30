@@ -145,11 +145,17 @@ func TestResponsive_EveryDistinctionSurvivesWithoutColour(t *testing.T) {
 	m = updated.(Model)
 
 	list := stripANSI(m.renderFileList())
-	// Staged, and each status, by mark rather than by hue.
-	for _, want := range []string{"●", "M", "D", "?"} {
+	// Staged, each status, and which row the cursor is on — by mark rather
+	// than by hue. The selection was bold and a foreground only, so stripped
+	// of colour the selected row was byte-identical to the others.
+	for _, want := range []string{"●", "M", "D", "?", cursorMarker} {
 		if !strings.Contains(list, want) {
 			t.Errorf("the file list does not mark %q without colour:\n%s", want, list)
 		}
+	}
+	// And exactly one row carries it.
+	if n := strings.Count(list, cursorMarker); n != 1 {
+		t.Errorf("%d rows carry the selection marker, want 1:\n%s", n, list)
 	}
 
 	// The diff's added and removed lines, and the cursor.

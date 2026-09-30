@@ -110,8 +110,11 @@ func (m Model) editorLine() int {
 
 func (m Model) handleEditorPlan(msg editorPlanMsg) (tea.Model, tea.Cmd) {
 	if msg.err != nil {
-		m.statusMsg = msg.err.Error()
-		return m, nil
+		// Through fail, like every other failure. It was assigned raw, so a
+		// tmux error — which internal/editor deliberately appends stderr to —
+		// arrived in the one-line bar verbatim, three lines of it, with
+		// m.problem left nil so `!` said nothing had gone wrong.
+		return m.fail("opening the editor", msg.err), nil
 	}
 	plan := msg.plan
 	if plan.Kind == editor.KindDetached {

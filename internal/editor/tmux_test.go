@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -41,7 +42,7 @@ func TestParsePanes(t *testing.T) {
 
 func TestListPanes_FindsARealSession(t *testing.T) {
 	skipWithoutTmux(t)
-	name := "differ-editor-list-test"
+	name := sessionName(t)
 	_ = exec.Command("tmux", "kill-session", "-t", name).Run()
 	if err := exec.Command("tmux", "new-session", "-d", "-s", name, "-n", "w", "sleep 30").Run(); err != nil {
 		t.Skipf("cannot start a tmux session: %v", err)
@@ -62,7 +63,7 @@ func TestListPanes_FindsARealSession(t *testing.T) {
 
 func TestCurrentSession_ResolvesAPaneToItsSession(t *testing.T) {
 	skipWithoutTmux(t)
-	name := "differ-editor-session-test"
+	name := sessionName(t)
 	_ = exec.Command("tmux", "kill-session", "-t", name).Run()
 	if err := exec.Command("tmux", "new-session", "-d", "-s", name, "-n", "w", "sleep 30").Run(); err != nil {
 		t.Skipf("cannot start a tmux session: %v", err)
@@ -231,7 +232,7 @@ func TestReuse_EndToEndInARealSession(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	name := "differ-editor-reuse-test"
+	name := sessionName(t)
 	_ = exec.Command("tmux", "kill-session", "-t", name).Run()
 	// Window 1 runs nvim; window 2 stands in for differ.
 	if err := exec.Command("tmux", "new-session", "-d", "-s", name, "-n", "ed",
@@ -314,7 +315,7 @@ func TestWindowPlan_CreatesTheWindowInDiffersOwnSession(t *testing.T) {
 	// Two sessions, so "the current one" is ambiguous. differ lives in the
 	// first; the second is created later and is therefore the more recently
 	// active, which is what an untargeted new-window would pick.
-	mine, other := "differ-editor-win-mine", "differ-editor-win-other"
+	mine, other := sessionName(t)+"-mine", sessionName(t)+"-other"
 	for _, s := range []string{mine, other} {
 		_ = exec.Command("tmux", "kill-session", "-t", s).Run()
 		if err := exec.Command("tmux", "new-session", "-d", "-s", s, "-n", "w", "sleep 60").Run(); err != nil {
@@ -346,7 +347,7 @@ func TestWindowPlan_CreatesTheWindowInDiffersOwnSession(t *testing.T) {
 // status bar.
 func TestWindowPlan_NamesTheWindowAfterTheEditor(t *testing.T) {
 	skipWithoutTmux(t)
-	name := "differ-editor-winname"
+	name := sessionName(t)
 	_ = exec.Command("tmux", "kill-session", "-t", name).Run()
 	if err := exec.Command("tmux", "new-session", "-d", "-s", name, "-n", "w", "sleep 60").Run(); err != nil {
 		t.Skipf("cannot start tmux: %v", err)
@@ -493,7 +494,7 @@ func TestReuse_TargetAnyReachesAnotherSession(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(repo) })
 
-	mine, other := "differ-any-mine", "differ-any-other"
+	mine, other := sessionName(t)+"-mine", sessionName(t)+"-other"
 	for _, s := range []string{mine, other} {
 		_ = exec.Command("tmux", "kill-session", "-t", s).Run()
 	}
@@ -551,4 +552,26 @@ func TestReuse_TargetAnyReachesAnotherSession(t *testing.T) {
 	if len(any) == 0 {
 		t.Error("target any produced no candidates")
 	}
+}
+
+// sessionName is a tmux session name unique to this test.
+//
+// These were fixed strings on the developer's real tmux server, killed in
+// setup and again in Cleanup. Two concurrent `go test ./internal/editor/`
+// runs, or a leftover session from an interrupted one, then fought over the
+// same session: new-window failing, a reuse falling back to a new window, and
+// nvim refusing a connection on a socket that had been killed underneath it —
+// exactly the three symptoms of the flake seen in CI-less local runs.
+// internal/feedback already does this; internal/editor did not.
+func sessionName(t *testing.T) string {
+	t.Helper()
+	safe := strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+			return r
+		default:
+			return '-'
+		}
+	}, t.Name())
+	return "differ-test-" + safe + "-" + strconv.Itoa(os.Getpid())
 }

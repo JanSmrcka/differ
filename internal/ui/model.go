@@ -59,6 +59,15 @@ const (
 type tickMsg time.Time
 
 type diffLoadedMsg struct {
+	// The file this diff was read for.
+	//
+	// index alone could not identify it: it indexes m.files, which the next
+	// refresh replaces, so a load in flight when the changeset reordered was
+	// installed against whatever had taken its slot. The panel then showed one
+	// file's diff under another's name, drew that file's comments on it, and
+	// re-anchored them against the wrong parse — marking valid comments stale.
+	path string
+
 	// The content key this diff was built from, read at the same moment as the
 	// content itself rather than looked up afterwards.
 	key string

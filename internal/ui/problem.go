@@ -34,9 +34,18 @@ type problem struct {
 // whatever does not fit, silently — so with the hint first, any failure whose
 // hint ran long lost the "!" and the user was never told the detail existed,
 // which is exactly when they needed it most.
-func (p problem) line() string {
+// line is the one-line form for the status bar.
+//
+// offerDetails is false where `!` does not work. Overlays and the `!` handler
+// both sit outside the typing guard, so in the branch picker, the branch-name
+// input, the commit input and the comment editor the key goes into the text
+// field — and a duplicate-branch failure was telling the user to press it
+// while it typed an exclamation mark into the filter. The problem is retained
+// either way, so `esc` then `!` still works; the bar just stops claiming
+// otherwise.
+func (p problem) line(offerDetails bool) string {
 	out := p.summary
-	if p.detail != "" {
+	if p.detail != "" && offerDetails {
 		out += "  ·  ! details"
 	}
 	if p.hint != "" {
@@ -185,7 +194,7 @@ func trimGitPrefix(s string) string {
 func (m Model) fail(action string, err error) Model {
 	p := describe(action, err)
 	m.problem = &p
-	m.statusMsg = p.line()
+	m.statusMsg = p.line(!m.typing())
 	return m
 }
 

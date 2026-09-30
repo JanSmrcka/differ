@@ -173,6 +173,14 @@ func (m Model) handleResize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleDiffLoaded(msg diffLoadedMsg) (tea.Model, tea.Cmd) {
+	// Matched by path, with the index as a tiebreak for the two entries a
+	// staged-and-unstaged file has. The index alone identified nothing: it
+	// addresses m.files, which every refresh replaces — so a load in flight
+	// when the changeset reordered was installed against whatever had taken
+	// its slot, and the panel showed one file's diff under another's name.
+	if msg.path != "" && msg.path != m.currentFilePath() {
+		return m, nil
+	}
 	if msg.index != m.cursor {
 		return m, nil
 	}
@@ -292,7 +300,7 @@ func (m Model) handleFilesRefreshed(msg filesRefreshedMsg) (tea.Model, tea.Cmd) 
 		wasStaged = m.files[m.cursor].change.Staged
 		wasPath = m.files[m.cursor].change.Path
 	}
-	m = m.noteChangedFiles(msg.keys)
+	m = m.noteChangedFiles(msg.keys, hold)
 	if filesEqual(m.files, msg.files) {
 		// Re-anchoring happens whether or not the display is held. It is what
 		// marks a comment stale, and #44 refuses to send a stale comment

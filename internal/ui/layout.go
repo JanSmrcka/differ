@@ -287,14 +287,27 @@ func (m Model) statusSegment() string {
 	// the repository, and every other word in this row describes that screen.
 	// Only where the key that clears it works. Outside review mode the bar was
 	// still telling people to press R, which is unbound there.
+	// A failure comes before everything, the notice included. An earlier
+	// version put the notice first, reasoning that it describes the screen
+	// every other word here describes — true, but not when the other word is a
+	// failure the user has to act on. The notice is up to 56 columns, so at
+	// eighty it clipped the failure's "! details" and below seventy-two it
+	// pushed the failure off the row entirely.
+	failed := m.problem != nil && m.statusMsg != ""
+	if failed {
+		parts = append(parts, m.statusMsg)
+	}
 	if m.mode == modeReview && m.diffStale() {
 		notice := "diff moved"
-		if summary := m.changeSince(m.files); summary != "" {
+		// The summary is the first thing dropped when the row is tight: what
+		// moved is available by reloading, and the half that says what to
+		// press is not.
+		if summary := m.changeSince(m.files); summary != "" && !failed && m.width >= noticeSummaryWidth {
 			notice += " (" + summary + ")"
 		}
 		parts = append(parts, notice+" — "+reloadKey+" to reload")
 	}
-	if m.statusMsg != "" {
+	if !failed && m.statusMsg != "" {
 		parts = append(parts, m.statusMsg)
 	}
 	if m.mode == modeReview {
@@ -307,6 +320,11 @@ func (m Model) statusSegment() string {
 	// Cut here rather than leaving it to the bar, which drops words silently.
 	return truncateEnd(strings.Join(parts, "  ·  "), max(m.width-1, 0))
 }
+
+// noticeSummaryWidth is the narrowest terminal that gets the "diff moved"
+// notice with its summary. Below it the notice keeps only the part that says
+// what to press.
+const noticeSummaryWidth = 100
 
 func padLines(lines []string, height int) []string {
 	for len(lines) < height {
