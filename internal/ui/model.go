@@ -317,10 +317,17 @@ func NewModel(repo *git.Repo, cfg config.Config, changes []git.FileChange, untra
 	ca.ShowLineNumbers = false
 	ca.SetHeight(commentEditorHeight)
 
+	// Read once, here, rather than on every frame from inside View.
+	branch := ""
+	if repo != nil {
+		branch = repo.BranchName()
+	}
+
 	return Model{
 		// Open, so a change arriving in the first seconds refreshes at once
 		// rather than waiting for the rate limit to fill.
 		ticksSinceRefresh: refreshEvery,
+		currentBranch:     branch,
 
 		repo:         repo,
 		cfg:          cfg,

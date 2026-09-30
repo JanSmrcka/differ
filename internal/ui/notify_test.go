@@ -1233,3 +1233,138 @@ func TestNotify_NavigatingStillLoadsTheFileAskedFor(t *testing.T) {
 		t.Errorf("the panel did not load the file asked for:\n%s", got)
 	}
 }
+
+// Staging has to show up at once.
+//
+// buildRefreshedFiles left its sequence number at zero, and the out-of-order
+// guard drops anything older than what is installed — so once a single
+// probe-driven refresh had landed, every `tab` and `a` refresh was thrown
+// away. The stage itself succeeded; the list just did not move until the next
+// probe noticed, turning the most-pressed key in the file list from instant
+// into a one-to-two-second lag. Nothing caught it because the tests that
+// exercise toggleStage never let a probe refresh land first.
+func TestRefresh_StagingShowsUpWithoutWaitingForAProbe(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("src.ts", "one\n", "first")
+	tr.Modify("src.ts", "two\n")
+
+	m := settle(t, liveModel(t, tr), tea.WindowSizeMsg{Width: 120, Height: 30})
+
+	// A probe refresh lands first, which is what installs a sequence number.
+	m = settle(t, m, m.probeCmd()())
+	if m.installedSeq == 0 {
+		t.Fatal("no probe refresh landed, so this test proves nothing")
+	}
+	if m.files[m.cursor].change.Staged {
+		t.Fatal("the file is already staged")
+	}
+
+	// tab, and the refresh it schedules.
+	updated, cmd := m.toggleStage()
+	m = updated.(Model)
+	if cmd == nil {
+		t.Fatal("tab scheduled no refresh")
+	}
+	for _, msg := range fanOut(cmd) {
+		updated, _ = m.Update(msg)
+		m = updated.(Model)
+	}
+
+	staged := false
+	for _, f := range m.files {
+		if f.change.Path == "src.ts" && f.change.Staged {
+			staged = true
+		}
+	}
+	if !staged {
+		t.Error("the list still shows src.ts unstaged after tab")
+	}
+}
+
+// Every refresh gets a sequence of its own. The explicit ones reused whatever
+// number the last probe had, so neither was older by the guard's test and the
+// last to land won — stale fingerprint included, which is the state the guard
+// exists to prevent.
+func TestRefresh_EveryRefreshGetsItsOwnSequence(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("src.ts", "one\n", "first")
+	tr.Modify("src.ts", "two\n")
+	m := settle(t, liveModel(t, tr), tea.WindowSizeMsg{Width: 120, Height: 30})
+
+	seen := map[int]bool{}
+	for i := 0; i < 4; i++ {
+		cmd := m.nextRefresh()
+		msg, ok := cmd().(filesRefreshedMsg)
+		if !ok {
+			t.Fatalf("refresh %d produced no filesRefreshedMsg", i)
+		}
+		if msg.seq == 0 {
+			t.Errorf("refresh %d was stamped 0, which the guard treats as oldest", i)
+		}
+		if seen[msg.seq] {
+			t.Errorf("sequence %d was issued twice", msg.seq)
+		}
+		seen[msg.seq] = true
+	}
+}
+
+// View must not shell out to git.
+//
+// renderHeader called BranchName(), which is a synchronous `git rev-parse`
+// — so every rendered frame started a process and blocked on it, roughly one
+// per keypress. That is also why #45's "idle sessions issue approximately no
+// git subprocesses" did not hold: the probe was one process a tick and the
+// header was two more, or four on a detached HEAD.
+func TestView_StartsNoProcesses(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("src.ts", "one\n", "first")
+	tr.Modify("src.ts", "two\n")
+
+	m := settle(t, liveModel(t, tr), tea.WindowSizeMsg{Width: 120, Height: 30})
+	// Take the repo away. Anything in View that needs git will now say so
+	// rather than quietly starting a process.
+	m.repo = nil
+
+	before := m.View()
+	if !strings.Contains(before, tr.Git("rev-parse", "--abbrev-ref", "HEAD")) {
+		t.Errorf("the header does not name the branch without asking git:\n%s", before)
+	}
+	// And it must be stable: rendering twice cannot depend on anything
+	// outside the model.
+	if after := m.View(); after != before {
+		t.Error("two renders of the same model disagree")
+	}
+}
+
+// The header reads the branch off the model, so every path that changes the
+// branch has to keep it current — otherwise the header names the old one
+// indefinitely.
+func TestView_TheHeaderFollowsABranchChange(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("src.ts", "one\n", "first")
+	m := settle(t, liveModel(t, tr), tea.WindowSizeMsg{Width: 120, Height: 30})
+	start := m.branchName()
+	if start == "" {
+		t.Fatal("no branch to begin with")
+	}
+
+	// Switched under us, the way the branch picker does it.
+	tr.Git("checkout", "-q", "-b", "elsewhere")
+	m = settle(t, m, branchSwitchedMsg{})
+	if got := m.branchName(); got != "elsewhere" {
+		t.Errorf("after a switch the header says %q, want %q", got, "elsewhere")
+	}
+	if !strings.Contains(m.View(), "elsewhere") {
+		t.Errorf("the header does not show the new branch:\n%s", m.View())
+	}
+
+	// And a created one.
+	m = settle(t, m, branchCreatedMsg{name: "fresh"})
+	if got := m.branchName(); got != "fresh" {
+		t.Errorf("after a create the header says %q, want %q", got, "fresh")
+	}
+}

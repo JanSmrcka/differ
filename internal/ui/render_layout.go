@@ -12,11 +12,16 @@ import (
 
 // View composition and all rendering helpers.
 
+// branchName is the branch on the model, never a question for git.
+//
+// It used to call repo.BranchName(), which is a synchronous `git rev-parse` —
+// inside View, so every rendered frame started a process and blocked ~8 ms on
+// it. That is one per keypress, and it is why #45's "idle sessions issue
+// approximately no git subprocesses" did not hold however cheap the probe got.
+// The name changes about once a session; it is read when the session starts and
+// whenever a branch is switched or created.
 func (m Model) branchName() string {
-	if m.repo == nil {
-		return ""
-	}
-	return m.repo.BranchName()
+	return m.currentBranch
 }
 
 // renderFileList draws the visible window of the changeset.

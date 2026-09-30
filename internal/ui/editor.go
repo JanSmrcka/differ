@@ -144,5 +144,6 @@ func (m Model) handleEditorDone(msg editorDoneMsg) (tea.Model, tea.Cmd) {
 	// differ had given up the terminal, so the file may already have been
 	// edited and closed. Reload without resetting, so the reviewer comes back
 	// to the file and position they left.
-	return m, tea.Batch(m.refreshFilesCmd(), m.loadDiffCmd(false))
+	refresh := m.nextRefresh()
+	return m, tea.Batch(refresh, m.loadDiffCmd(false))
 }

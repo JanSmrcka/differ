@@ -11,17 +11,24 @@ import (
 //
 // The poll loop used to rebuild everything every two seconds: eight git
 // processes — HasCommits, two name-status, two num-stat, ls-files, and two for
-// the upstream count — whether or not anything had happened. Measured on this
-// repository that is 112 ms of work every tick, and almost none of it is work:
-// `git --version` costs 13.6 ms here against `git status`'s 15.6, so roughly
-// fourteen of every sixteen milliseconds is spent starting a process.
+// the upstream count — whether or not anything had happened. Most of that is
+// not work: measured over 200 iterations on this machine, `git --version`
+// costs 8.5 ms against this probe's 13.2, and a bare fork/exec of `true` is
+// 1.5 ms. So roughly two thirds of each call is spent getting a process to the
+// point of doing anything.
 //
-// That is why this is not a filesystem watcher. A watcher removes the ~2 ms of
-// real work and leaves the ~14 ms of process startup in place for every refresh
-// that does happen, in exchange for a dependency, a file descriptor per
-// directory under kqueue on macOS, and a walk of the whole tree to install the
-// watches — the walk the issue asks us to avoid. The cost here is processes, so
-// the fix is to start fewer of them.
+// An earlier version of this comment said 13.6 ms and 15.6 ms — a 14-in-16
+// ratio — from a ten-iteration sample. The conclusion survives the correction;
+// the arithmetic did not.
+//
+// This is not a filesystem watcher, but not because of that arithmetic: a
+// watcher's whole point is the idle ticks, where it would cost nothing against
+// this probe's one process a second. It is rejected for the reasons that stand
+// on their own — a dependency CLAUDE.md restricts, a file descriptor per
+// directory under kqueue on macOS since fsnotify does not watch recursively,
+// and a walk of the whole tree to install the watches, which is the walk the
+// issue asks us to avoid. One cheap process a second is a price worth paying
+// to not own any of that.
 
 // probeFormat is one git process standing in for eight. Beyond the paths and
 // their staged/unstaged states it carries branch.oid, branch.head,

@@ -77,15 +77,36 @@ func TestResponsive_TheDiffIsVisibleInACollapsedLayout(t *testing.T) {
 // viewport empty for reasons that have nothing to do with the code under test.
 func settle(t *testing.T, m Model, msg tea.Msg) Model {
 	t.Helper()
-	for i := 0; msg != nil && i < 16; i++ {
-		updated, cmd := m.Update(msg)
-		m = updated.(Model)
-		if cmd == nil {
-			break
-		}
-		msg = cmd()
+	return settleDepth(t, m, msg, 0)
+}
+
+// settleDepth follows a command chain, fanning out batches.
+//
+// It used to follow one command and stop, so a handler returning tea.Batch had
+// everything in it dropped — dispatch has no BatchMsg case. That silently
+// removed whole behaviours from reach: v (split toggle) always returns two
+// commands, so no test could reach split view through the keyboard, and a
+// refresh batched with an upstream fetch never landed at all.
+func settleDepth(t *testing.T, m Model, msg tea.Msg, depth int) Model {
+	t.Helper()
+	if msg == nil || depth > 16 {
+		return m
 	}
-	return m
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		for _, c := range batch {
+			if c == nil {
+				continue
+			}
+			m = settleDepth(t, m, c(), depth+1)
+		}
+		return m
+	}
+	updated, cmd := m.Update(msg)
+	m = updated.(Model)
+	if cmd == nil {
+		return m
+	}
+	return settleDepth(t, m, cmd(), depth+1)
 }
 
 // With no files there is no diff, so the empty state should have the whole
