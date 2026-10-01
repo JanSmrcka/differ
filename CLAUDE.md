@@ -191,7 +191,11 @@ github.com/spf13/cobra                # CLI
 
 ## UX Priorities
 
-1. **Fast startup** — instant feel. No changes → print one line and exit.
+1. **Fast startup** — instant feel. No changes opens the TUI on an empty state
+   that says so (`internal/ui/problem.go`), rather than printing a line and
+   exiting: differ is meant to be left running in a pane, and the poll picks
+   up the agent's changes as they arrive. `differ commit` and `differ log` do
+   print and exit, because neither has anything to wait for.
 2. **Readable diffs** — syntax highlighting correct. Added/removed with distinct but non-harsh backgrounds.
 3. **Keyboard flow** — vim-style (j/k/g/G/d/u). No mouse needed.
 4. **Information density** — file status, staged state, line numbers, diff. No decorative waste.
