@@ -100,21 +100,34 @@ func TestFormatFeedback_Empty(t *testing.T) {
 	}
 }
 
-func TestFormatFeedback_DistinguishesOldAndNewSide(t *testing.T) {
-	newSide := FormatFeedback([]Comment{loginComment()})
-	if !strings.Contains(newSide, "(new)") {
-		t.Errorf("new-side comment should say so:\n%s", newSide)
+// Which side a comment is on only needs saying when the reference cannot
+// take the agent there. A new-side comment whose line resolves is addressed
+// by `@path :Ln`, and "(new)" would be restating it; an old-side one is a
+// line in the file *before* the change, which nothing can open, so it has to
+// be said.
+func TestFormatFeedback_SaysWhichSideOnlyWhenItHasTo(t *testing.T) {
+	t.Parallel()
+	resolvable := loginComment()
+	resolvable.Locate = LocateLine
+	if out := FormatFeedback([]Comment{resolvable}); strings.Contains(out, "(new)") {
+		t.Errorf("a resolvable line restates its side:\n%s", out)
 	}
 
-	c := loginComment()
-	c.Side = SideOld
-	if !strings.Contains(FormatFeedback([]Comment{c}), "(old)") {
-		t.Error("old-side comment should say so")
+	old := loginComment()
+	old.Side, old.Locate = SideOld, LocateFile
+	out := FormatFeedback([]Comment{old})
+	if !strings.Contains(out, "(old)") {
+		t.Errorf("an old-side comment does not say so:\n%s", out)
+	}
+	if !strings.Contains(out, "Changed code:") {
+		t.Errorf("an old-side comment lost the excerpt, which is the only "+
+			"thing that says which code is meant:\n%s", out)
 	}
 }
 
 func TestFormatFeedback_OmitsAnEmptyExcerpt(t *testing.T) {
 	c := loginComment()
+	c.Locate = LocateFile // the form that carries an excerpt at all
 	c.Excerpt = ""
 	out := FormatFeedback([]Comment{c})
 	if strings.Contains(out, "Changed code:") {
@@ -133,7 +146,10 @@ func TestFormatFeedback_ScalesToManyComments(t *testing.T) {
 		cs = append(cs, c)
 	}
 	out := FormatFeedback(cs)
-	if n := strings.Count(out, "Comment:"); n != 50 {
+	// Counted by the reference, not by a "Comment:" label: the resolvable
+	// form has no label, because the whole payload is the reference and the
+	// body.
+	if n := strings.Count(out, "@src/auth/login.ts :L"); n != 50 {
 		t.Errorf("got %d comment sections, want 50", n)
 	}
 }
@@ -221,11 +237,17 @@ func TestFormatComment_TheReferenceIsItsOwnLine(t *testing.T) {
 	if !found {
 		t.Errorf("the reference is not on a line of its own:\n%s", got)
 	}
-	// And everything that was there before still is.
-	for _, want := range []string{"File: src/cache.ts", "Line: 12", "Changed code:", "-  old", "this drops the error"} {
-		if !strings.Contains(got, want) {
-			t.Errorf("the payload lost %q:\n%s", want, got)
+	// And nothing restates it. This used to assert that `File:`, `Line:` and
+	// the excerpt were all still there; they were the duplication #90
+	// removed.
+	for _, gone := range []string{"File:", "Line:", "Changed code:"} {
+		if strings.Contains(got, gone) {
+			t.Errorf("the payload still carries %q, which the reference "+
+				"already says:\n%s", gone, got)
 		}
+	}
+	if !strings.Contains(got, "this drops the error") {
+		t.Errorf("the payload lost the body:\n%s", got)
 	}
 }
 
@@ -363,5 +385,77 @@ func TestReference_NoFileMeansNoReference(t *testing.T) {
 	t.Parallel()
 	if got := Reference(Comment{Locate: LocateLine, StartLine: 3, EndLine: 3}); got != "" {
 		t.Errorf("Reference with no file = %q", got)
+	}
+}
+
+// A comment whose line resolves is the reference and the body, and nothing
+// else.
+//
+// The payload used to say the same thing three times: the reference carries
+// the file and the line, `File:` repeated the file, `Line:` repeated the
+// line, and the excerpt showed code the agent could read for itself from the
+// reference it had just been given. The comment — the only part only the
+// reviewer could write — came last and smallest.
+func TestFormatComment_AResolvableLineNeedsNothingButTheReference(t *testing.T) {
+	t.Parallel()
+	got := FormatComment(Comment{
+		File: "src/api/client.ts", Side: SideNew, Locate: LocateLine,
+		StartLine: 14, EndLine: 14,
+		Excerpt: " ctx\n-old\n+new\n ctx\n",
+		Body:    "co je tohle?",
+	})
+
+	want := "@src/api/client.ts :L14\n\nco je tohle?\n"
+	if got != want {
+		t.Errorf("payload =\n%q\nwant\n%q", got, want)
+	}
+}
+
+// The degraded form keeps everything the reference cannot carry, and still
+// does not repeat what it can.
+func TestFormatComment_AnUnresolvableLineKeepsItsContext(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name    string
+		locate  Locate
+		side    Side
+		wantRef string
+	}{
+		{"old side", LocateFile, SideOld, "@src/a.ts"},
+		{"index line numbers", LocateFile, SideNew, "@src/a.ts"},
+		{"nothing on disk", LocateNone, SideNew, ""},
+	} {
+		c := Comment{
+			File: "src/a.ts", Side: tc.side, Locate: tc.locate,
+			StartLine: 10, EndLine: 10,
+			Excerpt: "-  return fetch(url)\n+  return await fetch(url)\n",
+			Body:    "this needs awaiting too",
+		}
+		got := FormatComment(c)
+
+		if !strings.Contains(got, "Changed code:") {
+			t.Errorf("%s: lost the excerpt, which is all that says which code "+
+				"is meant:\n%s", tc.name, got)
+		}
+		if !strings.Contains(got, c.Body) {
+			t.Errorf("%s: lost the body:\n%s", tc.name, got)
+		}
+		if !strings.Contains(got, "Line: 10") {
+			t.Errorf("%s: does not say where it was:\n%s", tc.name, got)
+		}
+
+		// The file is named once: by the reference when there is one, in
+		// prose when there is not. Never both.
+		named := strings.Count(got, "src/a.ts")
+		if named != 1 {
+			t.Errorf("%s: names the file %d times:\n%s", tc.name, named, got)
+		}
+		if tc.wantRef != "" && !strings.HasPrefix(got, tc.wantRef+"\n") {
+			t.Errorf("%s: does not lead with %q:\n%s", tc.name, tc.wantRef, got)
+		}
+		if tc.wantRef == "" && !strings.HasPrefix(got, "File: src/a.ts\n") {
+			t.Errorf("%s: with no reference the file must be named in prose:\n%s",
+				tc.name, got)
+		}
 	}
 }

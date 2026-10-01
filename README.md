@@ -269,31 +269,17 @@ letter while the editor is open.
 While the diff is held, `e` opens the file without jumping to a line — the line
 numbers belong to a version that is no longer on disk.
 
-What the agent receives, per comment: a reference, then the hunk the comment is
-about, then what you wrote.
+What the agent receives, per comment: a reference, and what you wrote.
 
 ```
 @src/session.ts :L8
-File: src/session.ts
-Line: 8 (new)
 
-Changed code:
- import { readFile } from "node:fs/promises";
- 
- export async function loadSession(path: string) {
--  const raw = await readFile(path, "utf8");
--  return JSON.parse(raw);
-+  try {
-+    const raw = await readFile(path, "utf8");
-+    return JSON.parse(raw);
-+  } catch {
-+    return null;
-+  }
- }
-
-Comment:
 this drops the error instead of returning it — the caller cannot tell
 ```
+
+That is the whole payload. The reference carries the file and the line, so
+naming either again would be saying the same thing twice, and the agent can
+read the code from the reference it has just been given.
 
 The reference is the form `sidekick.nvim` emits, and **the space before the
 colon matters**: its commit `d570e1f` ("different format that should work for
@@ -330,8 +316,21 @@ Which entry the cursor is on decides this, not the flag differ started with:
 git lists a file with both staged and unstaged changes twice, and walking
 from one to the other re-resolves a comment into the other's line numbers.
 
-The hunk is differ's addition: for a review it is more useful for the agent to
-see what changed than to go and read the file.
+When the line does *not* resolve, the reference alone is not enough — so
+those comments carry the diff's own coordinates and the hunk, which is then
+the only thing that says which code is meant:
+
+```
+@src/api/client.ts
+Line: 10 (old)
+
+Changed code:
+-  return fetch(url)
++  return await fetch(url)
+
+Comment:
+this needs awaiting too
+```
 
 The comment editor is a box in the middle of the screen with the diff still
 visible around it, so you can see the line you are writing about. `ctrl+s`

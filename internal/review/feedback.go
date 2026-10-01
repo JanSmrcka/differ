@@ -58,17 +58,30 @@ func header(n int) string {
 // FormatComment renders a single comment: where it is, what changed there,
 // and what the reviewer said.
 func FormatComment(c Comment) string {
-	var b strings.Builder
+	body := strings.TrimRight(c.Body, "\n")
+	ref := Reference(c)
 
-	// The reference first, on a line of its own, in the form an agent's editor
-	// integration already understands — sidekick.nvim sends exactly this and
-	// Claude Code reads the file from it. The lines below stay because the
-	// hunk is the more useful thing for a review: the agent sees what changed
-	// without going and looking.
-	if ref := Reference(c); ref != "" {
-		fmt.Fprintf(&b, "%s\n", ref)
+	// A reference that resolves to a line is the whole of "where", so nothing
+	// else needs to say it. The payload used to state the same fact three
+	// times — the reference, then `File:`, then `Line:` — and then show code
+	// the agent can read for itself from the reference it has just been
+	// given, which left the comment last and smallest.
+	if c.Locate == LocateLine && ref != "" {
+		return ref + "\n\n" + body + "\n"
 	}
-	fmt.Fprintf(&b, "File: %s\n", c.File)
+
+	// It does not resolve: an old-side line, index line numbers that are not
+	// the working tree's, a file that is gone, or a path the resolver cannot
+	// read. The excerpt is then the only thing that says *which* code is
+	// meant, so it stays, with the diff's own coordinates to place it.
+	var b strings.Builder
+	switch {
+	case ref != "":
+		fmt.Fprintf(&b, "%s\n", ref)
+	default:
+		// No reference at all, so the file has to be named in prose.
+		fmt.Fprintf(&b, "File: %s\n", c.File)
+	}
 	fmt.Fprintf(&b, "%s (%s)\n", lineLabel(c), sideLabel(c.Side))
 
 	if excerpt := strings.TrimRight(c.Excerpt, "\n"); excerpt != "" {
@@ -78,7 +91,7 @@ func FormatComment(c Comment) string {
 	}
 
 	b.WriteString("\nComment:\n")
-	b.WriteString(strings.TrimRight(c.Body, "\n"))
+	b.WriteString(body)
 	b.WriteString("\n")
 	return b.String()
 }
