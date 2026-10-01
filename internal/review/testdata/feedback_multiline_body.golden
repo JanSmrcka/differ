@@ -1,16 +1,7 @@
 Review feedback: 1 comment
 
 @src/auth/login.ts :L43
-File: src/auth/login.ts
-Line: 43 (new)
 
-Changed code:
- export function load(id: string) {
--  const user = getUser(id)
-+  const user = await getUser(id)
-   return user
-
-Comment:
 Two problems:
 
 1. missing await

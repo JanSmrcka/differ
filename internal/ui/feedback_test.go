@@ -30,20 +30,28 @@ func TestFeedback_FromARealCommentHasCorrectContext(t *testing.T) {
 
 	out := review.FormatFeedback(m.session.Comments())
 
+	// A comment whose line resolves is the reference and the body — #90
+	// removed the `File:`, `Line:` and excerpt sections, which restated what
+	// the reference already carries.
 	for _, want := range []string{
-		"File: src.ts",
-		"Line: 2 (new)",
-		"-  const user = getUser(id)",
-		"+  const user = await getUser(id)",
+		"@src.ts :L2",
 		"keep this awaited",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("feedback missing %q:\n%s", want, out)
 		}
 	}
-	// The second hunk is not relevant to this comment.
-	if strings.Contains(out, "persist(data)") {
-		t.Errorf("feedback leaked an unrelated hunk:\n%s", out)
+	// And no code at all, from this hunk or any other: the agent reads it
+	// from the reference. The second hunk leaking in was the original defect
+	// this test was written for, and a payload with no code cannot leak one
+	// — so the excerpt the comment still carries is checked where it is used,
+	// in TestFormatComment_AnUnresolvableLineKeepsItsContext.
+	if strings.Contains(out, "getUser(id)") || strings.Contains(out, "persist(data)") {
+		t.Errorf("the payload carries code the reference already points at:\n%s", out)
+	}
+	// The comment itself still holds the excerpt, for the forms that need it.
+	if c := m.session.Comments()[0]; !strings.Contains(c.Excerpt, "getUser(id)") {
+		t.Errorf("the comment lost its excerpt: %q", c.Excerpt)
 	}
 }
 
@@ -103,7 +111,9 @@ func TestFeedback_HunkCommentReportsTheRange(t *testing.T) {
 	m = updated.(Model)
 
 	out := review.FormatFeedback(m.session.Comments())
-	if !strings.Contains(out, "Lines: 1-5 (new)") {
+	// The range is in the reference, which is where an agent's resolver
+	// reads it: `Lines: 1-5 (new)` said the same thing a second time.
+	if !strings.Contains(out, "@src.ts :L1-L5") {
 		t.Errorf("hunk comment should report its range:\n%s", out)
 	}
 }
@@ -130,11 +140,16 @@ func TestFeedback_UntrackedFileComment(t *testing.T) {
 	m = commentAt(t, m, LineAdded, "export const fmt = (s: string) => s.trim()", "add a test for this")
 
 	out := review.FormatFeedback(m.session.Comments())
-	if !strings.Contains(out, "File: src/utils/format.ts") {
+	if !strings.Contains(out, "@src/utils/format.ts :L1") {
 		t.Errorf("feedback names the wrong file:\n%s", out)
 	}
-	if !strings.Contains(out, "+export const fmt") {
-		t.Errorf("new file content should appear as added lines:\n%s", out)
+	// An untracked file is read straight off disk, so its line numbers are
+	// the working tree's and the reference resolves — which is why the
+	// payload carries no code. The excerpt is still on the comment, where
+	// the degraded forms use it.
+	if c := m.session.Comments()[0]; !strings.Contains(c.Excerpt, "+export const fmt") {
+		t.Errorf("new file content should appear as added lines in the "+
+			"excerpt: %q", c.Excerpt)
 	}
 }
 
