@@ -196,52 +196,6 @@ func (m Model) hasStaleComments(path string) bool {
 	return false
 }
 
-func (m Model) renderBranchList(height int) string {
-	var b strings.Builder
-	b.WriteString(m.renderBranchFilterBar())
-	b.WriteByte('\n')
-	list := m.activeBranches()
-	itemH := height - 1
-	if len(list) == 0 {
-		b.WriteString(m.styles.FileItem.Width(m.listWidth()).Render(m.styles.HelpDesc.Render("   no matches")))
-		return b.String()
-	}
-	end := m.branchOffset + itemH
-	if end > len(list) {
-		end = len(list)
-	}
-	for i := m.branchOffset; i < end; i++ {
-		b.WriteString(m.renderBranchItem(list[i], i == m.branchCursor, list[i] == m.currentBranch))
-		if i < end-1 {
-			b.WriteByte('\n')
-		}
-	}
-	return b.String()
-}
-
-func (m Model) renderBranchFilterBar() string {
-	list := m.activeBranches()
-	countStyled := m.styles.HelpDesc.Render(fmt.Sprintf("%d/%d", len(list), len(m.branches)))
-	input := m.branchFilter.View()
-	gap := m.listWidth() - lipgloss.Width(input) - lipgloss.Width(countStyled) - 1
-	if gap < 0 {
-		gap = 0
-	}
-	return lipgloss.NewStyle().Width(m.listWidth()).Render(input + strings.Repeat(" ", gap) + countStyled)
-}
-
-func (m Model) renderBranchItem(name string, selected, current bool) string {
-	prefix := "  "
-	if current {
-		prefix = m.styles.StagedIcon.Render("* ")
-	}
-	line := prefix + truncatePath(name, m.listWidth()-4)
-	if selected {
-		return m.styles.FileSelected.Width(m.listWidth()).Render(cursorMarker + line)
-	}
-	return m.styles.FileItem.Width(m.listWidth()).Render(" " + line)
-}
-
 // truncateEnd shortens text to maxW columns, marking the cut with an ellipsis.
 // Unlike truncatePath it keeps the start, which is what identifies a branch or
 // a card.
@@ -345,20 +299,12 @@ func (m Model) commentRows(room int) []string {
 	return strings.Split(m.commentInput.View(), "\n")
 }
 
-func (m Model) renderBranchCreateBar() string {
-	return lipgloss.NewStyle().Width(m.width).Render(m.branchCreateContent())
-}
-
 func (m Model) commitBarContent() string {
 	prompt := m.styles.HelpKey.Render(" commit: ")
 	if m.generatingMsg {
 		return prompt + m.styles.HelpDesc.Render("generating...  esc cancel")
 	}
 	return prompt + m.commitInput.View() + "  " + m.styles.HelpDesc.Render("esc cancel · enter commit")
-}
-
-func (m Model) branchCreateContent() string {
-	return m.styles.HelpKey.Render(" new branch: ") + m.branchInput.View() + "  " + m.styles.HelpDesc.Render("esc cancel · enter create")
 }
 
 // renderCommentBar is the comment editor in the footer, for terminals too

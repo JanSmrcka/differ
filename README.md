@@ -415,6 +415,26 @@ stale because its file left the diff.
 
 ### Branch Picker
 
+`b` opens a box over the view, so the changeset you were looking at is still
+there behind it:
+
+```
+╭───────────────────────────────────────────────────────╮
+│  branch                                               │
+│                                                       │
+│  > feat/                                        12/34 │
+│                                                       │
+│ ▍*  feat/roadmap-59                                   │
+│     feat/payload-90                                   │
+│     feat/agent-picker-84                              │
+│                                                       │
+│  type filters · ↑/↓ · enter switches · ^n new · esc    │
+╰───────────────────────────────────────────────────────╯
+```
+
+`*` marks the branch checked out, `12/34` is how much of the list the filter
+matches, and `ctrl+n` turns the same box into the new-branch prompt.
+
 | Key             | Action               |
 | --------------- | -------------------- |
 | type            | filter branches      |

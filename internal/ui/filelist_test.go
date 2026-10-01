@@ -422,10 +422,10 @@ func TestFileList_RenderingDoesNotCostRowsTimesFiles(t *testing.T) {
 	}
 }
 
-// The branch picker shares the panel and had the same two holes: no
-// end-of-list clamp, so growing the terminal left its window past the tail,
-// and nothing clamped when the list first loaded — with the current branch
-// past the panel height, the picker opened with no visible selection.
+// The branch picker is a box rather than a panel now, and had the same two
+// holes: no end-of-list clamp, so growing the terminal left its window past
+// the tail, and nothing clamped when the list first loaded — with the current
+// branch past the box's height, the picker opened with no visible selection.
 func TestBranchList_TheWindowAndTheCursorStayTogether(t *testing.T) {
 	t.Parallel()
 	branches := make([]string, 40)
@@ -442,14 +442,14 @@ func TestBranchList_TheWindowAndTheCursorStayTogether(t *testing.T) {
 	if m.branchCursor != 37 {
 		t.Fatalf("branchCursor = %d, want 37", m.branchCursor)
 	}
-	if !strings.Contains(stripANSI(m.renderBranchList(m.listHeight())), "branch-37") {
+	if !strings.Contains(stripANSI(strings.Join(m.branchRows(modalBodyRoomAt(m.contentHeight(), -1)), "\n")), "branch-37") {
 		t.Errorf("the picker opened without the current branch on screen (offset %d)", m.branchOffset)
 	}
 
 	// And growing past the whole list must bring the window back.
 	grown, _ := m.handleResize(tea.WindowSizeMsg{Width: 120, Height: 60})
 	g := grown.(Model)
-	if !strings.Contains(stripANSI(g.renderBranchList(g.listHeight())), "branch-00") {
+	if !strings.Contains(stripANSI(strings.Join(g.branchRows(modalBodyRoomAt(g.contentHeight(), -1)), "\n")), "branch-00") {
 		t.Errorf("the whole list fits but it starts at %d", g.branchOffset)
 	}
 }
