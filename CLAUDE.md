@@ -134,6 +134,18 @@ expressions that disagreed handed `fitOverlay` more rows than the box would
 show, and it replaced the overflow with a count — the picker's highlighted
 row among them.
 
+The **three modals** — the comment editor, the agent picker and the branch
+picker — all go through `modal.go`. The branch picker used to be drawn into
+the file list's panel, which meant choosing a branch cost you sight of the
+changeset, and its new-branch prompt was a footer bar: three shapes for the
+same kind of question. `modeBranchPicker` stays, because key routing needs a
+mode and `keymap_test.go`'s checks are keyed on one; only where it is drawn
+changed. `boxRows` applies its half-area cap **only when the box has a row to
+avoid** — that cap exists so the box can move out of the cursor's way, and a
+picker is not judged against a particular line, so capping it cost the branch
+picker half its rows: at fourteen it had room for the filter and not one
+branch.
+
 **A covered row is composited, not cut.** `overlayRow` keeps what is left and
 right of the box, and the cut is made by `dropColumns`, which walks the row's
 escape sequences and cuts the visible text by display column. Measuring

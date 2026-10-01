@@ -52,6 +52,9 @@ var namedKeys = map[string]tea.KeyType{
 	"ctrl+s": tea.KeyCtrlS,
 	"ctrl+d": tea.KeyCtrlD,
 	"ctrl+u": tea.KeyCtrlU,
+	"ctrl+n": tea.KeyCtrlN,
+	"ctrl+j": tea.KeyCtrlJ,
+	"ctrl+k": tea.KeyCtrlK,
 }
 
 func press(t *testing.T, m Model, keys ...string) Model {

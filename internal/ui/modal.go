@@ -78,7 +78,7 @@ func (m Model) renderModal(title string, body []string, closing string, height, 
 	// that fills the screen cannot move out of the cursor's way, and the
 	// whole claim of a modal over a footer is that you can still see the
 	// line you are writing about.
-	room := min(len(body)+modalChrome, boxRows(height))
+	room := min(len(body)+modalChrome, boxRows(height, avoid))
 	// The ceiling last, so it wins over the floor. With the floor applied
 	// afterwards a height too small for a whole box produced one too tall for
 	// it, and placeModal then cut the bottom border off: at six rows the box
@@ -309,17 +309,23 @@ func (m Model) modal(height int) string {
 		return ""
 	}
 	switch {
+	case m.mode == modeBranchPicker:
+		// Nothing to avoid: which branch to check out is not a question about
+		// a particular line. The list is scrolled by branchRows, so it is
+		// asked for the room first.
+		return m.renderModal(m.branchTitle(), m.branchRows(m.modalBodyRoom(height, -1)),
+			m.branchClosing(), height, -1)
 	case m.showAgents:
 		// Nothing to avoid: choosing where feedback goes is not judged
 		// against a particular line. A list that does not fit is scrolled by
 		// agentRows, so it is asked for the room first.
-		return m.renderModal(" agent", m.agentRows(m.modalBodyRoom(height)), m.agentClosing(), height, -1)
+		return m.renderModal(" agent", m.agentRows(m.modalBodyRoom(height, -1)), m.agentClosing(), height, -1)
 	case m.commenting:
 		// The editor is sized to the room rather than fitted into it:
 		// fitOverlay drops what does not fit and says how many rows it
 		// dropped, which for a text area means the user types and sees a
 		// count instead of their own words.
-		return m.renderModal(m.commentTitle(), m.commentRows(m.modalBodyRoom(height)),
+		return m.renderModal(m.commentTitle(), m.commentRows(m.modalBodyRoom(height, m.cursorContentRow())),
 			commentClosing, height, m.cursorContentRow())
 	}
 	return ""
@@ -352,8 +358,8 @@ const panelHeaderRows = 2
 // modalBodyRoom is how many rows of content the box can hold at this height,
 // after the border, the title and the closing line — and after the cap that
 // keeps it out of the cursor's way.
-func modalBodyRoomAt(height int) int {
-	return max(boxRows(height)-modalChrome, 1)
+func modalBodyRoomAt(height, avoid int) int {
+	return max(boxRows(height, avoid)-modalChrome, 1)
 }
 
 // boxRows is how many rows of the box are content: never more than half the
@@ -365,13 +371,25 @@ func modalBodyRoomAt(height int) int {
 // the box would show and replaced the overflow with a count — the picker's
 // highlighted row among them.
 //
-// The half cap applies at every height. Its guard used to be `half >=
-// modalChrome+1`, which switched it off entirely below a content height of
-// fourteen, so at terminal heights 17 and 18 — the first two the box is
-// drawn at — it took the whole area and covered the line being commented on.
-func boxRows(height int) int {
-	half := max(height/2-modalBorderRows, modalChrome+1)
-	return max(min(half, height-modalBorderRows), 1)
+// The half cap applies at every height a box has something to avoid. Its
+// guard used to be `half >= modalChrome+1`, which switched it off entirely
+// below a content height of fourteen, so at terminal heights 17 and 18 — the
+// first two the box is drawn at — it took the whole area and covered the line
+// being commented on.
+//
+// With nothing to avoid it does not apply at all: its whole justification is
+// that the box must be able to move out of the cursor's way, and a picker is
+// not judged against a particular line. Capping those cost the branch picker
+// half its rows — at fourteen it had room for the filter and not one branch,
+// so there was nothing to pick from.
+func boxRows(height, avoid int) int {
+	limit := height - modalBorderRows
+	if avoid >= 0 {
+		limit = min(limit, max(height/2-modalBorderRows, modalChrome+1))
+	}
+	return max(limit, 1)
 }
 
-func (m Model) modalBodyRoom(height int) int { return modalBodyRoomAt(height) }
+func (m Model) modalBodyRoom(height, avoid int) int {
+	return modalBodyRoomAt(height, avoid)
+}

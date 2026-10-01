@@ -104,14 +104,12 @@ func (m Model) panelRow(left, right string) string {
 
 // leftPanel is the file list, or the branch picker, under its own label.
 func (m Model) leftPanel() []string {
-	// The mode is chosen before rendering, not after: building the file list
-	// and discarding it meant every keystroke in the branch filter paid for a
-	// pass over every path in the changeset.
-	body := m.renderBranchList(m.listHeight())
-	if m.mode != modeBranchPicker {
-		body = m.renderFileList()
-	}
-	return append(m.panelHeader(m.leftPanelLabel(), m.focusOn(paneFiles)), strings.Split(body, "\n")...)
+	// Always the file list. The branch picker used to be drawn here, which
+	// meant choosing a branch cost you sight of the changeset; it is a box
+	// over the view now, and the panel behind it keeps showing what you were
+	// looking at.
+	return append(m.panelHeader(m.leftPanelLabel(), m.focusOn(paneFiles)),
+		strings.Split(m.renderFileList(), "\n")...)
 }
 
 // rightPanel is the diff, under a label naming the file on show.
@@ -147,12 +145,7 @@ func (m Model) focusOn(p pane) bool {
 	}
 }
 
-func (m Model) leftPanelLabel() string {
-	if m.mode == modeBranchPicker {
-		return "BRANCHES"
-	}
-	return "CHANGED FILES"
-}
+func (m Model) leftPanelLabel() string { return "CHANGED FILES" }
 
 // diffLabel names the file on show, with its staged and review state.
 func (m Model) diffLabel() string {
@@ -239,8 +232,6 @@ func (m Model) renderFooter() string {
 		input = m.renderCommentBar()
 	case m.mode == modeCommit:
 		input = m.renderCommitBar()
-	case m.mode == modeBranchPicker && m.branchCreating:
-		input = m.renderBranchCreateBar()
 	default:
 		return m.renderHintBar() // already carries the status row, and asks
 		// for it itself — computing it above ran the whole thing twice on
