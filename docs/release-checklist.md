@@ -113,6 +113,27 @@ external integration.
   `--no-color`, where the validation used to be skipped.
 - **`--help` for every subcommand**: `differ`, `differ review`, `differ log`,
   `differ commit`.
+- **An agent actually resolves the reference.** This is the premise the whole
+  feedback format rests on and the one thing no test here can establish: send
+  a comment and watch the agent open `src/file.ts` at the line, rather than
+  ask what you meant. The form was taken from `sidekick.nvim`'s source and
+  verified by running its `location.lua` under `nvim --headless`; that it is
+  the form *differ's* agent acts on has only ever been reasoned about. Try it
+  against claude, codex and one other.
+- **The agent picker, with more than one agent running.** `A` lists them, the
+  one beside you sorts first, two in the same window are told apart by their
+  pane id, and `S` lands in the pane you picked — not the last active one.
+  Then restart differ and send again: the choice is in the config, so it must
+  still go to the same pane.
+- **A review across a real restart.** Comment, `q`, confirm, reopen: the
+  comments are back and the files you had read still count as read. Have the
+  agent rewrite one of those files while differ is closed, reopen, and that
+  file's comments are gone and it is unreviewed again. Then open a second
+  differ in the same repository and check it says it is not saving — and that
+  the first one's review is still on disk afterwards.
+- **The branch picker as a box.** `b`, type to filter, `enter` switches, and
+  the file list and diff were visible behind it the whole time. `ctrl+n`,
+  name a branch, `enter`, and you are on it.
 
 ### What the suite already covers here
 
