@@ -1,63 +1,28 @@
 # differ
 
-A terminal-native review interface for Git changes — especially changes a
-coding agent produced while you were doing something else.
+Review Git changes in the terminal — especially changes a coding agent made
+while you were doing something else.
 
-An agent writes a lot of code quickly. Reading it back is the slow part, and
-`git diff` is not built for the job: it has no idea which files you have
-already looked at, nowhere to put "this null check is wrong", and no way to
-hand that note back to the agent. `differ` is the part in between. You read the
-changes file by file, comment on the lines that need it, and send the comments
-back to the agent's pane in one keystroke.
+You read the changes file by file, comment on the lines that need it, and send
+those comments to the agent's pane in one keystroke. differ tracks what you
+have read and carries the result; it does not review anything for you. No
+model reads your diff.
 
-It does not review anything for you. There is no model reading your diff and no
-judgement in the tool — you do the reviewing, `differ` keeps the state and
-carries the result. (The one exception is an optional commit-message helper,
-which is off the review path and shells out to a command you choose.)
-
-It is also a perfectly good diff viewer: syntax highlighting, split view,
-staging, committing, branch switching and a commit log browser.
+It is also an ordinary diff viewer: syntax highlighting, split view, staging,
+committing, branch switching, commit log.
 
 <p align="center">
   <img src="./assets/preview.png" alt="differ preview" width="800" />
 </p>
 
-> **The demo recording is not in this commit.** `assets/demo.tape` and
-> `assets/demo-fixture.sh` are, and together they produce it reproducibly —
-> same files, same diff, same comment, rather than a lucky take:
->
-> ```bash
-> brew install vhs
-> ./assets/demo-fixture.sh     # the scratch repo the tape records against
-> vhs assets/demo.tape         # writes assets/demo.gif
-> ```
->
-> It walks the real loop in the layout above: an agent's pane on the left,
-> differ on the right, down to the line that is wrong — a `catch` that swallows
-> a read error and returns `null` — a comment, then `S` to send it across and
-> `H` to confirm it arrived. Every keystroke in the tape was checked against a
-> real tmux session rather than counted by eye. Once recorded,
-> `assets/demo.gif` replaces the image above, which still shows the old
-> two-panel viewer.
-
 ## Install
 
 ```bash
 brew install jansmrcka/tap/differ
-```
-
-Or via Go:
-
-```bash
 go install github.com/jansmrcka/differ@latest
 ```
 
-Or build from source:
-
-```bash
-make build    # → bin/differ
-make install  # → $GOPATH/bin/differ
-```
+Or from source: `make build` (→ `bin/differ`) or `make install` (→ `$GOPATH/bin`).
 
 ## Usage
 
@@ -67,20 +32,17 @@ differ -s           # staged only
 differ -r main      # compare against a branch, tag or commit
 differ -c           # open straight into the commit message
 differ review       # the same changes, straight into review mode
-differ review -s    # review the staged changes
 differ log          # browse recent commits
 differ commit       # review what is staged, then commit
 ```
 
-`differ` and `differ review` show the same changes; `review` starts in review
-mode, where you can comment line by line and send the result to an agent. Both
-take `-s` and `-r`.
+`review` takes `-s` and `-r` too. `--no-color`, or `NO_COLOR` set to anything,
+turns colour off — nothing in differ is distinguished by colour alone.
 
-`--no-color` turns colour off, as does setting `NO_COLOR` to anything.
+Exit codes: **0** fine, **1** a runtime problem (not a repository, no such
+ref), **2** a bad command line.
 
 ## The review loop
-
-The whole point, in six keystrokes:
 
 ```
 differ review        # the agent's changes, in review mode
@@ -90,73 +52,116 @@ n                    # next file; the one you left is marked read
 S                    # send every pending comment to the agent
 ```
 
-What that buys you over `git diff`:
+What that gives you over `git diff`:
 
-- **It remembers where you got to.** Each file is `unreviewed`, `read`,
-  `commented`, `sent` or `changed`, and the bar keeps the count. Coming back
-  after lunch, you know what is left.
-- **Comments are attached to lines, not to your memory.** They render inline
-  under the line they are about, and stay `pending` until you send them.
-- **The changeset moving under you is handled rather than ignored.** If the
-  agent rewrites a file while you are reading it, the diff is not swapped out
-  from under you: your comments are re-anchored against the new content, so one
-  whose line has gone is marked `stale` rather than left pointing at whatever
-  took its place. A file that changed after you read it is marked `changed`,
-  and stops counting as reviewed — so the ratio cannot quietly lie to you.
-- **Sending is one keystroke.** `s` for one comment, `S` for all of them. Where
-  they go is `feedback_target`: the agent's tmux pane, the clipboard, or
-  stdout. `H` shows what was sent and whether it arrived.
+- **It remembers where you got to.** Every file is `unreviewed`, `read`,
+  `commented`, `sent` or `changed`, and the bar keeps the count:
+  `3/7 reviewed  2 comments  1 pending  1 changed`.
+- **Comments attach to lines.** They show inline under the line they are about
+  and stay `pending` until you send them.
+- **The diff does not move under you.** If the agent rewrites the file while
+  you are reading it, your place is kept and the bar says `diff moved (2 more
+  added) — R to reload`. Comments follow their line either way; one whose line
+  is gone goes `stale` rather than pointing at whatever took its place.
+- **They survive `q`.** The review is written to `.git/differ/review.json` on
+  every change, so a crash, a closed tmux window or an accidental quit costs
+  nothing. A comment comes back only if the code it was written about is
+  byte-for-byte unchanged — otherwise the file goes back to unreviewed,
+  because it needs reading again.
 
-Nothing here writes to git. Staging and committing stay explicit, separate
-actions.
+Nothing here touches git. Staging and committing stay explicit.
 
-Exit codes are predictable enough to script against: **0** success, **1** a
-runtime problem (not a git repository, no such ref), **2** a bad command line.
-A runtime failure prints one line and no usage block.
+## Sending to an agent
 
-## Narrow terminals
+`A` lists the coding agents running in tmux and sends the review to the one
+you pick.
 
-The file list takes a quarter of the terminal rather than a fixed slice, within
-bounds, so a narrow split spends its width on the diff instead of on file
-names. Below 72 columns the layout collapses to one panel — whichever you are
-working in, and the file list regardless when there is nothing to show on the
-right. Split view needs both panels and a half wide enough for two columns, so
-it is unified below that and never switches off as the terminal grows.
+### Choosing the agent
 
-Nothing depends on colour alone. Added and removed lines carry `+`/`-`, the
-cursor a bar, a staged file a dot, each status its letter, the focused panel a
-bar in the margin, and review state is a word rather than a hue — so differ
-reads the same over SSH, on a 16-colour terminal, with `NO_COLOR`, or in a
-greyscale screenshot. A test asserts each of those marks survives with the
-colour stripped out.
+```
+ agent
 
-## Keyboard Shortcuts
+▍ differ:2  claude  /Users/you/git/private/differ
+  ELI-panda:2  claude  /Users/you/git/work/ELI-panda
+  personal-web:2 %5  opencode  /Users/you/git/private/personal-web
+  personal-web:2 %6  claude  /Users/you/git/private/personal-web
 
-Press `?` for the full list of the current view's keys — anywhere except the
-branch filter and the commit message, where every character is text rather
-than a command. The bar along the bottom shows the common ones for wherever
-you are, and hides what would not do anything: `send` appears only once a
-comment is waiting, `stage` disappears under `-s` or `-r`.
+ j/k · enter chooses · esc cancels
+```
 
-The tables below are checked against the code: a test fails if a key here has
-no handler, or a handler is missing from here.
+The choice applies at once and is written to the config, so it survives a
+restart. The agent in differ's own tmux session sorts first, then one working
+in this repository; two in the same window are told apart by pane id.
+
+Discovery walks each pane's **process tree** rather than reading its current
+command, so an agent started through `npx`, a shell function or a wrapper
+script is still found. It knows `claude`, `codex`, `gemini`, `copilot`,
+`opencode` and `aider`, including forms like `npx @anthropic-ai/claude-code`
+and `uvx --from aider-chat aider`. It never starts an agent, and it will not
+offer a one-shot such as `claude -p`.
+
+What the agent receives, per comment:
+
+```
+@src/session.ts :L8
+
+this drops the error instead of returning it — the caller cannot tell
+```
+
+The reference carries the file and the line, so nothing repeats them and the
+agent reads the code itself. It is the form `sidekick.nvim` emits, and **the
+space before the colon matters**: without it the resolver reads `@path:9` as
+one filename and attaches nothing. Claude Code's Neovim integration does not
+use this form at all — it sends JSON-RPC over a websocket, which is a
+different channel.
+
+How much of a reference a comment gets depends on what still resolves:
+
+| | |
+|---|---|
+| the line resolves | `@src/cache.ts :L12` |
+| only the file does | `@src/cache.ts` |
+| nothing does | no reference; the prose still says where it was |
+
+The middle case is a line number that would be wrong: the old side of a diff,
+or the index under `-s` when the working tree has moved on. Those comments
+carry the hunk instead, since it is then the only thing that says which code
+is meant:
+
+```
+@src/api/client.ts
+Line: 10 (old)
+
+Changed code:
+-  return fetch(url)
++  return await fetch(url)
+
+Comment:
+this needs awaiting too
+```
+
+`s` sends one comment, `S` all of them, `H` shows what was sent and whether it
+arrived. A failed send never discards anything — the comments stay pending.
+differ pastes into the agent's prompt and does **not** press Enter, so a
+misconfigured target cannot execute anything.
+
+## Keyboard shortcuts
+
+`?` lists the current view's keys. The bar along the bottom shows the common
+ones and hides what would do nothing. The tables below are checked against the
+code — a test fails if a key here has no handler, or a handler is missing here.
 
 ### File List
-
-The list scrolls, shows enough of each path to tell it apart from the others in
-the changeset, and puts the additions and deletions against the right edge:
 
 ```
  ● M login.ts                +12 -4
    M a/index.ts               +8 -2
-   M b/index.ts               +3 -0
    A format.ts               +31 -0
    ? NOTES.md                 +3 -0
 ```
 
-`●` marks a staged file. While reviewing, the right-hand column carries how far
-you have got with each file instead — `read`, `2 comments`, `sent`, or `changed`
-when the agent rewrote it after you read it.
+`●` is staged. While reviewing, the right-hand column shows review state
+instead — `read`, `2 comments`, `sent`, `changed`.
 
 | Key           | Action                                     |
 | ------------- | ------------------------------------------ |
@@ -176,235 +181,61 @@ when the agent rewrote it after you read it.
 
 ### Diff View
 
-| Key         | Action                    |
-| ----------- | ------------------------- |
-| `j/k`       | move line cursor          |
-| `}` / `{`   | next/prev hunk            |
-| `d/u`       | half page down/up         |
-| `g/G`       | first/last line           |
-| `n/p`       | next/prev file            |
-| `tab`       | stage/unstage             |
-| `b`         | open branch picker        |
-| `v`         | toggle split diff         |
+| Key         | Action                              |
+| ----------- | ----------------------------------- |
+| `j/k`       | move line cursor                    |
+| `}` / `{`   | next/prev hunk                      |
+| `d/u`       | half page down/up                   |
+| `g/G`       | first/last line                     |
+| `n/p`       | next/prev file                      |
+| `tab`       | stage/unstage                       |
+| `b`         | open branch picker                  |
+| `v`         | toggle split diff                   |
 | `e`         | open in editor at the cursor's line |
-| `r`         | enter review mode         |
-| `esc` / `h` | back to file list         |
-| `q`         | quit                      |
+| `r`         | enter review mode                   |
+| `esc` / `h` | back to file list                   |
+| `q`         | quit                                |
 
-The diff view has a line cursor (`▌`) marking the current line. It is the
-anchor review comments attach to, and it keeps the same position when you
-toggle between unified and split view.
+Marks in the gutter: `▌` the line cursor, `●` a comment on this line, `!` a
+comment that no longer matches the diff. At the end of the code: `›` the line
+was cut to fit, `·` trailing whitespace.
 
-In the gutter, before the line numbers:
-
-| Mark | Meaning                                   |
-| ---- | ----------------------------------------- |
-| `▌`  | the line cursor                           |
-| `●`  | the line carries a review comment         |
-| `!`  | a comment here no longer matches the diff |
-
-At the end of the code itself:
-
-| Mark | Meaning                                                      |
-| ---- | ------------------------------------------------------------ |
-| `›`  | the line was longer than the panel and is cut — `e` opens it in your editor |
-| `·`  | trailing whitespace on an added or removed line              |
-
-In split view the part of a line that actually differs from the line it is
-paired with is shaded a step darker, so a one-character change does not look
-like a rewritten line. A pair that mostly differs is left alone: at that point
-it is a rewrite, and pointing at nearly the whole line says no more than the
-`+`/`-` already does. With colour off there is no within-line shading — the
-`+`/`-` and the line backgrounds still carry the change.
-
-Line-number columns widen to fit the file, so a 5-digit diff stays aligned.
-Tabs are expanded to `tab_width`. Hunks are separated by a rule carrying the
-enclosing function, and split view falls back to unified when the panel is too
-narrow for two columns.
+Split view shades the part of a line that actually differs, so a
+one-character change does not read as a rewrite. It falls back to unified when
+the panel is too narrow for two columns.
 
 ### Review Mode
 
-Review mode is the diff view with review state on top: it tracks which files
-you have looked at and holds your review comments.
-It never changes git state — staging and committing stay explicit actions.
+The diff view with review state on top. It never changes git state.
 
-| Key       | Action                          |
-| --------- | ------------------------------- |
-| `j/k`     | move line cursor                |
-| `}` / `{` | next/prev hunk                  |
-| `d/u`     | half page down/up               |
-| `n/p`     | next/prev file                  |
-| `g/G`     | first/last line                 |
-| `c`       | comment on line (edit existing) |
-| `C`       | comment on whole hunk           |
-| `x`       | delete comment under cursor     |
-| `s`       | send comment under cursor       |
-| `S`       | send all pending comments       |
-| `H`       | what has already been sent      |
-| `R`       | reload after the file changed   |
-| `r`       | toggle review mode              |
+| Key       | Action                              |
+| --------- | ----------------------------------- |
+| `j/k`     | move line cursor                    |
+| `}` / `{` | next/prev hunk                      |
+| `d/u`     | half page down/up                   |
+| `n/p`     | next/prev file                      |
+| `g/G`     | first/last line                     |
+| `c`       | comment on line (edit existing)     |
+| `C`       | comment on whole hunk               |
+| `x`       | delete comment under cursor         |
+| `s`       | send comment under cursor           |
+| `S`       | send all pending comments           |
+| `H`       | what has already been sent          |
+| `R`       | reload after the file changed       |
+| `r`       | toggle review mode                  |
 | `e`       | open in editor at the cursor's line |
-| `tab`     | stage/unstage                   |
-| `v`       | toggle split diff               |
-| `b`       | open branch picker              |
-| `esc`     | back to file list               |
-| `q`       | quit                            |
+| `tab`     | stage/unstage                       |
+| `v`       | toggle split diff                   |
+| `b`       | open branch picker                  |
+| `esc`     | back to file list                   |
+| `q`       | quit                                |
 
-While you are reviewing, differ does not swap the diff out from under you. If
-the file changes — an agent rewriting it while you read — the file list and its
-marks update as usual, but the diff you are looking at stays put and the bar
-says what moved:
+The comment editor is a box over the diff, so you can see the line you are
+writing about. `ctrl+s` saves, `esc` cancels; comments are multiline.
 
-```
-diff moved (2 more added) — R to reload
-```
-
-`R` re-reads it, keeping your cursor where it was. Your comments are
-re-anchored either way, not just on reload: each one follows its line or is
-marked stale as soon as the change is seen, so a comment about a line that no
-longer exists cannot be sent as though it still described something. A comment
-you are in the middle of writing is never touched, and `R` is an ordinary
-letter while the editor is open.
-
-While the diff is held, `e` opens the file without jumping to a line — the line
-numbers belong to a version that is no longer on disk.
-
-What the agent receives, per comment: a reference, and what you wrote.
-
-```
-@src/session.ts :L8
-
-this drops the error instead of returning it — the caller cannot tell
-```
-
-That is the whole payload. The reference carries the file and the line, so
-naming either again would be saying the same thing twice, and the agent can
-read the code from the reference it has just been given.
-
-The reference is the form `sidekick.nvim` emits, and **the space before the
-colon matters**: its commit `d570e1f` ("different format that should work for
-most cli tools") added the space and the `L` together, because `@path:9` made
-the agent's @-mention resolver read the whole token as a filename and attach
-nothing.
-
-Claude Code's Neovim integration does not use this form at all — it sends
-`at_mentioned` as JSON-RPC over a websocket, with `filePath` and a line range.
-That is a different channel; differ writes text into the agent's terminal.
-
-How much of a reference a comment gets depends on what still resolves against
-the file on disk:
-
-| | |
-|---|---|
-| the line resolves | `@src/cache.ts :L12` |
-| only the file does | `@src/cache.ts` |
-| nothing does | no reference; the prose still says where it was |
-
-The middle case covers more than deleted code. Under `-s` and `differ commit`
-the diff's **new** side is the index, not the working tree — so differ asks
-whether the two hold the same bytes, and only degrades when they do not:
-stage a change, then edit above it, and the diff still says line 3 while the
-code has moved to line 8, so you get `@path`. Stage, review and commit
-without touching the file in between and the line reference stands. An
-old-side line number never resolves either, and neither does a path
-containing a space, which the agent's resolver would read as two tokens. In
-each case the file is usually still there, and `sidekick.nvim` has a bare
-`@path` form for exactly that — attaching the file and losing the line beats
-attaching nothing.
-
-Which entry the cursor is on decides this, not the flag differ started with:
-git lists a file with both staged and unstaged changes twice, and walking
-from one to the other re-resolves a comment into the other's line numbers.
-
-When the line does *not* resolve, the reference alone is not enough — so
-those comments carry the diff's own coordinates and the hunk, which is then
-the only thing that says which code is meant:
-
-```
-@src/api/client.ts
-Line: 10 (old)
-
-Changed code:
--  return fetch(url)
-+  return await fetch(url)
-
-Comment:
-this needs awaiting too
-```
-
-The comment editor is a box in the middle of the screen with the diff still
-visible around it, so you can see the line you are writing about. `ctrl+s`
-saves, `esc` cancels. Comments are multiline, shown inline under the line
-they refer to, and marked `pending` until sent.
-
-They outlive the process. Every change to a comment is written to
-`.git/differ/review.json` — not on quit, which would be no help against a
-crash, a closed tmux window or a `kill` — and read back silently on the next
-start. Nothing lands in the working tree, so there is nothing to ignore and
-nothing to commit, and the file dies with the repository. A linked worktree
-keeps its own, because a review belongs to a checkout.
-
-A pending comment only comes back if the content it was written about is
-still byte-for-byte what it was. That is the working tree normally, and the
-*staged* content for a comment written under `-s` or in `differ commit` —
-which is what you were reading there, so an unstaged edit does not disturb
-it. If the agent rewrote that content while differ was closed, the comment
-goes and the file is unreviewed again: it needs reading again, and a comment
-about code that has been replaced is worse than no comment. It goes for good
-— there is no dormant copy waiting for the old bytes to come back. What does
-come back is re-anchored against the diff as it is now, the same way it would
-be if the change had happened while you were watching.
-
-Files you read without commenting on come back read too, so an hour of
-reading does not report as nothing — and they stop counting as read if the
-agent rewrote them, exactly as during a session.
-
-**One differ at a time per repository.** A second one in the same checkout
-reviews normally but saves nothing, and says so in the bar: each save writes
-the whole review out, so two of them would overwrite each other — and could
-hand the agent a comment it had already been sent. Closing the first frees
-it; so does killing it.
-
-Quitting with unsent comments still asks for confirmation. Not because they
-would be lost — they will be there next time — but because the agent has not
-been told.
-
-### Progress and history
-
-The status bar carries the whole review: `3/7 reviewed  2 comments  1 pending
-1 changed`. A file counts as reviewed once you have looked at it in review
-mode, and stops counting when the agent rewrites it — that is what `changed`
-means, and looking at it again clears it.
-
-A rewrite is noticed by fingerprinting the content differ is actually showing
-you — the working-tree file normally and under `-r`, git's own object id for
-the staged content under `-s`. So staging never counts as a rewrite, and
-neither does a formatter writing the same bytes back.
-
-`H` lists what has been sent, most recent first:
-
-```
- already sent
-
- 14:22:06  2 comments → tmux  sent  src/api/client.ts, src/auth/login.ts
- 14:19:41  1 comment → tmux   failed: tmux pane %9 is gone  src/legacy.ts
-```
-
-Failures are in the list on purpose: a send that went nowhere is the one worth
-being able to look up. A failed send changes nothing — the comments stay
-pending and can be retried once the target is back.
-
-### Stale comments
-
-When the agent edits a file you are reviewing, comments follow the line they
-were written against rather than a line number. If that line is gone the
-comment is marked `stale` (`!`), with the reason shown inline and the file
-flagged in the list. Sending stale comments takes a second, explicit press —
-feedback about code that no longer exists is never sent by accident. If the
-line comes back, so does the comment.
-
-A comment that was already sent is never sent again, even if it later goes
-stale because its file left the diff.
+A `stale` comment takes a second, explicit press to send — feedback about code
+that no longer exists is never sent by accident. A comment already sent is
+never sent twice.
 
 ### Commit Mode
 
@@ -414,9 +245,6 @@ stale because its file left the diff.
 | `esc`   | cancel         |
 
 ### Branch Picker
-
-`b` opens a box over the view, so the changeset you were looking at is still
-there behind it:
 
 ```
 ╭───────────────────────────────────────────────────────╮
@@ -428,12 +256,9 @@ there behind it:
 │     feat/payload-90                                   │
 │     feat/agent-picker-84                              │
 │                                                       │
-│  type filters · ↑/↓ · enter switches · ^n new · esc    │
+│  type filters · ↑/↓ · enter switches · ^n new · esc   │
 ╰───────────────────────────────────────────────────────╯
 ```
-
-`*` marks the branch checked out, `12/34` is how much of the list the filter
-matches, and `ctrl+n` turns the same box into the new-branch prompt.
 
 | Key             | Action               |
 | --------------- | -------------------- |
@@ -443,85 +268,21 @@ matches, and `ctrl+n` turns the same box into the new-branch prompt.
 | `ctrl+n`        | create new branch    |
 | `esc`           | clear filter / close |
 
-## When something fails
-
-Failures get one line in differ's own voice, with what to do about it:
-
-```
-push failed  ·  ! details  ·  the remote has commits you do not — pull with F first
-```
-
-`!` shows the failure in full, including what git (or tmux, or the clipboard
-helper) actually said. It comes before the hint in the line because the bar is
-one row and cuts what does not fit — with the hint first, a long one took the
-`!` with it. The bar gets differ's own sentence, not that text — except
-where differ has nothing to say, when it gets one capped line of it. And it is
-never thrown away — for the failures nobody anticipated it is the only
-useful thing there is.
-
-A failure changes nothing else: not your place in the diff, not the comments
-you have written. Reading the line and trying again is the whole recovery.
-
-An empty changeset says so rather than showing a blank panel, and says what
-would change it:
-
-```
- No changes
-
- Your working tree is clean.
-```
-
-## AI Commit Messages
-
-When pressing `c`, differ uses `claude -p` (Claude CLI) to generate a commit message from the staged diff. The message is pre-filled in the input — edit or confirm with Enter.
-
-Requires [Claude CLI](https://docs.anthropic.com/en/docs/claude-code) installed. Falls back to empty input if unavailable.
-
 ## Themes
 
 ```bash
 differ --theme gruvbox
 ```
 
-| Name         | Palette                                                      |
-| ------------ | ------------------------------------------------------------ |
-| `mocha`      | Catppuccin-derived — the default, also reachable as `dark`    |
-| `latte`      | Catppuccin-derived, light — also reachable as `light`         |
-| `gruvbox`    | Gruvbox Dark (medium)                                        |
-| `tokyonight` | Tokyo Night (night)                                          |
-| `github`     | GitHub Dark                                                  |
+`mocha` (default, also `dark`), `latte` (also `light`), `gruvbox`,
+`tokyonight`, `github`. Each is paired with the matching Chroma style so the
+chrome and the syntax highlighting agree, and all five are held to a contrast
+floor by a test.
 
-Each is paired with the Chroma style of the same family, so the chrome and the
-syntax highlighting agree. In Gruvbox, Tokyo Night and GitHub Dark every
-palette colour is its upstream value; the diff backgrounds are differ's own in
-all five, because no upstream palette has a concept of them. `mocha` and
-`latte` are differ's original two themes and only *derived* from Catppuccin —
-their purple is One Dark's and their staged green is Dracula's.
+`t` opens a picker that repaints the screen as you move, so you choose by
+looking rather than by name. `enter` keeps it and writes it to the config.
 
-Every theme is held to the same contrast floor by a test — the diff colours,
-the marks differ draws inside the diff, and review comment text, which is the
-user's own words and gets the body-text bar rather than the accent one.
-
-An unknown `--theme` is refused and the choices are listed; a stale name in the
-config falls back quietly rather than stopping differ from opening.
-
-`t` opens the picker, anywhere a key is a command:
-
-```
- theme
-
-  mocha   in use   + added  - removed  context
-  latte   + added  - removed  context
-▍ gruvbox   + added  - removed  context
-  tokyonight   + added  - removed  context
-  github   + added  - removed  context
-
- j/k to try · enter to keep · esc to cancel
-```
-
-Moving the selection repaints the screen in that theme, so you are choosing by
-looking rather than by name. `enter` keeps it and writes it to the config;
-`esc` puts back what was there and writes nothing.
+## Configuration
 
 Config file: `~/.config/differ/config.json`
 
@@ -544,240 +305,83 @@ Config file: `~/.config/differ/config.json`
 }
 ```
 
-`feedback_target` decides where review feedback goes: `clipboard` (default),
-`stdout`, or `tmux`. The clipboard target shells out to `pbcopy` on macOS and
-`wl-copy`/`xclip`/`xsel` on Linux, so it does the right thing over SSH.
+`feedback_target` is where a review goes: `clipboard` (default), `stdout` or
+`tmux`. `A` sets it for you. The clipboard target shells out to `pbcopy` or
+`wl-copy`/`xclip`/`xsel`, so it does the right thing over SSH.
 
-A failed send never discards comments — they stay pending and the error is
-shown, so you can fix the target and send again.
+`commit_msg_cmd` generates a commit message from the staged diff when you
+press `c`; it is pre-filled for you to edit. Any command that reads a diff on
+stdin works, and differ carries on without one.
 
-### Choosing the agent
+## Editor
 
-`A` lists the agents running in tmux and sends the review to the one you pick:
+`e` opens the file under the cursor — at the cursor's line, from the diff or a
+review. differ keeps running.
 
-```
- agent
-
-▍ differ:2  claude  /Users/you/git/private/differ
-  ELI-panda:2  claude  /Users/you/git/work/ELI-panda
-  personal-web:2 %5  opencode  /Users/you/git/private/personal-web
-  personal-web:2 %6  claude  /Users/you/git/private/personal-web
-
- j/k · enter chooses · esc cancels
-```
-
-It writes `tmux_target` and sets `feedback_target` to `tmux`, so the choice
-survives a restart. The agent in differ's own tmux session comes first, then
-one working in this repository.
-
-Discovery **walks each pane's process tree** rather than reading its current
-command: an agent started through `npx`, a shell function or a wrapper script
-does not show up as the pane's command. It looks for `claude`, `codex`,
-`gemini`, `copilot`, `opencode` and `aider`, and the whole scan is two
-subprocesses however many panes there are: one `tmux list-panes -a` and one
-`ps`. The session differ itself is in — which is what puts the agent beside
-you first — comes out of that same listing.
-
-It finds the documented invocation of each: `npx @anthropic-ai/claude-code`,
-`uvx --from aider-chat aider`, `uv run aider`, `gh copilot`. A one-shot is
-not offered — `claude -p` is differ's own default commit-message command, and
-pasting a review into it would write to a process that has already read its
-input.
-
-The choice takes effect immediately, not at the next start: it re-resolves
-where feedback goes as well as writing the config.
-
-Two agents in one window are told apart by their pane id, which is shown only
-when the session and window alone would be ambiguous.
-
-If the pane you chose has since exited, the picker reopens rather than leaving
-you to work out why a send failed. It never starts an agent — it chooses among
-those already running.
-
-## Reviewing agent changes in tmux
-
-The workflow differ is built for: a coding agent in one pane, differ in another.
-
-```text
-tmux
-├── Claude Code
-└── differ
-```
-
-```json
-{
-  "feedback_target": "tmux",
-  "tmux_target": ""
-}
-```
-
-An empty `tmux_target` means the last active pane — in a two-pane layout, and
-from a `display-popup`, that is the pane you came from. Set it explicitly to
-any tmux pane target (`%12`, `session:window.pane`) to pin it.
-
-Press `r` to review, `c` to comment on a line, `S` to send everything pending.
-The payload is pasted into the target pane's prompt using a tmux paste buffer,
-so multiline feedback arrives intact.
-
-differ does **not** press Enter for you. The feedback lands in the agent's
-prompt and you send it — which means a misconfigured target can never execute
-anything. differ also refuses to paste into its own pane.
-
-If tmux is unavailable, the pane is gone, or the target resolves to differ
-itself, the send fails with a specific error and your comments stay pending.
-
-### Editor
-
-`e` opens the file under the cursor in your editor. differ keeps running
-either way, and from the diff or a review the editor opens at the line the
-cursor is on.
-
-**Which editor.** `editor_cmd`, else `$EDITOR`, else `vi`. `$EDITOR` may carry
-arguments (`code --wait`). `editor_cmd` supports `{file}` (absolute path),
-`{repo}` (repo root) and `{line}`; each is substituted inside a single
-argument, so a path containing spaces needs no quoting.
-
-Without an explicit `{file}` in `editor_cmd`, differ adds the line itself for
-editors it can check: `+<line>` for `vi`/`vim`/`nvim`/`view`/`nano`, and
-`--goto <file>:<line>` for `code`. Any other editor gets the file alone.
-
-`editor_line_args` replaces that table for an editor differ does not know. It
-is a whitespace-separated template over `{file}` and `{line}`, used only when
-a line is known:
+Which editor: `editor_cmd`, else `$EDITOR`, else `vi`. `editor_cmd` supports
+`{file}`, `{repo}` and `{line}`, substituted inside a single argument so
+spaces need no quoting. Without `{file}` differ adds the line itself for
+editors it knows (`+<line>` for vi-likes, `--goto` for `code`);
+`editor_line_args` is the escape hatch for one it does not:
 
 ```json
 { "editor_line_args": "{file}:{line}" }     // helix, sublime
 { "editor_line_args": "+{line} {file}" }    // emacs, micro
 ```
 
-**Where it opens** — `editor_strategy`:
+Where it opens — `editor_strategy`:
 
 | value | what happens |
 |---|---|
-| `auto` (default) | reuse an editor already open in this tmux session → else a new tmux window → else take over differ's terminal |
+| `auto` (default) | reuse an nvim already open in this tmux session → else a new tmux window → else take over differ's terminal |
 | `reuse` | only reuse; say so when there is nothing to reuse |
 | `window` | always a new tmux window |
-| `inline` | always take over differ's terminal, and resume when the editor exits |
-| `detach` | run the editor in the background and carry on |
+| `inline` | take over differ's terminal, resume when the editor exits |
+| `detach` | run it in the background and carry on |
 
-Outside tmux `reuse` and `window` are refused with a message rather than
-silently downgraded, so a setting that cannot work never looks like it did.
+Outside tmux, `reuse` and `window` are refused with a message rather than
+silently downgraded. Reuse needs nvim's RPC socket and sends `:drop`, so
+nothing unsaved is ever at risk. `editor_panes` and `editor_target` adjust
+which panes it will consider and how far it reaches.
 
-**Reuse** finds a pane in differ's own tmux session that is running
-`nvim`/`vim`/`vi`, hands it the file over nvim's RPC socket, and focuses that
-pane. Among several candidates, one in differ's own session wins, then one
-sitting in this repository, then differ's own window, then the lowest window
-index.
-
-Two settings adjust what reuse looks for:
-
-| setting | default | what it does |
-|---|---|---|
-| `editor_panes` | `["nvim","vim","vi","view"]` | which pane commands count as an editor. Name your own if you run something else in a pane. |
-| `editor_target` | `session` | how far reuse reaches: `session` is differ's own, `any` is every session on the machine, or give one session's name. |
-
-`editor_target` defaults to differ's own session on purpose: with an editor
-open in every session, anything looser can jump into a different project.
-`any` also moves your tmux client to the editor's session, since focusing a
-pane in a session you are not attached to would open the file out of sight.
-
-Note that `editor_panes` only decides *which pane* is offered the file —
-delivering it still needs nvim's RPC socket, so naming an editor that has no
-such socket means reuse finds the pane, cannot reach it, and falls back to a
-new window.
-
-Nothing unsaved is ever at risk: differ sends `:drop`, which reuses a window
-already showing the file and, when the current buffer is modified, hides it
-(with nvim's default `hidden`) or opens a window for the target instead of
-overwriting it. differ never sends `:edit!`, and passes nvim's own complaint
-straight through if it refuses.
-
-Reuse needs nvim's RPC socket, which nvim creates by default — under
-`$XDG_RUNTIME_DIR` on Linux and `$TMPDIR/nvim.$USER/` on macOS. A plain `vim`
-has no such socket, so it gets a new window instead.
-
-**Other editors.** VS Code, Zed and Sublime reuse their own window already and
-want neither a terminal nor a tmux window — that is what `detach` is for.
-differ does not try to guess which editor is which, so tell it:
+GUI editors reuse their own window already, so give them `detach`:
 
 ```json
-{
-  "editor_cmd": "code -r --goto {file}:{line}",
-  "editor_strategy": "detach"
-}
+{ "editor_cmd": "code -r --goto {file}:{line}", "editor_strategy": "detach" }
+{ "editor_cmd": "zed {file}:{line}",            "editor_strategy": "detach" }
 ```
 
-`-r` makes VS Code reuse its window instead of opening a new one, and leaving
-`--wait` off lets it return immediately. The same shape works for others:
+An `editor_cmd` starting with `tmux` runs exactly as written and ignores
+`editor_strategy`.
 
-```json
-{ "editor_cmd": "zed {file}:{line}",  "editor_strategy": "detach" }
-{ "editor_cmd": "subl {file}:{line}", "editor_strategy": "detach" }
-{ "editor_cmd": "idea --line {line} {file}", "editor_strategy": "detach" }
-```
+## tmux
 
-**Timeouts.** `editor_timeout_ms` (default 5000) bounds a tmux command or an
-editor open; `editor_probe_timeout_ms` (default 1000) bounds asking a running
-nvim which pane it lives in. Raise the second over a slow SSH hop — an nvim
-that does not answer in time is simply passed over, and reuse falls back to a
-new window.
-
-`detach` starts the editor and leaves it running — it never waits for it, so
-a launcher that stays in the foreground (`gvim`, `emacs`, `code --wait`, the
-JetBrains launcher with no instance up) is not killed, and one that exits at
-once but leaves a GUI process behind does not hold differ up. It is watched
-only briefly, so an editor that fails on the spot — a bad flag, a missing
-profile — still reports its own stderr in the status bar instead of failing
-silently.
-
-An `editor_cmd` that starts with `tmux` runs exactly as written and ignores
-`editor_strategy` — it is already a mechanism. So a recipe like
-`tmux new-window -c {repo} nvim {file}` keeps working.
-
-## Tips
-
-### Tmux floating window
-
-Bind differ to a key in tmux for quick access as a popup overlay:
+The layout differ is built for is an agent in one pane and differ in another.
+To open it as a popup:
 
 ```tmux
 bind g display-popup -E -w 90% -h 90% "cd #{pane_current_path} && differ"
 ```
 
-Press `prefix + g` to open differ in a floating window over your current session. It closes automatically on quit.
+## When something fails
 
-## Architecture
+One line, in differ's own voice, with what to do:
 
-Worth knowing if you are changing it:
+```
+push failed  ·  ! details  ·  the remote has commits you do not — pull with F first
+```
 
-- `internal/git` — every git operation, via `os/exec`. No go-git.
-- `internal/review` — the review session: comments, per-file state, feedback
-  text, and what of it survives a restart. Never imports the UI.
-- `internal/feedback` — where a review goes: clipboard, stdout or tmux.
-- `internal/editor` — decides *and* performs "open this file in an editor".
-- `internal/theme` — colour values only, no lipgloss.
-- `internal/config` — the config struct, and load/save of
-  `~/.config/differ/config.json`.
-- `internal/testutil` — temporary git repositories and diff fixtures, for tests.
-- `internal/ui` — the Bubble Tea models, the diff parser and the renderer.
+`!` shows what git, tmux or the clipboard helper actually said. A failure
+costs you nothing else — not your place in the diff, not the comments you have
+written.
 
-`CLAUDE.md` carries the rules that are not obvious from the code, including a
-long list of things that looked right and were not.
+## Contributing
 
-## Features
+`internal/git` shells out to git; `internal/review` holds the session and
+never imports the UI; `internal/feedback` delivers it; `internal/editor`
+decides and performs "open this file"; `internal/ui` is the Bubble Tea models,
+the diff parser and the renderer.
 
-- Syntax highlighting via Chroma (Go, JS/TS, Python, Rust, CSS, HTML, JSON, YAML, Markdown, ...)
-- Staged/unstaged/untracked file indicators
-- Stage/unstage individual files or all at once
-- Split (side-by-side) diff view
-- Branch picker with type-to-filter and branch creation (`ctrl+n`)
-- Push with auto `--set-upstream` for new branches
-- Pull with upstream ahead/behind tracking
-- Per-file added/deleted line counts in file list
-- Open the file under the cursor in `$EDITOR` without leaving differ
-- Commit flow with AI-generated messages
-- Commit log browser with diff preview
-- Compare against any branch/tag/commit ref
-- Auto-refresh: the repository is probed once a second, and the rebuild only
-  runs when something moved
-- Single binary, no runtime dependencies
+`CLAUDE.md` has the rules that are not obvious from the code, including a long
+list of things that looked right and were not. Read it before changing
+anything.

@@ -56,7 +56,7 @@ func TestREADME_TheReferenceTableMatchesReference(t *testing.T) {
 // names the integration and the @ form has to carry a negation.
 func TestREADME_DoesNotClaimTheWrongIntegration(t *testing.T) {
 	t.Parallel()
-	readme := normaliseNames(strings.ToLower(readReadme(t)))
+	readme := normaliseNames(unwrap(strings.ToLower(readReadme(t))))
 
 	if !strings.Contains(readme, "does not use this form") {
 		t.Fatal("the README no longer says which integration does not use this form")
@@ -99,6 +99,24 @@ func normaliseNames(text string) string {
 		text = strings.ReplaceAll(text, r.from, r.to)
 	}
 	return text
+}
+
+// unwrap joins a markdown paragraph's hard-wrapped lines back into sentences.
+//
+// The wrapping is not semantic, and treating it as though it were made this
+// whole check weaker than it looks: the sentinel below is a phrase, and a
+// line break anywhere inside it hid the sentence entirely — which is how a
+// rewritten README with the claim intact still failed. splitClauses had the
+// same hole in the other direction, cutting one assertion into two at a line
+// break and finding neither half incriminating.
+//
+// A blank line still separates paragraphs, so the two are not run together.
+func unwrap(text string) string {
+	paragraphs := strings.Split(text, "\n\n")
+	for i, p := range paragraphs {
+		paragraphs[i] = strings.Join(strings.Fields(p), " ")
+	}
+	return strings.Join(paragraphs, "\n\n")
 }
 
 // splitClauses cuts prose at the punctuation that separates one assertion
