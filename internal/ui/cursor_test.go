@@ -23,11 +23,38 @@ func diffModel(t *testing.T, fixture string, height int) Model {
 	return updated.(Model)
 }
 
+// key builds the KeyMsg for a key name as the keymap writes it.
+//
+// It used to return tea.KeyDown for anything longer than one rune, silently:
+// key("esc"), key("enter") and key("ctrl+c") all pressed Down instead, so a
+// test could assert on an escape that never happened and pass for the wrong
+// reason. An unrecognised name now panics rather than pressing something else.
 func key(s string) tea.KeyMsg {
-	if len(s) == 1 {
+	if named, ok := namedKeys[s]; ok {
+		return tea.KeyMsg{Type: named}
+	}
+	if len([]rune(s)) == 1 {
 		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
 	}
-	return tea.KeyMsg{Type: tea.KeyDown}
+	panic("key: unknown key name " + s + " — add it to namedKeys rather than letting it press something else")
+}
+
+var namedKeys = map[string]tea.KeyType{
+	"enter":  tea.KeyEnter,
+	"esc":    tea.KeyEsc,
+	"tab":    tea.KeyTab,
+	"space":  tea.KeySpace,
+	"up":     tea.KeyUp,
+	"down":   tea.KeyDown,
+	"left":   tea.KeyLeft,
+	"right":  tea.KeyRight,
+	"ctrl+c": tea.KeyCtrlC,
+	"ctrl+s": tea.KeyCtrlS,
+	"ctrl+d": tea.KeyCtrlD,
+	"ctrl+u": tea.KeyCtrlU,
+	"ctrl+n": tea.KeyCtrlN,
+	"ctrl+j": tea.KeyCtrlJ,
+	"ctrl+k": tea.KeyCtrlK,
 }
 
 func press(t *testing.T, m Model, keys ...string) Model {

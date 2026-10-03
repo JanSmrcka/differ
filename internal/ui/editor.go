@@ -76,7 +76,11 @@ func (m Model) editorLine() int {
 	// previous file's — after entering the diff, or after n/p, until
 	// diffLoadedMsg arrives. A line taken from it would be about the wrong
 	// file, so claim none until the two agree.
-	if m.renderer == nil || m.rendererPath != m.currentFilePath() {
+	// The same reason covers a held diff: it is knowingly older than the file,
+	// so its line numbers describe a version that is no longer on disk.
+	// Opening an editor at a confidently wrong line is worse than opening it
+	// at the top.
+	if m.renderer == nil || m.rendererPath != m.currentFilePath() || m.diffStale() {
 		return 0
 	}
 
@@ -106,8 +110,11 @@ func (m Model) editorLine() int {
 
 func (m Model) handleEditorPlan(msg editorPlanMsg) (tea.Model, tea.Cmd) {
 	if msg.err != nil {
-		m.statusMsg = msg.err.Error()
-		return m, nil
+		// Through fail, like every other failure. It was assigned raw, so a
+		// tmux error — which internal/editor deliberately appends stderr to —
+		// arrived in the one-line bar verbatim, three lines of it, with
+		// m.problem left nil so `!` said nothing had gone wrong.
+		return m.fail("opening the editor", msg.err), nil
 	}
 	plan := msg.plan
 	if plan.Kind == editor.KindDetached {
@@ -128,7 +135,7 @@ func (m Model) handleEditorPlan(msg editorPlanMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) handleEditorDone(msg editorDoneMsg) (tea.Model, tea.Cmd) {
 	if msg.err != nil {
-		m.statusMsg = "editor failed: " + msg.err.Error()
+		m = m.fail("the editor", msg.err)
 	} else if msg.desc != "" {
 		m.statusMsg = msg.desc
 	}
@@ -140,5 +147,6 @@ func (m Model) handleEditorDone(msg editorDoneMsg) (tea.Model, tea.Cmd) {
 	// differ had given up the terminal, so the file may already have been
 	// edited and closed. Reload without resetting, so the reviewer comes back
 	// to the file and position they left.
-	return m, tea.Batch(m.refreshFilesCmd(), m.loadDiffCmd(false))
+	refresh := m.nextRefresh()
+	return m, tea.Batch(refresh, m.loadDiffCmd(false))
 }

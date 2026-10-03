@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/alecthomas/chroma/v2"
+
 	"github.com/charmbracelet/lipgloss"
 	"github.com/jansmrcka/differ/internal/review"
 	"github.com/jansmrcka/differ/internal/theme"
@@ -29,7 +31,14 @@ type DiffRenderer struct {
 	theme    theme.Theme
 	width    int
 
-	split    bool
+	split bool
+	// chroma is this renderer's syntax palette, resolved once from the theme
+	// it was built with. Per renderer rather than global: two renderers can be
+	// in flight at different themes.
+	chroma *chroma.Style
+	// geom is the column arithmetic for this diff, sized once from its
+	// largest line number.
+	geom     geometry
 	tabWidth int
 	comments []review.Comment
 
@@ -58,13 +67,10 @@ type displayRow struct {
 
 // NewDiffRenderer renders every line up front.
 func NewDiffRenderer(parsed ParsedDiff, filename string, styles Styles, t theme.Theme, width int) *DiffRenderer {
-	// Without this the Chroma style stays nil and every line renders
-	// unhighlighted.
-	initChromaStyle(t.ChromaStyle)
-
 	r := &DiffRenderer{
 		parsed: parsed, filename: filename, styles: styles,
 		theme: t, width: width, tabWidth: defaultTabWidth,
+		geom: diffGeometry(parsed, width), chroma: chromaStyleFor(t.ChromaStyle),
 	}
 	r.render()
 	return r
@@ -91,7 +97,11 @@ func (r *DiffRenderer) ensure() {
 // The original keeps its tabs so comment anchors and excerpts show the file as
 // it really is.
 func (r *DiffRenderer) displayLine(dl DiffLine) DiffLine {
-	dl.Content = expandTabs(dl.Content, r.tabWidth)
+	// Carriage returns are dropped, not rendered: a CR mid-line makes the
+	// terminal redraw over itself, and Chroma turns it into a newline which is
+	// stripped anyway. Dropping it here means the string the span is measured
+	// against is the string that gets painted.
+	dl.Content = expandTabs(strings.ReplaceAll(dl.Content, "\r", ""), r.tabWidth)
 	return dl
 }
 
@@ -125,12 +135,16 @@ func (r *DiffRenderer) render() {
 	byLine := r.byLine
 	r.rows = r.rows[:0]
 
+	// The number block is one column per side in split view and two in
+	// unified, and the comment indent is measured from it.
+	r.geom.split = r.split
+
 	if !r.split {
 		r.pairs = nil
 		for i, dl := range r.parsed.Lines {
 			r.rowOf[i] = len(r.rows)
 			r.rows = append(r.rows, displayRow{
-				text: renderDiffLineGutter(r.displayLine(dl), r.filename, r.styles, r.theme, r.width, r.gutterFor(byLine, i)),
+				text: renderDiffLineGutter(r.displayLine(dl), r.filename, r.styles, r.theme, r.geom, r.gutterFor(byLine, i), r.chroma),
 				line: i, pair: -1,
 			})
 			r.appendCommentRows(byLine[i])
@@ -163,7 +177,10 @@ func (r *DiffRenderer) hasComment(byLine map[int][]review.Comment, idx int) bool
 func (r *DiffRenderer) appendCommentRows(cs []review.Comment) {
 	for _, c := range cs {
 		for _, text := range r.renderComment(c) {
-			r.rows = append(r.rows, displayRow{text: text, line: -1, pair: -1})
+			// A comment body is text the user typed, so it needs the same
+			// guard the code rows have: a long one wrapped and shifted every
+			// row below it.
+			r.rows = append(r.rows, displayRow{text: clipRow(text, r.width), line: -1, pair: -1})
 		}
 	}
 }
@@ -200,7 +217,7 @@ func (r *DiffRenderer) anchorIndex(c review.Comment) (int, bool) {
 
 // renderComment lays a comment out as indented rows under its anchor.
 func (r *DiffRenderer) renderComment(c review.Comment) []string {
-	indent := strings.Repeat(" ", gutterWidth+lineNumWidth*2+1)
+	indent := strings.Repeat(" ", gutterWidth+r.geom.numbersWidth())
 	bar := r.styles.CommentBar.Render(commentBar)
 
 	label := fmt.Sprintf("line %d", c.StartLine)
@@ -250,14 +267,27 @@ func (r *DiffRenderer) rowGutters(row splitRow, cursor int) (left, right string)
 }
 
 func (r *DiffRenderer) renderRow(row splitRow, leftGutter, rightGutter string) string {
+	// Two gutters and the separator between them come out of the panel, and
+	// the odd column left over goes to the right side — halving and doubling
+	// left a column of the panel unused at every even width, which then made
+	// the hunk rule one column longer than the code rows.
+	room := max(r.width-2*gutterWidth-verticalDividerWidth, 0)
+	leftG := geometry{numW: r.geom.numW, width: room / 2, split: true}
+	rightG := geometry{numW: r.geom.numW, width: room - room/2, split: true}
+
 	if row.left != nil && row.left.Type == LineHunkHeader {
-		return renderHunkLine(r.displayLine(*row.left), r.styles, r.width, leftGutter)
+		// The header spans the whole row, but its line-number stand-in has to
+		// match what a split row carries — one column of numbers, not two — or
+		// its text sits several columns right of the code it heads.
+		header := geometry{numW: r.geom.numW, width: r.width, split: true}
+		return renderHunkLine(r.displayLine(*row.left), r.styles, header, leftGutter)
 	}
-	panelW := (r.width - 2*gutterWidth - 1) / 2
-	left := renderSplitSide(r.displaySide(row.left), r.filename, r.styles, r.theme, panelW, true)
-	right := renderSplitSide(r.displaySide(row.right), r.filename, r.styles, r.theme, panelW, false)
-	sep := lipgloss.NewStyle().Foreground(lipgloss.Color(r.theme.BorderFg)).Render("│")
-	return leftGutter + left + sep + rightGutter + right
+	l, rr := r.displaySide(row.left), r.displaySide(row.right)
+	oldSpan, newSpan := r.changedSpans(l, rr)
+	left := renderSplitSide(l, r.filename, r.styles, r.theme, leftG, true, oldSpan, r.chroma)
+	right := renderSplitSide(rr, r.filename, r.styles, r.theme, rightG, false, newSpan, r.chroma)
+	sep := lipgloss.NewStyle().Foreground(lipgloss.Color(r.theme.BorderFg)).Render(verticalDivider)
+	return clipRow(leftGutter+left+sep+rightGutter+right, r.width)
 }
 
 // displaySide expands tabs on one side of a split row, preserving nil.
@@ -293,7 +323,7 @@ func (r *DiffRenderer) renderCursorRow(row displayRow, cursor int) string {
 		lg, rg := r.rowGutters(r.pairs[row.pair], cursor)
 		return r.renderRow(r.pairs[row.pair], lg, rg)
 	case row.line >= 0:
-		return renderDiffLineGutter(r.displayLine(r.parsed.Lines[row.line]), r.filename, r.styles, r.theme, r.width, cursorGutter(r.styles))
+		return renderDiffLineGutter(r.displayLine(r.parsed.Lines[row.line]), r.filename, r.styles, r.theme, r.geom, cursorGutter(r.styles), r.chroma)
 	default:
 		return row.text
 	}
@@ -319,3 +349,45 @@ func (r *DiffRenderer) RowFor(cursor int) (int, bool) { return r.rowFor(cursor) 
 
 // Parsed exposes the diff the renderer was built from.
 func (r *DiffRenderer) Parsed() ParsedDiff { return r.parsed }
+
+// maxChangedShare is how much of a line may differ before the pair counts as
+// a rewrite rather than an edit.
+const maxChangedShare = 0.6
+
+// share is what fraction of a line of n runes a span of length k covers. An
+// empty line has nothing to cover.
+func share(k, n int) float64 {
+	if n == 0 {
+		return 0
+	}
+	return float64(k) / float64(n)
+}
+
+// changedSpans works out which part of a paired removed/added row actually
+// differs, so each side can emphasise it.
+//
+// Only a replacement gets one: a row with one side empty is a plain insertion
+// or deletion, and the +/- already says so. A pair with nothing in common is a
+// rewritten line, where emphasising everything would be a wall of colour
+// saying no more than the line type does.
+func (r *DiffRenderer) changedSpans(left, right *DiffLine) (oldSpan, newSpan span) {
+	if left == nil || right == nil {
+		return span{}, span{}
+	}
+	if left.Type != LineRemoved || right.Type != LineAdded {
+		return span{}, span{}
+	}
+
+	start, endOld, endNew := changedRange(left.Content, right.Content)
+	oldRunes, newRunes := len([]rune(left.Content)), len([]rune(right.Content))
+
+	// Most of the line having changed makes it a rewrite, not an edit, and
+	// emphasising nearly all of it says no more than the +/- already does.
+	// Exact equality was the first test of that and far too strict: one
+	// shared character — a semicolon, a brace, a comma — was enough to defeat
+	// it, and two unrelated lines got twenty of twenty-two runes emphasised.
+	if share(endOld-start, oldRunes) > maxChangedShare || share(endNew-start, newRunes) > maxChangedShare {
+		return span{}, span{}
+	}
+	return span{from: start, to: endOld}, span{from: start, to: endNew}
+}

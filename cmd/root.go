@@ -61,8 +61,11 @@ line and send the result to a coding agent.`,
   differ review -s       # review the staged changes
   differ log             # browse recent commits
   differ commit          # review what is staged, then commit`,
-	Version: version,
-	RunE:    runDiff,
+	// Version is assigned in init, not here: this literal is evaluated when
+	// the package variable is initialised, which is before init runs — so the
+	// build-info fallback below never reached Cobra and `go install …@latest`
+	// reported "dev" forever.
+	RunE: runDiff,
 }
 
 var reviewCmd = &cobra.Command{
@@ -96,11 +99,8 @@ var commitCmd = &cobra.Command{
 }
 
 func init() {
-	if version == "dev" {
-		if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
-			version = info.Main.Version
-		}
-	}
+	info, ok := debug.ReadBuildInfo()
+	setVersion(resolveVersion(version, info, ok))
 
 	// Usage belongs to a bad command line, not to a repository that turned
 	// out to have no such ref: printing it over a runtime failure buries the
@@ -117,7 +117,8 @@ func init() {
 		c.Flags().StringVarP(&flagRef, "ref", "r", "", "compare against a branch, tag or commit")
 	}
 	for _, c := range []*cobra.Command{rootCmd, reviewCmd, logCmd, commitCmd} {
-		c.Flags().StringVar(&flagTheme, "theme", "", "colour theme: dark or light")
+		c.Flags().StringVar(&flagTheme, "theme", "",
+			"colour theme: "+strings.Join(theme.ThemeNames(), ", "))
 		c.Flags().BoolVar(&flagNoColor, "no-color", false, "disable colour (also honours NO_COLOR)")
 	}
 	rootCmd.Flags().BoolVarP(&flagCommit, "commit", "c", false, "open straight into the commit message")
@@ -173,28 +174,51 @@ func isUnknownCommand(err error) bool {
 		strings.HasPrefix(msg, "unknown shorthand flag")
 }
 
-func resolveTheme(cfg config.Config) theme.Theme {
-	// NO_COLOR is a convention worth honouring: its presence, at any value,
-	// means no colour. https://no-color.org
+// resolveTheme picks the theme, and refuses a name it does not have.
+//
+// It used to fall back to dark without a word, so a typo in --theme left the
+// user wondering why the colours had not changed. A name from the *config*
+// still falls back rather than refusing: a stale config file should not stop
+// differ from opening.
+func resolveTheme(cfg config.Config) (theme.Theme, error) {
+	// The name is checked before the no-colour short-circuit. Accepting a
+	// typo because NO_COLOR happened to be set would make whether differ
+	// reports the mistake depend on an unrelated environment variable.
+	named, ok := theme.Themes[flagTheme]
+	if flagTheme != "" && !ok {
+		return theme.Theme{}, fmt.Errorf("unknown theme %q — use one of: %s",
+			flagTheme, strings.Join(theme.ThemeNames(), ", "))
+	}
+
+	// NO_COLOR is a convention worth honouring: set and not empty means no
+	// colour. https://no-color.org — "present and not an empty string".
 	if flagNoColor || os.Getenv("NO_COLOR") != "" {
-		return theme.NoColorTheme()
+		return theme.NoColorTheme(), nil
 	}
-	name := cfg.Theme
 	if flagTheme != "" {
-		name = flagTheme
+		return named, nil
 	}
-	if t, ok := theme.Themes[name]; ok {
-		return t
+	if t, ok := theme.Themes[cfg.Theme]; ok {
+		return t, nil
 	}
-	return theme.DarkTheme()
+	return theme.DarkTheme(), nil
 }
 
-func runDiff(cmd *cobra.Command, args []string) error { return openDiff(false) }
+func runDiff(cmd *cobra.Command, args []string) error { return openDiff(cmd, false) }
 
-func runReview(cmd *cobra.Command, args []string) error { return openDiff(true) }
+func runReview(cmd *cobra.Command, args []string) error { return openDiff(cmd, true) }
 
 // openDiff builds the model for the current changeset and runs the TUI.
-func openDiff(review bool) error {
+func openDiff(cmd *cobra.Command, review bool) error {
+	// The command line is checked before the repository. A typo in --theme is
+	// the user's mistake either way, and reporting it should not depend on
+	// where they happened to run differ from.
+	cfg := config.Load()
+	t, err := resolveTheme(cfg)
+	if err != nil {
+		return usageError{cmd: cmd, err: err}
+	}
+
 	repo, err := git.NewRepo(".")
 	if err != nil {
 		return err
@@ -213,8 +237,6 @@ func openDiff(review bool) error {
 		}
 	}
 
-	cfg := config.Load()
-	t := resolveTheme(cfg)
 	model := ui.NewModel(repo, cfg, files, untracked, ui.NewStyles(t), t, flagStaged, flagRef)
 	switch {
 	case review:
@@ -225,6 +247,12 @@ func openDiff(review bool) error {
 
 	p := tea.NewProgram(model, tea.WithAltScreen())
 	finalModel, err := p.Run()
+	if m, ok := finalModel.(ui.Model); ok {
+		// Before the error check: the claim on the review file has to be
+		// given up however the program ended, or the next differ in this
+		// repository would find it held and refuse to save.
+		defer m.Close()
+	}
 	if err != nil {
 		return err
 	}
@@ -237,6 +265,12 @@ func openDiff(review bool) error {
 	return nil
 }
 func runCommit(cmd *cobra.Command, args []string) error {
+	cfg := config.Load()
+	t, err := resolveTheme(cfg)
+	if err != nil {
+		return usageError{cmd: cmd, err: err}
+	}
+
 	repo, err := git.NewRepo(".")
 	if err != nil {
 		return err
@@ -251,14 +285,15 @@ func runCommit(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	cfg := config.Load()
-	t := resolveTheme(cfg)
 	styles := ui.NewStyles(t)
 
 	model := ui.NewModel(repo, cfg, files, nil, styles, t, true, "")
 	model.StartInCommitMode()
 	p := tea.NewProgram(model, tea.WithAltScreen())
 	finalModel, err := p.Run()
+	if m, ok := finalModel.(ui.Model); ok {
+		defer m.Close()
+	}
 	if err != nil {
 		return err
 	}
@@ -269,6 +304,12 @@ func runCommit(cmd *cobra.Command, args []string) error {
 }
 
 func runLog(cmd *cobra.Command, args []string) error {
+	cfg := config.Load()
+	t, err := resolveTheme(cfg)
+	if err != nil {
+		return usageError{cmd: cmd, err: err}
+	}
+
 	repo, err := git.NewRepo(".")
 	if err != nil {
 		return err
@@ -278,12 +319,33 @@ func runLog(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	cfg := config.Load()
-	t := resolveTheme(cfg)
 	styles := ui.NewStyles(t)
 
 	model := ui.NewLogModel(repo, styles, t, cfg.TabWidth)
 	p := tea.NewProgram(model, tea.WithAltScreen())
 	_, err = p.Run()
 	return err
+}
+
+// resolveVersion picks what --version reports.
+//
+// ldflags win: a release build is told exactly what it is. Otherwise the
+// module version the binary was built from, which is what `go install
+// github.com/jansmrcka/differ@latest` leaves behind. "(devel)" means a local
+// build of an untagged tree, which is less informative than "dev".
+func resolveVersion(ldflags string, info *debug.BuildInfo, ok bool) string {
+	if ldflags != "dev" {
+		return ldflags
+	}
+	if ok && info != nil && info.Main.Version != "" && info.Main.Version != "(devel)" {
+		return info.Main.Version
+	}
+	return ldflags
+}
+
+// setVersion keeps the package variable and what Cobra prints in step. They
+// were set in two places, one of which ran first and won.
+func setVersion(v string) {
+	version = v
+	rootCmd.Version = v
 }

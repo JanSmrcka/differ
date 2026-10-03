@@ -36,11 +36,63 @@ func repoWith(t *testing.T, names ...string) string {
 // PATH juggling — and therefore no t.Setenv, which would bar t.Parallel.
 func stubEditor(t *testing.T, name string) string {
 	t.Helper()
-	p := filepath.Join(t.TempDir(), name)
-	if err := os.WriteFile(p, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+	return writeScript(t, t.TempDir(), name, "exit 0")
+}
+
+// writeScript writes an executable shell script and returns its path.
+//
+// One function for all of them, because they share a hazard: on Linux,
+// exec'ing a file this process has just written can fail with ETXTBSY ("text
+// file busy"). os.WriteFile closes the file before returning, but a fork in
+// another goroutine — and these tests run in parallel, each forking an
+// editor — inherits the still-open descriptor, so the kernel sees the inode
+// open for writing at exec time. That is golang/go#22315, not a differ bug,
+// and it failed CI with the suite green locally.
+//
+// Writing through a temporary name and renaming does not help: ETXTBSY is
+// about the inode, not the path. What does help is not having a descriptor to
+// inherit, so the file is written and synced here and the exec is retried by
+// runPlan.
+func writeScript(t *testing.T, dir, name, body string) string {
+	t.Helper()
+	p := filepath.Join(dir, name)
+	f, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o755)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString("#!/bin/sh\n" + body + "\n"); err != nil {
+		_ = f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
 		t.Fatal(err)
 	}
 	return p
+}
+
+// runPlan runs a plan, retrying while the kernel still thinks the script is
+// open for writing. See writeScript: the window is a fork in another
+// goroutine and it closes on its own within milliseconds.
+//
+// Only ETXTBSY is retried. Every other error is the answer the test is
+// about, and swallowing a retry of those would hide the failure differ is
+// supposed to report.
+func runPlan(t *testing.T, ctx context.Context, plan Plan) error {
+	t.Helper()
+	var err error
+	for range 50 {
+		err = plan.Run(ctx)
+		if err == nil || !strings.Contains(err.Error(), "text file busy") {
+			return err
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("the script stayed busy for half a second: %v", err)
+	return err
 }
 
 func TestResolve_DefaultsToTheEditorFromTheEnvironment(t *testing.T) {
@@ -375,17 +427,15 @@ func TestResolve_DetachActuallyRunsTheCommand(t *testing.T) {
 	root := repoWith(t, "src.ts")
 	marker := filepath.Join(t.TempDir(), "ran.txt")
 	ed := filepath.Join(t.TempDir(), "writer")
-	script := "#!/bin/sh\nprintf '%s' \"$1\" > " + marker + "\n"
-	if err := os.WriteFile(ed, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	ed = writeScript(t, filepath.Dir(ed), filepath.Base(ed),
+		"printf '%s' \"$1\" > "+marker)
 
 	plan, err := Resolve(context.Background(), Config{Strategy: "detach", Cmd: ed + " {file}"},
 		Request{File: "src.ts", Repo: root, Env: Env{Editor: ed}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := plan.Run(context.Background()); err != nil {
+	if err := runPlan(t, context.Background(), plan); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
@@ -420,9 +470,7 @@ func TestDetach_DoesNotWaitForTheEditor(t *testing.T) {
 			t.Parallel()
 			root := repoWith(t, "src.ts")
 			ed := filepath.Join(t.TempDir(), "launcher")
-			if err := os.WriteFile(ed, []byte("#!/bin/sh\n"+c.script+"\n"), 0o755); err != nil {
-				t.Fatal(err)
-			}
+			ed = writeScript(t, filepath.Dir(ed), filepath.Base(ed), c.script)
 
 			plan, err := Resolve(context.Background(), Config{Strategy: "detach"},
 				Request{File: "src.ts", Repo: root, Env: Env{Editor: ed}})
@@ -432,7 +480,7 @@ func TestDetach_DoesNotWaitForTheEditor(t *testing.T) {
 
 			done := make(chan error, 1)
 			start := time.Now()
-			go func() { done <- plan.Run(context.Background()) }()
+			go func() { done <- runPlan(t, context.Background(), plan) }()
 
 			select {
 			case err := <-done:
@@ -463,9 +511,8 @@ func TestDetach_AnImmediateFailureIsStillReported(t *testing.T) {
 	t.Parallel()
 	root := repoWith(t, "src.ts")
 	ed := filepath.Join(t.TempDir(), "failer")
-	if err := os.WriteFile(ed, []byte("#!/bin/sh\necho 'no such profile' >&2\nexit 3\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	ed = writeScript(t, filepath.Dir(ed), filepath.Base(ed),
+		"echo 'no such profile' >&2\nexit 3")
 
 	// A generous grace so a loaded machine cannot turn "reports the failure"
 	// into "declared it launched".
@@ -475,7 +522,7 @@ func TestDetach_AnImmediateFailureIsStillReported(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = plan.Run(context.Background())
+	err = runPlan(t, context.Background(), plan)
 	if err == nil {
 		t.Fatal("want an error from an editor that exits non-zero at once")
 	}

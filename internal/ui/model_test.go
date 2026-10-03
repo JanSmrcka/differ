@@ -124,14 +124,22 @@ func TestContentHeight(t *testing.T) {
 	}
 }
 
+// The two panels divide the terminal between them, with the diff taking what
+// the file list does not. The file list's share is no longer fixed, so this
+// checks the arithmetic holds at several widths rather than pinning one.
 func TestDiffWidth(t *testing.T) {
 	t.Parallel()
-	m := Model{width: 120}
-	// 120 less the file list (35), the divider (1) and the space either side
-	// of it (2). The old figure also budgeted for card borders that the frame
-	// no longer draws.
-	if got := m.diffWidth(); got != 82 {
-		t.Errorf("diffWidth()=%d, want 82", got)
+	for _, w := range []int{80, 100, 120, 160, 200} {
+		m := Model{width: w, files: []fileItem{{}}}
+		want := w - m.listWidth() - verticalDividerWidth - 2*panelGap
+		if got := m.diffWidth(); got != want {
+			t.Errorf("width %d: diffWidth() = %d, want %d", w, got, want)
+		}
+		// Nothing is unaccounted for: the two panels plus the divider and its
+		// spaces are exactly the terminal.
+		if total := m.listWidth() + verticalDividerWidth + 2*panelGap + m.diffWidth(); total != w {
+			t.Errorf("width %d: the panels add up to %d", w, total)
+		}
 	}
 }
 
@@ -141,7 +149,7 @@ func newTestModel(t *testing.T, files []fileItem) Model {
 	bf := textinput.New()
 	bf.Placeholder = "filter..."
 	bf.CharLimit = 100
-	bf.Width = fileListWidth - 8
+	bf.Width = minListWidth - 8
 	bi := textinput.New()
 	bi.Placeholder = "branch name..."
 	bi.CharLimit = 100
@@ -245,47 +253,11 @@ func TestRenderHelpBar_FileListShowsBranches(t *testing.T) {
 	}
 }
 
-func TestRenderBranchList(t *testing.T) {
-	t.Parallel()
-	m := newTestModel(t, nil)
-	m.branches = []string{"main", "feature-a", "feature-b"}
-	m.currentBranch = "main"
-	m.branchCursor = 0
-	out := m.renderBranchList(10)
-	if !strings.Contains(out, "main") {
-		t.Error("branch list should contain main")
-	}
-	if !strings.Contains(out, "feature-a") {
-		t.Error("branch list should contain feature-a")
-	}
-	if !strings.Contains(out, "*") {
-		t.Error("branch list should mark current branch with *")
-	}
-}
-
-func TestRenderBranchItem_ContainsName(t *testing.T) {
-	t.Parallel()
-	m := newTestModel(t, nil)
-	item := m.renderBranchItem("feature-branch", true, false)
-	if !strings.Contains(item, "feature-branch") {
-		t.Error("branch item should contain branch name")
-	}
-}
-
-func TestRenderBranchItem_Current(t *testing.T) {
-	t.Parallel()
-	m := newTestModel(t, nil)
-	item := m.renderBranchItem("main", false, true)
-	if !strings.Contains(item, "*") {
-		t.Error("current branch should have * prefix")
-	}
-}
-
 func TestRenderFileItem_ShowsStats(t *testing.T) {
 	t.Parallel()
 	m := newTestModel(t, nil)
 	item := fileItem{change: git.FileChange{Path: "main.go", Status: git.StatusModified, AddedLines: 12, DeletedLines: 3}}
-	out := m.renderFileItem(item, false)
+	out := m.renderFileItem(item, false, nil)
 	if !strings.Contains(out, "+12 -3") {
 		t.Errorf("expected stats in file item, got %q", out)
 	}
@@ -325,17 +297,23 @@ func TestUpdateBranchMode_Esc(t *testing.T) {
 	}
 }
 
+// This reverses what the test used to assert. It required the tool's own words
+// in the status bar; putting them there is the thing #55 set out to stop. The
+// bar gets differ's sentence, and the original text is reachable with !.
 func TestHandleBranchesLoaded_Error(t *testing.T) {
 	t.Parallel()
 	m := newTestModel(t, nil)
-	msg := branchesLoadedMsg{err: fmt.Errorf("permission denied")}
+	msg := branchesLoadedMsg{err: fmt.Errorf("fatal: some git complaint")}
 	result, _ := m.handleBranchesLoaded(msg)
 	rm := result.(Model)
 	if rm.mode != modeFileList {
 		t.Error("should stay in file list mode on error")
 	}
-	if !strings.Contains(rm.statusMsg, "permission denied") {
-		t.Errorf("statusMsg=%q, want error message", rm.statusMsg)
+	if !strings.Contains(rm.statusMsg, "listing branches failed") {
+		t.Errorf("statusMsg=%q, want it to say what failed", rm.statusMsg)
+	}
+	if rm.problem == nil || !strings.Contains(rm.problem.detail, "some git complaint") {
+		t.Error("the original text was not kept for the details view")
 	}
 }
 
@@ -382,28 +360,6 @@ func TestHandleDiffLoaded_SkipsDuplicate(t *testing.T) {
 	rm := result.(Model)
 	if rm.lastDiffContent != "same diff" {
 		t.Error("cache should remain unchanged on duplicate")
-	}
-}
-
-func TestBranchListScroll(t *testing.T) {
-	t.Parallel()
-	m := newTestModel(t, nil)
-	m.mode = modeBranchPicker
-	branches := make([]string, 40)
-	for i := range branches {
-		branches[i] = fmt.Sprintf("branch-%02d", i)
-	}
-	m.branches = branches
-	itemH := m.listHeight() - 1 // the filter bar takes one row
-	m.branchCursor = 35
-	m.branchOffset = 35 - itemH + 1
-
-	out := m.renderBranchList(m.listHeight())
-	if !strings.Contains(out, "branch-35") {
-		t.Error("branch list should show cursor branch when scrolled")
-	}
-	if strings.Contains(out, "branch-00") {
-		t.Error("branch list should not show first branch when scrolled down")
 	}
 }
 
@@ -541,32 +497,36 @@ func TestUpdateBranchMode_CtrlJK(t *testing.T) {
 	}
 }
 
-func TestRenderBranchList_ShowsFilterBar(t *testing.T) {
+// The filter and the match count moved into the box with everything else.
+func TestBranchRows_ShowTheFilterAndTheCount(t *testing.T) {
 	t.Parallel()
 	m := newTestModel(t, nil)
 	m.mode = modeBranchPicker
 	m.branches = []string{"main", "dev"}
 	m.branchCursor = 0
-	out := m.renderBranchList(10)
-	// Should contain the match count
+
+	out := strings.Join(m.branchRows(10), "\n")
 	if !strings.Contains(out, "2/2") {
-		t.Error("branch list should show match count")
+		t.Errorf("the box does not show the match count:\n%s", out)
 	}
 }
 
-func TestRenderBranchList_NoMatches(t *testing.T) {
+// A filter that matches nothing says so, rather than leaving an empty box
+// that reads as a bug.
+func TestBranchRows_SayWhenNothingMatches(t *testing.T) {
 	t.Parallel()
 	m := newTestModel(t, nil)
 	m.mode = modeBranchPicker
 	m.branches = []string{"main", "dev"}
-	m.filteredBranches = []string{} // empty filter result
+	m.filteredBranches = []string{}
 	m.branchFilter.SetValue("zzz")
-	out := m.renderBranchList(10)
+
+	out := strings.Join(m.branchRows(10), "\n")
 	if !strings.Contains(out, "no matches") {
-		t.Error("should show 'no matches' placeholder")
+		t.Errorf("an empty result does not say so:\n%s", out)
 	}
 	if !strings.Contains(out, "0/2") {
-		t.Error("should show 0/2 count")
+		t.Errorf("the count does not say 0/2:\n%s", out)
 	}
 }
 
@@ -626,18 +586,33 @@ func TestUpdateBranchMode_CreateMode_Esc_Cancels(t *testing.T) {
 	}
 }
 
-func TestUpdateBranchMode_CreateMode_CtrlC_Cancels(t *testing.T) {
+// This reverses what the test here used to assert. ctrl+c cancelled the
+// new-branch input, while the keymap documented it as a global "quit
+// immediately" — and in the commit input the same key was swallowed by the
+// text field, so it meant three different things in three places. It quits
+// everywhere now; esc is what cancels an input.
+func TestUpdateBranchMode_CreateMode_EscCancels_CtrlCQuits(t *testing.T) {
 	t.Parallel()
-	m := newTestModel(t, nil)
-	m.mode = modeBranchPicker
-	m.branchCreating = true
-	m.branchInput.Focus()
-	m.branches = []string{"main"}
+	base := func() Model {
+		m := newTestModel(t, nil)
+		m.mode = modeBranchPicker
+		m.branchCreating = true
+		m.branchInput.Focus()
+		m.branches = []string{"main"}
+		return m
+	}
 
-	result, _ := m.updateBranchMode(tea.KeyMsg{Type: tea.KeyCtrlC})
-	rm := result.(Model)
-	if rm.branchCreating {
-		t.Error("ctrl+c should cancel branch creation, not quit")
+	result, _ := base().updateBranchMode(tea.KeyMsg{Type: tea.KeyEsc})
+	if result.(Model).branchCreating {
+		t.Error("esc should cancel branch creation")
+	}
+
+	_, cmd := base().Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if cmd == nil {
+		t.Fatal("ctrl+c did nothing in the new-branch input")
+	}
+	if _, quit := cmd().(tea.QuitMsg); !quit {
+		t.Error("ctrl+c should quit from the new-branch input")
 	}
 }
 
@@ -728,41 +703,6 @@ func TestRenderHelpBar_BranchMode_ShowsNewKey(t *testing.T) {
 	}
 	if !strings.Contains(bar, "new") {
 		t.Error("branch help should contain 'new' description")
-	}
-}
-
-func TestRenderBranchCreateBar(t *testing.T) {
-	t.Parallel()
-	m := newTestModel(t, nil)
-	m.branchCreating = true
-	m.branchInput.Focus()
-	bar := m.renderBranchCreateBar()
-	if !strings.Contains(bar, "branch") {
-		t.Error("create bar should contain 'branch' prompt")
-	}
-	if !strings.Contains(bar, "esc") {
-		t.Error("create bar should show esc hint")
-	}
-	if !strings.Contains(bar, "enter") {
-		t.Error("create bar should show enter hint")
-	}
-}
-
-func TestView_BranchCreating_ShowsCreateBar(t *testing.T) {
-	t.Parallel()
-	// View() calls fileCardTitle() which needs a real repo for BranchName()
-	// Use renderBranchCreateBar() directly to test view integration
-	m := newTestModel(t, nil)
-	m.mode = modeBranchPicker
-	m.branchCreating = true
-	m.branchInput.Focus()
-
-	bar := m.renderBranchCreateBar()
-	if !strings.Contains(bar, "new branch") {
-		t.Error("create bar should show 'new branch' prompt")
-	}
-	if !strings.Contains(bar, "enter create") {
-		t.Error("create bar should show 'enter create' hint")
 	}
 }
 

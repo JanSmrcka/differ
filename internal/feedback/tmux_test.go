@@ -21,6 +21,13 @@ func tmuxSession(t *testing.T) (pane, outfile string) {
 	outfile = filepath.Join(dir, "received.txt")
 	name := "differ-test-" + strings.ReplaceAll(t.Name(), "/", "-")
 
+	// Its own tmux server. On the shared one these sessions are visible to
+	// internal/editor's tmux tests, which run as a parallel package and look
+	// for a window running an editor: the two fought over one server and
+	// failed each other intermittently.
+	t.Setenv("TMUX_TMPDIR", shortTmuxDir(t))
+	t.Setenv("TMUX", "")
+
 	run := func(args ...string) string {
 		out, err := exec.Command("tmux", args...).CombinedOutput()
 		if err != nil {
@@ -28,9 +35,8 @@ func tmuxSession(t *testing.T) (pane, outfile string) {
 		}
 		return strings.TrimSpace(string(out))
 	}
-	_ = exec.Command("tmux", "kill-session", "-t", name).Run()
 	run("new-session", "-d", "-s", name, "-n", "w", "cat > "+outfile)
-	t.Cleanup(func() { _ = exec.Command("tmux", "kill-session", "-t", name).Run() })
+	t.Cleanup(func() { _ = exec.Command("tmux", "kill-server").Run() })
 
 	pane = run("list-panes", "-t", name+":w", "-F", "#{pane_id}")
 	return pane, outfile
@@ -103,6 +109,12 @@ func TestTmuxTarget_RefusesToSendToItself(t *testing.T) {
 }
 
 func TestTmuxTarget_DefaultTargetIsTheLastActivePane(t *testing.T) {
+	// Both conditions. Guarding on $TMUX alone meant that with tmux off PATH
+	// but the variable still set — a stripped container, a binary moved — this
+	// failed where every other tmux test skipped.
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not installed")
+	}
 	if os.Getenv("TMUX") == "" {
 		t.Skip("not running inside tmux")
 	}
@@ -142,4 +154,70 @@ func TestTmuxTarget_ResolvePaneReportsEmptyResultAsInvalid(t *testing.T) {
 	if _, err := resolveTmuxPane(context.Background(), "%999999"); err == nil {
 		t.Error("an unresolvable target must be an error, not an empty pane id")
 	}
+}
+
+// An explicit pane works from outside tmux; only the default needs a client.
+//
+// "{last}" means "the pane this session last looked at", which has no meaning
+// without a client — but load-buffer and paste-buffer address the tmux
+// *server*, so differ running in a plain terminal can send into a pane in
+// tmux. Refusing that made the agent picker useless from outside tmux: you
+// choose a pane by id and differ replies that it is not in tmux.
+func TestTmuxTarget_AnExplicitPaneDoesNotNeedAClient(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not installed")
+	}
+	t.Setenv("TMUX", "")
+	t.Setenv("TMUX_PANE", "")
+
+	if _, err := newTmuxTarget("%1"); err != nil {
+		t.Errorf("an explicit pane was refused outside tmux: %v", err)
+	}
+	if _, err := newTmuxTarget(""); err == nil {
+		t.Error("the default target was accepted outside tmux, where it means nothing")
+	}
+}
+
+// A tmux server that has gone away says so, and the error has to carry
+// tmux's own words: it is what tells a pane that has exited (reopen the
+// picker) from a server that has (report it and stop).
+//
+// exec.Cmd.Output puts stderr on ExitError.Stderr, whose Error() renders only
+// "exit status 1", so without capturing it the two were indistinguishable.
+func TestResolveTmuxPane_CarriesTmuxsOwnWords(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not installed")
+	}
+	// A socket name with no server behind it: tmux exits non-zero and
+	// explains itself on stderr.
+	t.Setenv("TMUX", "")
+	dir := t.TempDir()
+	t.Setenv("TMUX_TMPDIR", dir)
+
+	_, err := resolveTmuxPane(context.Background(), "%1")
+	if err == nil {
+		t.Fatal("resolving a pane with no server running succeeded")
+	}
+	if strings.Contains(err.Error(), "exit status") {
+		t.Errorf("the error is %q, which is exec's words rather than tmux's", err)
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "server") &&
+		!strings.Contains(strings.ToLower(err.Error()), "connect") {
+		t.Errorf("the error is %q and does not say the server is unreachable", err)
+	}
+}
+
+// shortTmuxDir is a temporary directory with a short path.
+//
+// t.TempDir()'s name is built from the test's, and tmux puts its socket
+// inside a `tmux-<uid>` subdirectory of this one: the result overran the
+// 104-byte sun_path limit and tmux reported "File name too long".
+func shortTmuxDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "dt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return dir
 }

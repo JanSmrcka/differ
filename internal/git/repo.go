@@ -2,6 +2,7 @@ package git
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -70,6 +71,32 @@ func NewRepo(path string) (*Repo, error) {
 
 // Dir returns the repository root directory.
 func (r *Repo) Dir() string { return r.dir }
+
+// GitDir is the repository's own git directory: `.git` in an ordinary
+// checkout, `.git/worktrees/<name>` in a linked one.
+//
+// The distinction is the point. Anything kept per checkout — differ keeps the
+// review there — must not be shared between two worktrees of the same
+// repository, and `--git-dir` is the one that separates them; `--git-common-dir`
+// would hand both the same file.
+//
+// git answers relative to the process's directory when it can, and `run` sets
+// that to the repository root, so a relative answer is resolved against it
+// rather than against whatever the caller's own directory happens to be.
+func (r *Repo) GitDir() (string, error) {
+	out, err := r.run("rev-parse", "--git-dir")
+	if err != nil {
+		return "", err
+	}
+	dir := strings.TrimSpace(out)
+	if dir == "" {
+		return "", errors.New("git did not say where its directory is")
+	}
+	if !filepath.IsAbs(dir) {
+		dir = filepath.Join(r.dir, dir)
+	}
+	return dir, nil
+}
 
 // HasCommits returns true if the repo has at least one commit.
 func (r *Repo) HasCommits() bool {
@@ -312,13 +339,33 @@ func (r *Repo) CommitDiffFiles(hash string) ([]FileChange, error) {
 
 // run executes a git command and returns stdout.
 func (r *Repo) run(args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
+	// core.quotepath=false keeps a non-ASCII path readable. By default git
+	// escapes those bytes — žluťoučký.ts arrives as "\305\276lu..." — and
+	// every path differ reads is then wrong: the file list shows the escaped
+	// form, and asking git for that file's diff matches nothing. Paths that
+	// genuinely need quoting (a quote or a newline in the name) are still
+	// quoted, so the parsers are no worse off than before.
+	cmd := exec.Command("git", append([]string{"-c", "core.quotepath=false"}, args...)...)
 	cmd.Dir = r.dir
-	out, err := cmd.Output()
-	if err != nil {
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Run(); err != nil {
+		// git's own words, not "exit status 1". cmd.Output() discards them —
+		// it puts stderr on ExitError.Stderr, whose Error() renders only the
+		// exit code — and the whole point of reading them is to tell the user
+		// what to do about it.
+		//
+		// stdout is the fallback because a few messages go there instead:
+		// `git commit` writes "no changes added to commit" to stdout.
+		for _, said := range []string{stderr.String(), stdout.String()} {
+			if said = strings.TrimSpace(said); said != "" {
+				return "", errors.New(said)
+			}
+		}
 		return "", err
 	}
-	return string(out), nil
+	return stdout.String(), nil
 }
 
 // runWithStderr executes a git command and returns stdout.
@@ -339,10 +386,18 @@ func (r *Repo) runWithStderr(args ...string) (string, error) {
 	return stdout.String(), nil
 }
 
+// emptyTreeHash is git's empty tree object, the thing a first commit's staged
+// content is diffed against.
+//
+// Checked against `git hash-object -t tree /dev/null` by a test, because the
+// value written here before was wrong from its 27th hex digit — which looks
+// exactly like the real one — and every `git init && git add . && differ`
+// failed with "fatal: bad object".
+const emptyTreeHash = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
 // diffNameStatusEmptyTree lists staged files when there are no commits yet.
 func (r *Repo) diffNameStatusEmptyTree() ([]FileChange, error) {
-	// 4b825dc... is git's well-known empty tree hash
-	out, err := r.run("diff-index", "--name-status", "--cached", "4b825dc642cb6eb9a060e54bf899d69f82c6b18f")
+	out, err := r.run("diff-index", "--name-status", "--cached", emptyTreeHash)
 	if err != nil {
 		return nil, err
 	}
@@ -492,4 +547,63 @@ func parseLog(out string) []Commit {
 		})
 	}
 	return commits
+}
+
+// IndexHashes maps each path in the index to the object id of its staged
+// content, in one call.
+//
+// It is how "has what is staged changed?" is answered exactly. The line counts
+// from a numstat cannot answer it: staging moves lines between the staged and
+// unstaged halves of the same file without changing their total.
+// WorktreeMatchesIndex reports whether a path's working-tree content is
+// byte-identical to what is staged for it.
+//
+// It is the question "does a line number from the --cached diff also address
+// the file on disk?". `differ commit` and `-s` show the index, so a line
+// reference into it is only safe when the two agree — which is the ordinary
+// case: stage, review, commit, with nothing edited in between.
+//
+// `git diff --quiet` exits 1 when there is a difference and 0 when there is
+// none, so an error that is not an exit status is reported as "cannot say",
+// and the caller degrades rather than guessing.
+func (r *Repo) WorktreeMatchesIndex(path string) (bool, error) {
+	if _, err := r.run("diff", "--no-ext-diff", "--quiet", "--", path); err != nil {
+		var exit *exec.ExitError
+		if errors.As(err, &exit) && exit.ExitCode() == 1 {
+			return false, nil
+		}
+		if strings.Contains(err.Error(), "exit status 1") {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+func (r *Repo) IndexHashes() (map[string]string, error) {
+	out, err := r.run("ls-files", "--stage", "-z")
+	if err != nil {
+		return nil, err
+	}
+	hashes := map[string]string{}
+	for _, record := range strings.Split(out, "\x00") {
+		// "<mode> <oid> <stage>\t<path>", NUL-terminated so a path with a
+		// newline in it cannot split a record.
+		tab := strings.IndexByte(record, '\t')
+		if tab < 0 {
+			continue
+		}
+		fields := strings.Fields(record[:tab])
+		if len(fields) < 2 {
+			continue
+		}
+		hashes[record[tab+1:]] = fields[1]
+	}
+	return hashes, nil
+}
+
+// hasPath reports whether a path exists in the working tree. Tests only.
+func (r *Repo) hasPath(rel string) bool {
+	_, err := os.Stat(filepath.Join(r.dir, rel))
+	return err == nil
 }

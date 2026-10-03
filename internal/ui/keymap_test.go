@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -55,8 +56,13 @@ func handledKeys(t *testing.T) map[string][]string {
 	return out
 }
 
-// isKeyHandler spots a method that takes a tea.KeyMsg, which is how every key
-// handler in this package is shaped.
+// isKeyHandler spots a method that handles keys: one taking a tea.KeyMsg, or
+// one named *Key taking the key as a plain string.
+//
+// The second shape was invisible to this scanner. The overlay pickers are
+// written that way — agentPickerKey, themePickerKey — so none of the checks
+// below reached them: a key could be handled and undocumented, bound twice,
+// or leave an overlay with no way out, with the suite green.
 func isKeyHandler(fn *ast.FuncDecl) bool {
 	if fn.Recv == nil || fn.Type.Params == nil {
 		return false
@@ -67,7 +73,16 @@ func isKeyHandler(fn *ast.FuncDecl) bool {
 			return true
 		}
 	}
-	return false
+	return strings.HasSuffix(fn.Name.Name, "Key") && takesOneString(fn)
+}
+
+// takesOneString reports whether the method's only parameter is a string.
+func takesOneString(fn *ast.FuncDecl) bool {
+	if len(fn.Type.Params.List) != 1 || len(fn.Type.Params.List[0].Names) != 1 {
+		return false
+	}
+	id, ok := fn.Type.Params.List[0].Type.(*ast.Ident)
+	return ok && id.Name == "string"
 }
 
 // caseStrings collects the keys a handler actually matches: the cases of a
@@ -102,9 +117,12 @@ func caseStrings(fn *ast.FuncDecl) []string {
 	return keys
 }
 
-// isKeyString reports whether an expression is a call to .String() on the key
-// message.
+// isKeyString reports whether an expression is the key: a call to .String()
+// on the key message, or the plain `key` parameter the pickers take.
 func isKeyString(e ast.Expr) bool {
+	if id, ok := e.(*ast.Ident); ok {
+		return id.Name == "key"
+	}
 	call, ok := e.(*ast.CallExpr)
 	if !ok {
 		return false
@@ -136,8 +154,31 @@ var handlerFor = map[viewMode]string{
 	modeBranchPicker: "updateBranchMode",
 }
 
-// Keys shared by every mode, handled centrally rather than per mode.
-var globalKeys = map[string]bool{"ctrl+c": true}
+// Keys handled centrally in routeKey or dispatch rather than per mode, so a
+// mode's handler is not expected to carry them.
+var globalKeys = map[string]bool{"ctrl+c": true, "?": true, "!": true, "t": true}
+
+// typingModes are the modes where every printable character is text. ? and !
+// are commands everywhere else, and routeKey answers them — but a handler
+// claiming one *here* would be an undocumented binding on a key the user
+// meant to type, which widening globalKeys stopped catching.
+var typingModes = map[viewMode]bool{modeCommit: true, modeBranchPicker: true}
+
+func TestKeymap_NoTypingModeStealsAGlobalKey(t *testing.T) {
+	t.Parallel()
+	handled := handledKeys(t)
+
+	for mode, fn := range handlerFor {
+		if !typingModes[mode] {
+			continue
+		}
+		for _, k := range handled[fn] {
+			if k == "?" || k == "!" || k == "t" {
+				t.Errorf("%s handles %q, which is a character there, not a command", fn, k)
+			}
+		}
+	}
+}
 
 func TestKeymap_EveryHandledKeyIsDocumented(t *testing.T) {
 	t.Parallel()
@@ -289,6 +330,7 @@ func TestKeymap_TheREADMEMatchesTheKeymap(t *testing.T) {
 	sections := map[viewMode]string{
 		modeFileList: "### File List",
 		modeDiff:     "### Diff View",
+		modeReview:   "### Review Mode",
 	}
 	for mode, heading := range sections {
 		table := sectionTable(t, string(readme), heading)
@@ -334,16 +376,36 @@ func sectionTable(t *testing.T, readme, heading string) []string {
 		rest = rest[:j]
 	}
 
-	// Only the first column of a table row. Prose in the same section is full
-	// of backticks — `claude`, `--set-upstream`, the cursor glyph — and none
-	// of those are keys.
+	// Only the first column of a table headed "Key". Prose in the same section
+	// is full of backticks — `claude`, `--set-upstream` — and a section may
+	// hold other tables entirely, such as the diff view's two mark legends,
+	// whose first column is glyphs rather than keys.
 	var keys []string
-	for _, line := range strings.Split(rest, "\n") {
+	inKeyTable := false
+	lines := strings.Split(rest, "\n")
+	for i, line := range lines {
 		if !strings.HasPrefix(strings.TrimSpace(line), "|") {
+			inKeyTable = false
 			continue
 		}
 		cells := strings.Split(strings.Trim(strings.TrimSpace(line), "|"), "|")
 		if len(cells) < 2 {
+			continue
+		}
+		first := strings.TrimSpace(cells[0])
+		if isSeparatorRow(line) {
+			continue
+		}
+		// A header row is the one directly above the |---|---| separator, and
+		// its first cell decides whether the rows under it are keys. Spotting
+		// it by "no backticks in the first cell" looked equivalent and was
+		// not: the branch picker's first *data* row is `| type | filter |`,
+		// which silently turned that whole table off.
+		if i+1 < len(lines) && isSeparatorRow(lines[i+1]) {
+			inKeyTable = first == "Key"
+			continue
+		}
+		if !inKeyTable {
 			continue
 		}
 		for _, cell := range regexp.MustCompile("`([^`]+)`").FindAllStringSubmatch(cells[0], -1) {
@@ -376,6 +438,167 @@ func TestKeymap_ConfirmationsDisarmEachOther(t *testing.T) {
 		}
 		if cmd != nil {
 			t.Errorf("%v acted on the last press; another key should have disarmed it", seq)
+		}
+	}
+}
+
+// The globals were never checked against the code — the AST tests only look at
+// the per-mode tables. ctrl+c is documented as "quit immediately", and in the
+// commit input it was swallowed by the text field: esc was the only way out.
+func TestKeymap_TheGlobalKeysWorkInEveryMode(t *testing.T) {
+	t.Parallel()
+	states := []struct {
+		name  string
+		setup func(m Model) Model
+	}{
+		{"file list", func(m Model) Model { m.mode = modeFileList; return m }},
+		{"diff", func(m Model) Model { m.mode = modeDiff; return m }},
+		{"review", func(m Model) Model { m.mode = modeReview; return m }},
+		{"commit", func(m Model) Model { m.mode = modeCommit; return m }},
+		{"branch picker", func(m Model) Model { m.mode = modeBranchPicker; return m }},
+		{"branch create", func(m Model) Model {
+			m.mode = modeBranchPicker
+			m.branchCreating = true
+			return m
+		}},
+		{"comment editor", func(m Model) Model {
+			m.mode = modeReview
+			m.commenting = true
+			return m
+		}},
+		{"help overlay", func(m Model) Model { m.showHelp = true; return m }},
+		{"history overlay", func(m Model) Model { m.mode = modeReview; m.showHistory = true; return m }},
+	}
+
+	for _, s := range states {
+		base := newTestModel(t, []fileItem{{change: git.FileChange{Path: "a.go", Status: git.StatusModified}}})
+		m := s.setup(base)
+
+		_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+		if cmd == nil {
+			t.Errorf("%s: ctrl+c did nothing", s.name)
+			continue
+		}
+		if _, quit := cmd().(tea.QuitMsg); !quit {
+			t.Errorf("%s: ctrl+c did not quit", s.name)
+		}
+	}
+
+	// ? and ! are global in the same sense the command bar is: everywhere a
+	// key is a command rather than a character. Where the user is typing they
+	// are text, which is why they are not answered before the mode dispatch
+	// the way ctrl+c is.
+	for _, s := range states {
+		base := newTestModel(t, []fileItem{{change: git.FileChange{Path: "a.go", Status: git.StatusModified}}})
+		m := s.setup(base)
+		// What is under test is whether the key opens the overlay from this
+		// mode, so the states that start with one open are cleared first —
+		// there ? would toggle it shut, which is its own test.
+		m.showHelp, m.showHistory, m.showProblem = false, false, false
+		typing := m.typing()
+
+		for _, c := range []struct {
+			key  string
+			open func(Model) bool
+		}{
+			{"?", func(m Model) bool { return m.showHelp }},
+			{"!", func(m Model) bool { return m.showProblem }},
+		} {
+			updated, _ := m.routeKey(key(c.key))
+			got := c.open(updated.(Model))
+			// An overlay is already open in two of the states, where these
+			// keys switch between them rather than being swallowed.
+			if want := !typing; got != want {
+				t.Errorf("%s: %q opened the overlay = %v, want %v (typing = %v)",
+					s.name, c.key, got, want, typing)
+			}
+		}
+	}
+}
+
+// isSeparatorRow spots the |---|---| line under a markdown table's header.
+func isSeparatorRow(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	if !strings.HasPrefix(trimmed, "|") {
+		return false
+	}
+	cells := strings.Split(strings.Trim(trimmed, "|"), "|")
+	return len(cells) >= 2 && regexp.MustCompile(`^[-: ]+$`).MatchString(strings.TrimSpace(cells[0]))
+}
+
+// The README check is only as good as its parser, and a parser that reads a
+// section as zero keys passes every assertion in it. This pins what each
+// section actually yields.
+func TestKeymap_TheREADMEParserReadsEverySection(t *testing.T) {
+	t.Parallel()
+	readme, err := os.ReadFile(filepath.Join("..", "..", "README.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, section := range []struct {
+		heading string
+		want    string
+	}{
+		{"### File List", "tab"},
+		{"### Diff View", "}"},
+		{"### Review Mode", "C"},
+		{"### Commit Mode", "enter"},
+		{"### Branch Picker", "ctrl+n"},
+	} {
+		keys := sectionTable(t, string(readme), section.heading)
+		if len(keys) == 0 {
+			t.Errorf("%s reads as no keys at all — the parser is blind there", section.heading)
+			continue
+		}
+		found := false
+		for _, k := range keys {
+			if k == section.want {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("%s: parsed %v, which does not include %q", section.heading, keys, section.want)
+		}
+	}
+}
+
+// overlayHandlers are the key handlers that own the keyboard while an overlay
+// is open. They are written as `func (m Model) xKey(key string)` rather than
+// taking a tea.KeyMsg, which is why the checks above, keyed on handlerFor,
+// never saw them.
+var overlayHandlers = []string{"agentPickerKey", "themePickerKey"}
+
+// An overlay owns the keyboard, so it has to say how to leave. Without this
+// the only thing standing between a picker and a trapped user was that
+// someone remembered.
+func TestKeymap_EveryOverlayOffersAnExit(t *testing.T) {
+	t.Parallel()
+	handled := handledKeys(t)
+
+	for _, name := range overlayHandlers {
+		keys := handled[name]
+		if len(keys) == 0 {
+			t.Errorf("%s handles no keys — the scanner no longer reads it", name)
+			continue
+		}
+		if !slices.Contains(keys, "esc") {
+			t.Errorf("%s has no esc: %v", name, keys)
+		}
+	}
+}
+
+// And no overlay may bind one key to two things.
+func TestKeymap_NoOverlayBindsAKeyTwice(t *testing.T) {
+	t.Parallel()
+	handled := handledKeys(t)
+
+	for _, name := range overlayHandlers {
+		seen := map[string]bool{}
+		for _, k := range handled[name] {
+			if seen[k] {
+				t.Errorf("%s binds %q twice", name, k)
+			}
+			seen[k] = true
 		}
 	}
 }

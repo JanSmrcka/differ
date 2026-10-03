@@ -52,6 +52,9 @@ func (b binding) help() string {
 func globalBindings() []binding {
 	return []binding{
 		{Keys: []string{"?"}, Desc: "help", Help: "show every key for this view", Bar: true},
+		{Keys: []string{"!"}, Desc: "problem", Help: "show the last failure in full, including what the tool said"},
+		{Keys: []string{"t"}, Desc: "theme", Help: "try the themes; the screen changes as you move"},
+		{Keys: []string{agentKey}, Desc: "agent", Help: "choose which agent in tmux the review is sent to"},
 		{Keys: []string{"ctrl+c"}, Desc: "quit", Help: "quit immediately"},
 	}
 }
@@ -133,6 +136,8 @@ func diffBindings(review bool) []binding {
 			{Keys: []string{"x"}, Desc: "delete", Help: "delete the comment under the cursor"},
 			{Keys: []string{"s"}, Label: "s/S", Desc: "send", Help: "send the comment under the cursor, or S for all of them", Bar: true},
 			{Keys: []string{"S"}},
+			{Keys: []string{"H"}, Desc: "history", Help: "what has been sent, and whether it arrived"},
+			{Keys: []string{"R"}, Desc: "reload", Help: "re-read this file after it changed underneath you"},
 			{Keys: []string{"r"}, Desc: "exit review", Help: "go back to the plain diff", Bar: true},
 		}
 	} else {

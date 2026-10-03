@@ -58,9 +58,30 @@ func header(n int) string {
 // FormatComment renders a single comment: where it is, what changed there,
 // and what the reviewer said.
 func FormatComment(c Comment) string {
-	var b strings.Builder
+	body := strings.TrimRight(c.Body, "\n")
+	ref := Reference(c)
 
-	fmt.Fprintf(&b, "File: %s\n", c.File)
+	// A reference that resolves to a line is the whole of "where", so nothing
+	// else needs to say it. The payload used to state the same fact three
+	// times — the reference, then `File:`, then `Line:` — and then show code
+	// the agent can read for itself from the reference it has just been
+	// given, which left the comment last and smallest.
+	if c.Locate == LocateLine && ref != "" {
+		return ref + "\n\n" + body + "\n"
+	}
+
+	// It does not resolve: an old-side line, index line numbers that are not
+	// the working tree's, a file that is gone, or a path the resolver cannot
+	// read. The excerpt is then the only thing that says *which* code is
+	// meant, so it stays, with the diff's own coordinates to place it.
+	var b strings.Builder
+	switch {
+	case ref != "":
+		fmt.Fprintf(&b, "%s\n", ref)
+	default:
+		// No reference at all, so the file has to be named in prose.
+		fmt.Fprintf(&b, "File: %s\n", c.File)
+	}
 	fmt.Fprintf(&b, "%s (%s)\n", lineLabel(c), sideLabel(c.Side))
 
 	if excerpt := strings.TrimRight(c.Excerpt, "\n"); excerpt != "" {
@@ -70,7 +91,7 @@ func FormatComment(c Comment) string {
 	}
 
 	b.WriteString("\nComment:\n")
-	b.WriteString(strings.TrimRight(c.Body, "\n"))
+	b.WriteString(body)
 	b.WriteString("\n")
 	return b.String()
 }
@@ -80,6 +101,44 @@ func lineLabel(c Comment) string {
 		return fmt.Sprintf("Lines: %d-%d", c.StartLine, c.EndLine)
 	}
 	return fmt.Sprintf("Line: %d", c.StartLine)
+}
+
+// Reference locates a comment the way a CLI agent's @-mention resolver expects:
+// "@path :L12", or "@path :L12-L20" for a range.
+//
+// The space before the colon is load-bearing, not decoration. sidekick.nvim
+// emits exactly this, and its commit d570e1f ("different format that should
+// work for most cli tools") added the space and the L prefix together, because
+// "@path:12" made the resolver read the whole token as a filename, fail to
+// stat it, and attach nothing. Adopting the L without the space lands back on
+// the broken shape.
+//
+// How much of it is emitted depends on Locate — see its doc comment. Briefly:
+// a line number that does not resolve against the file on disk is worse than
+// no line number, and a file with nothing on disk is worse than no reference.
+// The first version keyed this on Side, which got `-s` and `differ commit`
+// wrong: there the diff's new side is the index, so a new-side line number is
+// as unresolvable as an old-side one.
+func Reference(c Comment) string {
+	switch {
+	case c.File == "", c.Locate == LocateNone:
+		return ""
+	case strings.ContainsAny(c.File, " \t"):
+		// The whole reason for the space before the colon is that the
+		// resolver tokenises on whitespace and would otherwise read
+		// "@path:9" as one filename. A path that itself contains a space
+		// gives it the token "@my" and a file that does not exist, which is
+		// worse than saying nothing: the prose below still carries the path
+		// in full, and a reader can open it.
+		return ""
+	case c.Locate == LocateFile, c.Locate == LocateUnknown:
+		// The bare form sidekick.nvim emits when it has no row: the agent
+		// attaches the file and reads it.
+		return "@" + c.File
+	case c.EndLine > c.StartLine:
+		return fmt.Sprintf("@%s :L%d-L%d", c.File, c.StartLine, c.EndLine)
+	}
+	return fmt.Sprintf("@%s :L%d", c.File, c.StartLine)
 }
 
 // sideLabel says which version of the file the line numbers refer to, so a

@@ -15,12 +15,17 @@ import (
 
 // enterReviewMode switches into review, creating the session on first use.
 func (m Model) enterReviewMode() (tea.Model, tea.Cmd) {
-	if len(m.files) == 0 {
-		m.statusMsg = "nothing to review"
-		return m, nil
-	}
 	if m.session == nil {
+		// Before the early return below: a changeset can arrive later, and a
+		// review mode with no session is dead — no progress, no badges, and
+		// the only way out is to leave and come back.
 		m.session = review.NewSession()
+	}
+	if len(m.files) == 0 {
+		// Nothing to review, but the panel says that better than the status
+		// bar can — and it says it in the same place the file list would.
+		m.mode = modeReview
+		return m, nil
 	}
 	m.mode = modeReview
 	m.session.MarkViewed(m.currentFilePath())
@@ -53,15 +58,18 @@ func (m Model) updateReviewMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.startHunkComment()
 	case "x":
 		return m.deleteCommentAtCursor()
+	case "H":
+		m.showHistory = !m.showHistory
+		return m, nil
 	case "s":
 		return m.sendCommentAtCursor()
 	case "S":
 		return m.sendAllPending()
-	case "ctrl+c":
-		return m, tea.Quit
 	case "esc":
 		m.mode = modeFileList
 		return m, nil
+	case "R":
+		return m.reloadDiff()
 	case "r":
 		// Toggle back to the plain diff view.
 		m.mode = modeDiff
@@ -92,6 +100,12 @@ func (m Model) reviewProgress() review.Progress {
 	return m.session.Progress(paths)
 }
 
+// reloadKey re-reads the file on screen after it moved underneath.
+//
+// Not "r": that leaves review mode, and the two would be a keystroke apart
+// with opposite effects on a half-written comment.
+const reloadKey = "R"
+
 // reviewSummary is the one-line progress readout shown while reviewing.
 func (m Model) reviewSummary() string {
 	p := m.reviewProgress()
@@ -108,5 +122,31 @@ func (m Model) reviewSummary() string {
 	if p.Stale > 0 {
 		out += fmt.Sprintf("  %d stale", p.Stale)
 	}
+	// Files the agent rewrote while the user was reading elsewhere. Worth
+	// saying out loud: they no longer count as reviewed, so the ratio above
+	// would otherwise appear to go backwards for no reason.
+	if p.Changed > 0 {
+		out += fmt.Sprintf("  %d changed", p.Changed)
+	}
 	return out
+}
+
+// reloadDiff re-reads the file on screen after it moved underneath.
+//
+// It keeps the reviewer's place: loadDiffCmd(false) clamps rather than resets,
+// and handleDiffLoaded re-anchors this file's comments against the diff that
+// arrives, so a comment follows its line or is marked stale rather than left
+// pointing at whatever now occupies its old line number.
+func (m Model) reloadDiff() (tea.Model, tea.Cmd) {
+	if !m.diffStale() {
+		return m, nil
+	}
+	// The flag is cleared by handleDiffLoaded when the reload lands, not here:
+	// clearing it now would drop the notice before the diff it describes has
+	// actually been replaced.
+	//
+	// No need to clear lastDiffContent either — it is compared against what
+	// the reload renders, so content that really differs updates the viewport
+	// and content that does not needs no update.
+	return m, m.loadDiffCmd(false)
 }

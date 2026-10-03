@@ -11,8 +11,6 @@ func (m Model) updateDiffMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.quitConfirm = false
 	}
 	switch msg.String() {
-	case "ctrl+c":
-		return m, tea.Quit
 	case "q":
 		return m.confirmQuit()
 	case "esc", "h", "left":
@@ -56,10 +54,17 @@ func (m Model) diffNavigation(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.toggleStage()
 	case "v":
 		m.splitDiff = !m.splitDiff
+		m.cfg.SplitDiff = m.splitDiff
 		m.prevCurs = -1
 		m.lastDiffContent = ""
-		// Reload without resetting: the cursor addresses source lines, so it
-		// means the same thing in both views.
+		// Re-render rather than re-read while the diff is held, for the same
+		// reason a resize and a theme preview do: reading the file would swap
+		// in content the reviewer has not asked for and take the notice saying
+		// it moved with it. The cursor addresses source lines, so it means the
+		// same thing in both views either way.
+		if m.holdsTheDiff() && m.diffStale() {
+			return m, tea.Batch(m.rerenderCmd(), m.saveSplitPrefCmd())
+		}
 		return m, tea.Batch(m.loadDiffCmd(false), m.saveSplitPrefCmd())
 	}
 	var cmd tea.Cmd

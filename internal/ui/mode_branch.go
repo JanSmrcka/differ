@@ -64,8 +64,6 @@ func (m Model) updateBranchMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.mode = modeFileList
 		m.branchFilter.Blur()
 		return m, nil
-	case "ctrl+c":
-		return m, tea.Quit
 	case "up", "ctrl+k":
 		if m.branchCursor > 0 {
 			m.branchCursor--
@@ -108,7 +106,7 @@ func (m Model) updateBranchMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) updateBranchCreateMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "esc", "ctrl+c":
+	case "esc":
 		m.branchCreating = false
 		m.branchInput.Reset()
 		m.branchFilter.Focus()
@@ -136,6 +134,12 @@ func (m Model) clampBranchScroll() Model {
 		m.branchOffset = m.branchCursor
 	} else if m.branchCursor >= m.branchOffset+h {
 		m.branchOffset = m.branchCursor - h + 1
+	}
+	// And back off the end of the list, which is the half that matters when
+	// the terminal grows: without it the window stays where it was and the
+	// branches above it are unreachable until the user scrolls up.
+	if maxOffset := max(len(m.activeBranches())-h, 0); m.branchOffset > maxOffset {
+		m.branchOffset = maxOffset
 	}
 	return m
 }

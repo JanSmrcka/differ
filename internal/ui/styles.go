@@ -8,6 +8,11 @@ import (
 // Styles holds all lipgloss styles derived from a theme.
 type Styles struct {
 	// File list
+	// Modal is the border round a transient box that asks for an answer. The
+	// chrome has no boxes; this is the exception, and the border is what says
+	// the rest of the screen is not taking input.
+	Modal lipgloss.Style
+
 	FileItem     lipgloss.Style
 	FileSelected lipgloss.Style
 	StagedIcon   lipgloss.Style
@@ -20,15 +25,33 @@ type Styles struct {
 	StatusUntracked lipgloss.Style
 
 	// Diff
-	DiffAdded          lipgloss.Style
-	DiffRemoved        lipgloss.Style
-	DiffAddedBg        lipgloss.Style // bg-only, for padding highlighted lines
-	DiffRemovedBg      lipgloss.Style // bg-only, for padding highlighted lines
+	DiffAdded     lipgloss.Style
+	DiffRemoved   lipgloss.Style
+	DiffAddedBg   lipgloss.Style // bg-only, for padding highlighted lines
+	DiffRemovedBg lipgloss.Style // bg-only, for padding highlighted lines
+	// The part of a split-view line that differs from its pair: a shade away
+	// from the line's own background.
+	//
+	// Background only, deliberately. An underline was the obvious way to
+	// carry it without colour, and lipgloss re-styles run by run when one is
+	// set — which puts an escape inside a grapheme cluster and makes a ZWJ
+	// emoji measure four columns instead of two, so the row loses a column
+	// off the end. It would not have helped where it was meant to either:
+	// NO_COLOR puts termenv in its Ascii profile, where nothing is emitted at
+	// all.
+	DiffAddedEmph      lipgloss.Style
+	DiffRemovedEmph    lipgloss.Style
 	DiffContext        lipgloss.Style
 	DiffHunkHeader     lipgloss.Style
 	DiffLineNum        lipgloss.Style
 	DiffLineNumAdded   lipgloss.Style
 	DiffLineNumRemoved lipgloss.Style
+	// The marks differ adds inside the code column — trailing whitespace, and
+	// the sign that a line was cut. One variant per line background, so the
+	// mark sits on the line rather than over it.
+	DiffMark        lipgloss.Style
+	DiffMarkAdded   lipgloss.Style
+	DiffMarkRemoved lipgloss.Style
 
 	// Chrome — dim structure, so content stands out against it.
 	Chrome          lipgloss.Style
@@ -61,13 +84,23 @@ type Styles struct {
 // NewStyles creates styles from a theme.
 func NewStyles(t theme.Theme) Styles {
 	return Styles{
+		// The one column of left padding is where the selection marker goes.
+		// It used to be padding on both, so the only difference between a
+		// selected row and an unselected one was bold and a foreground — and
+		// stripped of colour the two were byte-identical. Every other
+		// distinction in differ carries a glyph as well as a hue; this one
+		// carries cursorMarker, the same one the diff uses, so it means the
+		// same thing in both places.
+		Modal: lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color(t.AccentFg)).
+			Padding(0, modalPadding),
+
 		FileItem: lipgloss.NewStyle().
-			Foreground(lipgloss.Color(t.Fg)).
-			PaddingLeft(1),
+			Foreground(lipgloss.Color(t.Fg)),
 		FileSelected: lipgloss.NewStyle().
 			Foreground(lipgloss.Color(t.SelectedFg)).
-			Bold(true).
-			PaddingLeft(1),
+			Bold(true),
 		StagedIcon: lipgloss.NewStyle().
 			Foreground(lipgloss.Color(t.StagedFg)).
 			Bold(true),
@@ -93,6 +126,10 @@ func NewStyles(t theme.Theme) Styles {
 			Background(lipgloss.Color(t.AddedBg)),
 		DiffRemovedBg: lipgloss.NewStyle().
 			Background(lipgloss.Color(t.RemovedBg)),
+		DiffAddedEmph: lipgloss.NewStyle().
+			Background(lipgloss.Color(t.AddedEmphBg)),
+		DiffRemovedEmph: lipgloss.NewStyle().
+			Background(lipgloss.Color(t.RemovedEmphBg)),
 		DiffContext: lipgloss.NewStyle().
 			Foreground(lipgloss.Color(t.Fg)),
 		DiffHunkHeader: lipgloss.NewStyle().
@@ -104,6 +141,14 @@ func NewStyles(t theme.Theme) Styles {
 			Background(lipgloss.Color(t.AddedBg)),
 		DiffLineNumRemoved: lipgloss.NewStyle().
 			Foreground(lipgloss.Color(t.LineNumRemovedFg)).
+			Background(lipgloss.Color(t.RemovedBg)),
+		DiffMark: lipgloss.NewStyle().
+			Foreground(lipgloss.Color(t.MarkFg)),
+		DiffMarkAdded: lipgloss.NewStyle().
+			Foreground(lipgloss.Color(t.MarkFg)).
+			Background(lipgloss.Color(t.AddedBg)),
+		DiffMarkRemoved: lipgloss.NewStyle().
+			Foreground(lipgloss.Color(t.MarkFg)).
 			Background(lipgloss.Color(t.RemovedBg)),
 
 		Chrome: lipgloss.NewStyle().

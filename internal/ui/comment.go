@@ -44,12 +44,25 @@ func diffLocations(p ParsedDiff) []review.Location {
 // a comment on any other file keeps line numbers that the agent has since
 // moved — and would be delivered quoting the wrong place.
 func (m Model) reanchorAllCmd() tea.Cmd {
+	return m.reanchorCmd(false)
+}
+
+// reanchorCmd re-resolves commented files, optionally including the one on
+// screen.
+//
+// The file on screen is normally re-anchored by handleDiffLoaded, so it is
+// excluded here. While the diff is held that never runs — and re-anchoring is
+// what marks a comment stale, so excluding it left a comment about a deleted
+// line looking pending and sendable.
+func (m Model) reanchorCmd(includeCurrent bool) tea.Cmd {
 	if m.session == nil {
 		return nil
 	}
-	current := m.currentFilePath()
 	var targets []string
-	seen := map[string]bool{current: true}
+	seen := map[string]bool{}
+	if current := m.currentFilePath(); !includeCurrent {
+		seen[current] = true
+	}
 	for _, c := range m.session.Comments() {
 		if !seen[c.File] {
 			seen[c.File] = true
@@ -61,8 +74,16 @@ func (m Model) reanchorAllCmd() tea.Cmd {
 	}
 
 	repo := m.repo
+	// The flag, not an entry: these are files the cursor is not on, so there
+	// is no entry to ask. What matters is that the Locate below is derived
+	// from the same answer, so the coordinates and the claim about them
+	// cannot disagree.
 	staged := m.stagedOnly
 	ref := m.ref
+	locate := review.LocateLine
+	if staged && ref == "" {
+		locate = review.LocateFile
+	}
 	untracked := map[string]bool{}
 	for _, f := range m.files {
 		if f.untracked {
@@ -71,13 +92,13 @@ func (m Model) reanchorAllCmd() tea.Cmd {
 	}
 
 	return func() tea.Msg {
-		out := make(map[string][]review.Location, len(targets))
+		out := make(map[string]review.Anchored, len(targets))
 		for _, path := range targets {
 			parsed, ok := parseFileDiff(repo, path, staged, ref, untracked[path])
 			if !ok {
 				continue
 			}
-			out[path] = diffLocations(parsed)
+			out[path] = review.Anchored{Locations: diffLocations(parsed), Locate: locate}
 		}
 		return reanchorMsg{locations: out}
 	}
@@ -102,7 +123,7 @@ func parseFileDiff(repo *git.Repo, path string, staged bool, ref string, untrack
 
 // buildLineComment describes the line under the cursor.
 func (m Model) buildLineComment() (review.Comment, bool) {
-	if m.renderer == nil {
+	if !m.rendererIsTheCursorsFile() {
 		return review.Comment{}, false
 	}
 	parsed := m.renderer.Parsed()
@@ -119,6 +140,7 @@ func (m Model) buildLineComment() (review.Comment, bool) {
 	c := review.Comment{
 		File:      m.currentFilePath(),
 		Side:      side,
+		Locate:    m.locateFor(side),
 		StartLine: line,
 		EndLine:   line,
 		HunkIndex: addr.HunkIndex,
@@ -127,12 +149,46 @@ func (m Model) buildLineComment() (review.Comment, bool) {
 	if h, ok := parsed.HunkAt(m.diffCursor); ok {
 		c.Excerpt = excerptFor(parsed, h)
 	}
+	c.FileKey, c.Scope = m.contentKeyNow(c.File)
 	return c, true
+}
+
+// contentKeyNow fingerprints the content the reviewer is looking at, right
+// now, so a restored comment can be checked against the version its author
+// read rather than against whatever the file held when the review was last
+// written out.
+//
+// The scope is decided the way the diff was read, not by the flag differ was
+// started with: git reports a file with both staged and unstaged changes
+// twice, staged first, so in default mode the cursor can sit on an entry
+// whose diff is `--cached`. Under -r the diff is a ref against the working
+// tree whatever the index says.
+func (m Model) contentKeyNow(path string) (string, review.KeyScope) {
+	if m.repo == nil || path == "" {
+		return "", review.ScopeWorktree
+	}
+	if m.readsTheIndex() {
+		staged, err := m.repo.IndexHashes()
+		return indexKey(staged, path, err == nil), review.ScopeIndex
+	}
+	return worktreeKey(m.repo, path), review.ScopeWorktree
+}
+
+// readsTheIndex reports whether the diff under the cursor came from the
+// index rather than the working tree.
+func (m Model) readsTheIndex() bool {
+	if m.ref != "" {
+		return false
+	}
+	if m.cursor < 0 || m.cursor >= len(m.files) {
+		return m.stagedOnly
+	}
+	return m.files[m.cursor].change.Staged
 }
 
 // buildHunkComment describes the whole hunk the cursor is in.
 func (m Model) buildHunkComment() (review.Comment, bool) {
-	if m.renderer == nil {
+	if !m.rendererIsTheCursorsFile() {
 		return review.Comment{}, false
 	}
 	parsed := m.renderer.Parsed()
@@ -148,15 +204,32 @@ func (m Model) buildHunkComment() (review.Comment, bool) {
 		start, count, side = h.OldStart, h.OldCount, review.SideOld
 	}
 
-	return review.Comment{
+	c := review.Comment{
 		File:      m.currentFilePath(),
 		Side:      side,
+		Locate:    m.locateFor(side),
 		StartLine: start,
 		EndLine:   start + max(count, 1) - 1,
 		HunkIndex: h.Index,
 		Anchor:    anchorForHunk(parsed, h, side),
 		Excerpt:   excerptFor(parsed, h),
-	}, true
+	}
+	c.FileKey, c.Scope = m.contentKeyNow(c.File)
+	return c, true
+}
+
+// rendererIsTheCursorsFile reports whether what is parsed is what the cursor
+// is on.
+//
+// A comment takes its excerpt and anchor from the renderer and its path and
+// Locate from the cursor. A diff load is a tea.Cmd and git diff costs about
+// eight milliseconds, so holding j through the file list leaves the two
+// disagreeing — and the comment then named one file while quoting another's
+// hunk, or named the right file with the other entry's line numbers. Now
+// that the reference is machine-actionable, that is a wrong edit rather than
+// a confusing message. The editor already had this guard.
+func (m Model) rendererIsTheCursorsFile() bool {
+	return m.renderer != nil && m.rendererPath == m.currentFilePath()
 }
 
 // sideAndLine picks which side of the diff a line belongs to. A removed line
@@ -231,4 +304,70 @@ func excerptMarker(t DiffLineType) string {
 	default:
 		return " "
 	}
+}
+
+// locateFor says how precisely the agent can be pointed at a comment on this
+// side of the current file.
+//
+// Only here is everything needed in scope: the side, whether the diff is
+// against the index, and whether the file still exists. review cannot work it
+// out — it deliberately reads nothing from the repository.
+func (m Model) locateFor(side review.Side) review.Locate {
+	if m.currentFileGone() {
+		return review.LocateNone
+	}
+	// The old side describes the file before the change, so its line numbers
+	// never resolve.
+	if side == review.SideOld {
+		return review.LocateFile
+	}
+	// Whether the *new* side is the working tree depends on what this entry's
+	// diff was read with, not on the flag differ was started with. git reports
+	// a file with both staged and unstaged changes twice, staged first — so in
+	// default mode the cursor starts on an entry whose diff is `--cached`, and
+	// keying on m.stagedOnly called that the worktree. Stage a change, edit
+	// above it, and the reference said line 3 while the code had moved to line
+	// 8. loadDiffCmd reads f.change.Staged; so does this.
+	//
+	// No `&& m.ref == ""` here. Under -r, changedFilesRef never sets Staged,
+	// so the term could never be reached and removing it changed no screen —
+	// a condition documenting a case it cannot see is worse than none.
+	entry := m.files[m.cursor].change
+	if entry.Staged && !m.worktreeMatchesIndex(entry.Path) {
+		return review.LocateFile
+	}
+	return review.LocateLine
+}
+
+// currentFileGone reports whether there is no file on disk to point at: the
+// cursor is off the end of the list, or the file under it has been deleted.
+//
+// The bounds check was one-sided. A negative cursor is not reachable today,
+// but the only thing standing between it and a panic inside a tea.Cmd was
+// that fact, and this function is the guard.
+func (m Model) currentFileGone() bool {
+	if m.cursor < 0 || m.cursor >= len(m.files) {
+		return true
+	}
+	return m.files[m.cursor].change.Status == git.StatusDeleted
+}
+
+// worktreeMatchesIndex answers whether a --cached diff's line numbers also
+// address the file on disk.
+//
+// Blanket-degrading every staged entry to a file reference meant `differ
+// commit` — whose whole purpose is reviewing staged work — could never point
+// the agent at a line, even in its dominant case: stage, review, commit,
+// with nothing edited in between, where the index and the working tree are
+// the same bytes. The question is answerable exactly in one git call rather
+// than guessed at conservatively.
+//
+// A failure answers false, which is the safe direction: an unanswerable
+// question degrades to "@path", never to a line nobody checked.
+func (m Model) worktreeMatchesIndex(path string) bool {
+	if m.repo == nil {
+		return false
+	}
+	same, err := m.repo.WorktreeMatchesIndex(path)
+	return err == nil && same
 }

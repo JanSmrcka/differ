@@ -1,13 +1,5 @@
 Review feedback: 1 comment
 
-File: src/auth/login.ts
-Line: 43 (new)
+@src/auth/login.ts :L43
 
-Changed code:
- export function load(id: string) {
--  const user = getUser(id)
-+  const user = await getUser(id)
-   return user
-
-Comment:
 This should remain awaited. We need the resolved user here.

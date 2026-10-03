@@ -40,16 +40,51 @@ func (m Model) View() string {
 	// the layout's height does not change while it is open and the diff
 	// viewport is exactly where it was when it closes.
 	var body string
-	if m.showHelp {
+	switch {
+	case m.showHelp:
 		body = m.renderHelpOverlay(m.width, contentH)
-	} else {
+	case m.showHistory:
+		body = m.renderHistoryOverlay(m.width, contentH)
+	case m.showProblem:
+		body = m.renderProblemOverlay(m.width, contentH)
+
+	case m.onePanel():
+		// One panel takes the terminal. A pair squeezed into sixty columns is
+		// two unusable panels rather than one usable one, and the diff is what
+		// differ is for — so the file list keeps the width only while it is
+		// what the user is working in.
+		only := m.rightPanel()
+		if m.showsFileList() {
+			only = m.leftPanel()
+		}
+		if m.showThemes {
+			// One panel means the picker cannot sit beside the diff, so it
+			// takes the panel outright. The preview still repaints the frame
+			// around it, which is all the room there is.
+			only = strings.Split(m.renderThemeOverlay(m.width, contentH), "\n")
+		}
+		body = strings.Join(padLines(only, contentH), "\n")
+	default:
 		left := padLines(m.leftPanel(), contentH)
+		if m.showThemes {
+			// The picker takes the file list's panel rather than the whole
+			// area, so the diff beside it stays on screen — repainted in the
+			// theme under the cursor, which is the point of a picker.
+			left = padLines(strings.Split(m.renderThemeOverlay(m.listWidth(), contentH), "\n"), contentH)
+		}
 		right := padLines(m.rightPanel(), contentH)
 		rows := make([]string, contentH)
 		for i := range rows {
 			rows[i] = m.panelRow(left[i], right[i])
 		}
 		body = strings.Join(rows, "\n")
+	}
+
+	// The modals go on top of whatever the switch produced, so the view is
+	// still there around the box — you are commenting on a line, and choosing
+	// where feedback goes while looking at what will be sent.
+	if modal := m.modal(contentH); modal != "" {
+		body = modalOver(strings.Split(body, "\n"), modal, m.width, contentH)
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Left,
@@ -64,16 +99,17 @@ func (m Model) View() string {
 // panelRow places one line from each panel either side of the divider.
 func (m Model) panelRow(left, right string) string {
 	gap := strings.Repeat(" ", panelGap)
-	return padTo(left, fileListWidth) + gap + m.styles.Chrome.Render(verticalDivider) + gap + right
+	return padTo(left, m.listWidth()) + gap + m.styles.Chrome.Render(verticalDivider) + gap + right
 }
 
 // leftPanel is the file list, or the branch picker, under its own label.
 func (m Model) leftPanel() []string {
-	body := m.renderFileList(m.listHeight())
-	if m.mode == modeBranchPicker {
-		body = m.renderBranchList(m.listHeight())
-	}
-	return append(m.panelHeader(m.leftPanelLabel(), m.focusOn(paneFiles)), strings.Split(body, "\n")...)
+	// Always the file list. The branch picker used to be drawn here, which
+	// meant choosing a branch cost you sight of the changeset; it is a box
+	// over the view now, and the panel behind it keeps showing what you were
+	// looking at.
+	return append(m.panelHeader(m.leftPanelLabel(), m.focusOn(paneFiles)),
+		strings.Split(m.renderFileList(), "\n")...)
 }
 
 // rightPanel is the diff, under a label naming the file on show.
@@ -109,12 +145,7 @@ func (m Model) focusOn(p pane) bool {
 	}
 }
 
-func (m Model) leftPanelLabel() string {
-	if m.mode == modeBranchPicker {
-		return "BRANCHES"
-	}
-	return "CHANGED FILES"
-}
+func (m Model) leftPanelLabel() string { return "CHANGED FILES" }
 
 // diffLabel names the file on show, with its staged and review state.
 func (m Model) diffLabel() string {
@@ -188,22 +219,31 @@ func (m Model) rule() string {
 // renderFooter is the bar below the content: hints, or an input when one is
 // open.
 func (m Model) renderFooter() string {
+	// No budget arithmetic left here. The comment editor was the only footer
+	// that wanted more than one row, and it is a modal now — the commit bar
+	// and the branch-name bar are one line each, so the footer is at most two
+	// with the status row.
 	var input string
 	switch {
-	case m.commenting:
-		input = m.renderCommentEditor()
+	case m.commenting && m.height < commentModalMinHeight:
+		// Too short for a box. The footer form needs two rows and is what
+		// this replaced, so it is still here for terminals the modal cannot
+		// serve.
+		input = m.renderCommentBar()
 	case m.mode == modeCommit:
 		input = m.renderCommitBar()
-	case m.mode == modeBranchPicker && m.branchCreating:
-		input = m.renderBranchCreateBar()
 	default:
-		return m.renderHintBar() // already carries the status row
+		return m.renderHintBar() // already carries the status row, and asks
+		// for it itself — computing it above ran the whole thing twice on
+		// every frame of the common path.
 	}
+
+	segment := m.statusSegment()
 
 	// An open input replaces the hints, but not the status: "comment is empty
 	// — esc to cancel" and "ai msg failed" are only reachable here, and the
 	// whole point of those messages is not to fail silently.
-	if segment := m.statusSegment(); segment != "" {
+	if segment != "" {
 		return lipgloss.JoinVertical(lipgloss.Left,
 			input,
 			m.renderBar(m.styles.StatusText, " "+segment),
@@ -236,18 +276,56 @@ func (m Model) renderHintBar() string {
 // state and what just happened. The changeset counts live in the header, so
 // they are not repeated here.
 func (m Model) statusSegment() string {
+	// What just happened comes first, and the standing state after it. The
+	// row is one line and the bar drops whole words off the end to keep it
+	// that way, so the order here is a priority order: with the review
+	// progress and "split" in front, a failure at sixty columns was cut down
+	// to its first few words — "generating a commit message", with no
+	// "failed", no hint and no "!" — and read as progress rather than a
+	// failure.
 	var parts []string
+	// First, above even what just happened: it says the screen is not showing
+	// the repository, and every other word in this row describes that screen.
+	// Only where the key that clears it works. Outside review mode the bar was
+	// still telling people to press R, which is unbound there.
+	// A failure comes before everything, the notice included. An earlier
+	// version put the notice first, reasoning that it describes the screen
+	// every other word here describes — true, but not when the other word is a
+	// failure the user has to act on. The notice is up to 56 columns, so at
+	// eighty it clipped the failure's "! details" and below seventy-two it
+	// pushed the failure off the row entirely.
+	failed := m.problem != nil && m.statusMsg != ""
+	if failed {
+		parts = append(parts, m.statusMsg)
+	}
+	if m.mode == modeReview && m.diffStale() {
+		notice := "diff moved"
+		// The summary is the first thing dropped when the row is tight: what
+		// moved is available by reloading, and the half that says what to
+		// press is not.
+		if summary := m.changeSince(m.files); summary != "" && !failed && m.width >= noticeSummaryWidth {
+			notice += " (" + summary + ")"
+		}
+		parts = append(parts, notice+" — "+reloadKey+" to reload")
+	}
+	if !failed && m.statusMsg != "" {
+		parts = append(parts, m.statusMsg)
+	}
 	if m.mode == modeReview {
 		parts = append(parts, m.reviewSummary())
 	}
 	if m.splitDiff {
 		parts = append(parts, "split")
 	}
-	if m.statusMsg != "" {
-		parts = append(parts, m.statusMsg)
-	}
-	return strings.Join(parts, "  ·  ")
+
+	// Cut here rather than leaving it to the bar, which drops words silently.
+	return truncateEnd(strings.Join(parts, "  ·  "), max(m.width-1, 0))
 }
+
+// noticeSummaryWidth is the narrowest terminal that gets the "diff moved"
+// notice with its summary. Below it the notice keeps only the part that says
+// what to press.
+const noticeSummaryWidth = 100
 
 func padLines(lines []string, height int) []string {
 	for len(lines) < height {

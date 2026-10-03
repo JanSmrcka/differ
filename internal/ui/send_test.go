@@ -269,7 +269,7 @@ func TestSend_EndToEndIntoATmuxPane(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 
-	for _, want := range []string{"Review feedback", "File: src.ts", "first note", "second note"} {
+	for _, want := range []string{"Review feedback", "@src.ts :L", "first note", "second note"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("the agent pane never received %q; got:\n%s", want, got)
 		}

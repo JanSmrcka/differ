@@ -157,7 +157,7 @@ func TestRenderNewFileSplit_ContainsSeparator(t *testing.T) {
 
 func TestRenderSplitSide_Nil(t *testing.T) {
 	styles, th := testStyles()
-	result := renderSplitSide(nil, "test.go", styles, th, 40, true)
+	result := renderSplitSide(nil, "test.go", styles, th, geometry{numW: lineNumWidth, width: 40}, true, span{}, nil)
 	if len(result) == 0 {
 		t.Error("nil side should produce padding, not empty")
 	}
@@ -170,7 +170,7 @@ func TestRenderSplitSide_Nil(t *testing.T) {
 func TestRenderSplitSide_Added(t *testing.T) {
 	styles, th := testStyles()
 	dl := &DiffLine{Type: LineAdded, Content: "new line", OldNum: -1, NewNum: 5}
-	result := renderSplitSide(dl, "test.go", styles, th, 50, false)
+	result := renderSplitSide(dl, "test.go", styles, th, geometry{numW: lineNumWidth, width: 50}, false, span{}, nil)
 	if len(result) == 0 {
 		t.Error("added line should produce output")
 	}
@@ -179,7 +179,7 @@ func TestRenderSplitSide_Added(t *testing.T) {
 func TestRenderSplitSide_Removed(t *testing.T) {
 	styles, th := testStyles()
 	dl := &DiffLine{Type: LineRemoved, Content: "old line", OldNum: 3, NewNum: -1}
-	result := renderSplitSide(dl, "test.go", styles, th, 50, true)
+	result := renderSplitSide(dl, "test.go", styles, th, geometry{numW: lineNumWidth, width: 50}, true, span{}, nil)
 	if len(result) == 0 {
 		t.Error("removed line should produce output")
 	}
@@ -189,7 +189,7 @@ func TestRenderSplitSide_ZeroWidth(t *testing.T) {
 	styles, th := testStyles()
 	dl := &DiffLine{Type: LineContext, Content: "x", OldNum: 1, NewNum: 1}
 	// Should not panic with tiny panelW
-	result := renderSplitSide(dl, "test.go", styles, th, 5, true)
+	result := renderSplitSide(dl, "test.go", styles, th, geometry{numW: lineNumWidth, width: 5}, true, span{}, nil)
 	if len(result) == 0 {
 		t.Error("should produce some output even with tiny width")
 	}
@@ -265,9 +265,9 @@ func TestFmtLineNum(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got := fmtLineNum(tt.n)
+			got := fmtLineNum(tt.n, lineNumWidth)
 			if got != tt.want {
-				t.Errorf("fmtLineNum(%d) = %q, want %q", tt.n, got, tt.want)
+				t.Errorf("fmtLineNum(%d, %d) = %q, want %q", tt.n, lineNumWidth, got, tt.want)
 			}
 		})
 	}

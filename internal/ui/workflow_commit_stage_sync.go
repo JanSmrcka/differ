@@ -39,13 +39,15 @@ func (m Model) toggleStage() (tea.Model, tea.Cmd) {
 	f := m.files[m.cursor]
 	repo := m.repo
 	path := f.change.Path
+	m.refreshSeq++
+	seq := m.refreshSeq
 	return m, func() tea.Msg {
 		if f.change.Staged {
 			_ = repo.UnstageFile(path)
 		} else {
 			_ = repo.StageFile(path)
 		}
-		return m.buildRefreshedFiles()
+		return m.buildRefreshedFilesAs(seq)
 	}
 }
 
@@ -54,9 +56,11 @@ func (m Model) stageAll() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	repo := m.repo
+	m.refreshSeq++
+	seq := m.refreshSeq
 	return m, func() tea.Msg {
 		_ = repo.StageAll()
-		return m.buildRefreshedFiles()
+		return m.buildRefreshedFilesAs(seq)
 	}
 }
 
@@ -114,13 +118,114 @@ func (m Model) handleTick() (tea.Model, tea.Cmd) {
 	if m.mode == modeCommit || m.mode == modeBranchPicker || m.generatingMsg {
 		return m, tickCmd()
 	}
-	return m, tea.Batch(m.refreshFilesCmd(), m.fetchUpstreamStatusCmd(), tickCmd())
+	// One question — "did anything move?" — instead of eight answers nobody
+	// asked for. The refresh happens in handleRepoProbed, and only if it did.
+	//
+	// Not while one is already out: tea.Tick does not wait for the previous
+	// command, so on a repository where git status takes longer than the
+	// interval the probes would pile up, each one contending for the index
+	// with the last.
+	m.ticksSinceRefresh++
+	if m.probing {
+		// A probe that never comes back would otherwise wedge the poll loop
+		// for good — git status on a hung mount does not error, it blocks —
+		// and nothing on screen would say so. After staleProbeTicks the flag
+		// is dropped and a fresh one goes out; the stale answer is harmless
+		// when it eventually lands, because it is only a fingerprint.
+		m.probeWaited++
+		if m.probeWaited < staleProbeTicks {
+			return m, tickCmd()
+		}
+	}
+	m.probing = true
+	m.probeWaited = 0
+	return m, tea.Batch(m.probeCmd(), tickCmd())
+}
+
+// refreshEvery is the most often the expensive rebuild runs, in ticks.
+//
+// The probe is cheap and runs every tick, so a change is noticed within a
+// second. Acting on it is rate-limited: while an agent writes continuously
+// every probe would move, and a refresh a second is nine git processes a
+// second — more churn than the two-second rebuild this replaced, in exactly
+// the burst the issue is about. This is the coalescing it asks for: many
+// writes in quick succession become one refresh, not twenty.
+const refreshEvery = 2
+
+// staleProbeTicks is how long a probe may be out before another is sent.
+const staleProbeTicks = 10
+
+// probeCmd asks git for the repository's fingerprint, off the update loop.
+func (m Model) probeCmd() tea.Cmd {
+	repo := m.repo
+	ref := m.ref
+	return func() tea.Msg {
+		fingerprint, err := repo.Probe(ref)
+		return repoProbedMsg{fingerprint: fingerprint, err: err}
+	}
+}
+
+// handleRepoProbed does the expensive work, but only when the probe says the
+// repository actually moved.
+//
+// A burst of writes is coalesced by the interval itself: whatever an agent does
+// between two probes becomes one refresh, however many files it touched.
+func (m Model) handleRepoProbed(msg repoProbedMsg) (tea.Model, tea.Cmd) {
+	m.probing = false
+	if msg.err != nil {
+		// The probe is an optimisation, never a gate. A repository mid-rebase,
+		// a vanished git binary or an unreadable index must cost the user a
+		// wasted refresh, not a screen that has quietly stopped updating.
+		//
+		// Rate-limited like any other refresh, though: a repository where the
+		// probe reliably fails would otherwise rebuild every tick — nine
+		// processes a second, in exactly the degraded state where that is
+		// least welcome.
+		if m.ticksSinceRefresh < refreshEvery {
+			return m, nil
+		}
+		m.ticksSinceRefresh = 0
+		refresh := m.refreshEverythingCmd()
+		return m, refresh
+	}
+	// A refresh must not land under an open input. The tick already declines
+	// to probe in those modes, but a probe dispatched a moment earlier can
+	// arrive after the user has pressed c or b — and handleFilesRefreshed
+	// reorders the file list, moves the cursor and reloads the diff.
+	if m.mode == modeCommit || m.mode == modeBranchPicker || m.generatingMsg {
+		return m, nil
+	}
+	if msg.fingerprint == m.repoFingerprint {
+		return m, nil
+	}
+	if m.ticksSinceRefresh < refreshEvery {
+		// Seen, but not acted on yet. The fingerprint is deliberately not
+		// stored: the next probe must still find a difference, or this change
+		// would be dropped rather than delayed.
+		return m, nil
+	}
+	// Still not stored here. It is a claim that the screen matches the
+	// repository, and nothing on screen has changed yet — handleFilesRefreshed
+	// stores it when the rebuild actually lands. Storing it on dispatch made a
+	// failed or out-of-order refresh permanent: the screen kept its old state
+	// while the fingerprint said it was current, so no later probe would ever
+	// disagree.
+	m.ticksSinceRefresh = 0
+	m.refreshSeq++
+	return m, tea.Batch(m.refreshFilesAs(msg.fingerprint, m.refreshSeq), m.fetchUpstreamStatusCmd())
+}
+
+// refreshEverythingCmd is what a tick used to do unconditionally.
+//
+// A pointer receiver so the refresh it issues gets a sequence of its own, like
+// every other one.
+func (m *Model) refreshEverythingCmd() tea.Cmd {
+	return tea.Batch(m.nextRefresh(), m.fetchUpstreamStatusCmd())
 }
 
 func (m Model) handlePushDone(msg pushDoneMsg) (tea.Model, tea.Cmd) {
 	if msg.err != nil {
-		m.statusMsg = "push failed: " + msg.err.Error()
-		return m, nil
+		return m.fail("push", msg.err), nil
 	}
 	m.statusMsg = "pushed!"
 	return m, m.fetchUpstreamStatusCmd()
@@ -128,11 +233,11 @@ func (m Model) handlePushDone(msg pushDoneMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) handlePullDone(msg pullDoneMsg) (tea.Model, tea.Cmd) {
 	if msg.err != nil {
-		m.statusMsg = "pull failed: " + msg.err.Error()
-		return m, nil
+		return m.fail("pull", msg.err), nil
 	}
 	m.statusMsg = "pulled!"
-	return m, tea.Batch(m.refreshFilesCmd(), m.fetchUpstreamStatusCmd())
+	refresh := m.nextRefresh()
+	return m, tea.Batch(refresh, m.fetchUpstreamStatusCmd())
 }
 
 func (m Model) loadDiffCmd(resetScroll bool) tea.Cmd {
@@ -145,17 +250,27 @@ func (m Model) loadDiffCmd(resetScroll bool) tea.Cmd {
 	styles := m.styles
 	t := m.theme
 	staged := f.change.Staged
+	stagedOnly := m.stagedOnly
 	ref := m.ref
 	diffW := m.diffWidth()
 	filename := f.change.Path
-	splitMode := m.splitDiff && diffW >= minSplitWidth
+	// Split view needs the two-panel layout as well as the width. Without that
+	// it engaged between 60 and 71 columns — where the layout has collapsed and
+	// the diff briefly has the whole terminal — and then switched off at 72
+	// when the file list reappeared and cut the diff to 45. Widening a pane by
+	// one column dropped the user out of split view, which is the opposite of
+	// what the README promises.
+	splitMode := m.splitDiff && !m.onePanel() && diffW >= minSplitWidth
 	tabWidth := m.cfg.TabWidth
+	gen := m.themeGen
 	return func() tea.Msg {
 		fail := func(err error) tea.Msg {
 			return diffLoadedMsg{
 				errContent:  styles.DiffHunkHeader.Render("Error: " + err.Error()),
 				index:       idx,
+				path:        filename,
 				resetScroll: resetScroll,
+				themeGen:    gen,
 			}
 		}
 
@@ -177,52 +292,114 @@ func (m Model) loadDiffCmd(resetScroll bool) tea.Cmd {
 		r := NewDiffRenderer(parsed, filename, styles, t, diffW)
 		r.SetTabWidth(tabWidth)
 		r.SetSplit(splitMode)
-		return diffLoadedMsg{renderer: r, index: idx, resetScroll: resetScroll}
+		return diffLoadedMsg{
+			renderer:    r,
+			index:       idx,
+			path:        filename,
+			resetScroll: resetScroll,
+			themeGen:    gen,
+			// Read here, next to the content, rather than looked up from the
+			// last poll's key map afterwards: a write landing between that
+			// poll and this read left the renderer holding content newer than
+			// its recorded key, and the next poll then reported a change that
+			// was already on screen.
+			key: fileKeyOf(repo, f, stagedOnly),
+		}
 	}
 }
 
 func (m Model) refreshFilesCmd() tea.Cmd {
+	return m.refreshFilesAs("", m.refreshSeq)
+}
+
+// nextRefresh stamps a refresh with a sequence of its own and returns its
+// command.
+//
+// Every refresh needs one. The explicit ones — staging, committing, switching
+// branch, returning from the editor — reused whatever number the last probe
+// had been given, so neither was older than the other by the guard's test and
+// the last to land won, stale fingerprint included. Worse, buildRefreshedFiles
+// left the number at zero, so once any probe had landed the guard dropped
+// every `tab` and `a` refresh outright: staging stopped updating the list
+// until the next probe noticed, turning the most-pressed key in the file list
+// from instant into a one-to-two-second lag.
+//
+// A pointer receiver, and callers must take the command into a variable before
+// returning the model: in `return m, m.nextRefresh()` Go evaluates m first, so
+// the increment would be lost.
+func (m *Model) nextRefresh() tea.Cmd {
+	m.refreshSeq++
+	return m.refreshFilesAs("", m.refreshSeq)
+}
+
+// refreshFilesAs rebuilds the file list, tagged with the fingerprint the
+// repository had when it was asked for and with its place in the queue.
+//
+// An explicit refresh — staging, committing, switching branch — passes an
+// empty fingerprint: it knows the repository changed but not what it looks
+// like now, so it installs its files without claiming the screen is current.
+func (m Model) refreshFilesAs(fingerprint string, seq int) tea.Cmd {
 	repo := m.repo
 	stagedOnly := m.stagedOnly
 	ref := m.ref
 	return func() tea.Msg {
+		fail := func(err error) tea.Msg {
+			return filesRefreshedMsg{err: err, seq: seq}
+		}
 		files, err := repo.ChangedFiles(stagedOnly, ref)
 		if err != nil {
-			return filesRefreshedMsg{err: err}
+			return fail(err)
 		}
 		var untracked []string
 		if !stagedOnly && ref == "" {
 			untracked, err = repo.UntrackedFiles()
 			if err != nil {
-				return filesRefreshedMsg{err: err}
+				return fail(err)
 			}
 		}
-		return filesRefreshedMsg{files: buildFileItems(repo, files, untracked)}
+		items := buildFileItems(repo, files, untracked)
+		return filesRefreshedMsg{
+			files:       items,
+			keys:        fileKeysOf(repo, items, stagedOnly),
+			fingerprint: fingerprint,
+			seq:         seq,
+		}
 	}
 }
 
 func (m Model) buildRefreshedFiles() filesRefreshedMsg {
+	return m.buildRefreshedFilesAs(m.refreshSeq)
+}
+
+func (m Model) buildRefreshedFilesAs(seq int) filesRefreshedMsg {
 	files, err := m.repo.ChangedFiles(m.stagedOnly, m.ref)
 	if err != nil {
-		return filesRefreshedMsg{err: err}
+		return filesRefreshedMsg{err: err, seq: seq}
 	}
 	var untracked []string
 	if !m.stagedOnly && m.ref == "" {
 		untracked, err = m.repo.UntrackedFiles()
 		if err != nil {
-			return filesRefreshedMsg{err: err}
+			return filesRefreshedMsg{err: err, seq: seq}
 		}
 	}
-	return filesRefreshedMsg{files: buildFileItems(m.repo, files, untracked)}
+	items := buildFileItems(m.repo, files, untracked)
+	return filesRefreshedMsg{
+		files: items,
+		keys:  fileKeysOf(m.repo, items, m.stagedOnly),
+		seq:   seq,
+	}
 }
 
+// saveSplitPrefCmd persists the split preference.
+//
+// m.cfg is the one copy that gets written, by this and by the theme picker.
+// This used to mutate a local copy instead, so m.cfg.SplitDiff kept its
+// startup value for the whole session and the next whole-config write — a
+// theme change — silently put the old value back.
 func (m Model) saveSplitPrefCmd() tea.Cmd {
 	cfg := m.cfg
-	split := m.splitDiff
-	return func() tea.Msg {
-		cfg.SplitDiff = split
-		return savePrefDoneMsg{err: config.Save(cfg)}
-	}
+	return func() tea.Msg { return savePrefDoneMsg{err: config.Save(cfg)} }
 }
 
 func (m Model) commitCmd(message string) tea.Cmd {
@@ -265,5 +442,40 @@ func (m Model) generateCommitMsgCmd() tea.Cmd {
 			return commitMsgGeneratedMsg{err: fmt.Errorf("%s: %w", parts[0], err)}
 		}
 		return commitMsgGeneratedMsg{message: strings.TrimSpace(string(out))}
+	}
+}
+
+// rerenderCmd rebuilds the diff on screen at the current width and palette,
+// from the parse already in hand rather than from the file.
+//
+// It keeps the key the content was read with, so a resize or a theme change
+// cannot mark a held diff as current — which would remove the notice without
+// the reviewer ever seeing what moved.
+func (m Model) rerenderCmd() tea.Cmd {
+	if m.renderer == nil {
+		return nil
+	}
+	parsed := m.renderer.Parsed()
+	idx := m.cursor
+	styles := m.styles
+	t := m.theme
+	diffW := m.diffWidth()
+	filename := m.rendererPath
+	// The same rule as loadDiffCmd, onePanel included. Without it a resize
+	// into the 60-71 column band engaged split view where a fresh load
+	// refuses, because there the collapsed layout gives the diff the whole
+	// terminal.
+	splitMode := m.splitDiff && !m.onePanel() && diffW >= minSplitWidth
+	tabWidth := m.cfg.TabWidth
+	key := m.rendererKey
+	gen := m.themeGen
+	return func() tea.Msg {
+		r := NewDiffRenderer(parsed, filename, styles, t, diffW)
+		r.SetTabWidth(tabWidth)
+		r.SetSplit(splitMode)
+		return diffLoadedMsg{
+			renderer: r, index: idx, path: filename, resetScroll: false,
+			key: key, themeGen: gen, rerender: true,
+		}
 	}
 }

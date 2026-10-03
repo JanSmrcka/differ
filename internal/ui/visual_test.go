@@ -109,10 +109,27 @@ func TestVisual_TheSelectionIsVisibleWithoutColour(t *testing.T) {
 	plain := NewStyles(theme.NoColorTheme())
 	lm.styles = plain
 
-	first := lm.renderCommitLine(lm.commits[0], true)
-	second := lm.renderCommitLine(lm.commits[1], false)
-	if stripANSI(first) == stripANSI(second) {
-		t.Errorf("selected and unselected rows are identical without colour:\n%q\n%q", first, second)
+	// The *same* commit, rendered both ways. It used to compare commits[0]
+	// selected against commits[1] unselected — two different commits, so the
+	// plain text differed whatever the styling did, and the assertion could
+	// not fail.
+	selected := stripANSI(lm.renderCommitLine(lm.commits[0], true))
+	plainRow := stripANSI(lm.renderCommitLine(lm.commits[0], false))
+	if selected == plainRow {
+		t.Errorf("selected and unselected rows are identical without colour:\n%q\n%q",
+			selected, plainRow)
+	}
+	if !strings.Contains(selected, cursorMarker) {
+		t.Errorf("the selected row carries no marker: %q", selected)
+	}
+	if strings.Contains(plainRow, cursorMarker) {
+		t.Errorf("an unselected row carries the marker: %q", plainRow)
+	}
+	// And the two must be the same width, or the list jitters as the cursor
+	// moves.
+	if lipgloss.Width(selected) != lipgloss.Width(plainRow) {
+		t.Errorf("selected row is %d wide, unselected %d",
+			lipgloss.Width(selected), lipgloss.Width(plainRow))
 	}
 }
 
@@ -166,9 +183,13 @@ func TestTruncateEnd(t *testing.T) {
 	}
 }
 
-// `differ review` in a clean repository used to open the plain file list with
-// no sign that review had been asked for and skipped. enterReviewMode says
-// "nothing to review"; this has to as well.
+// `differ review` in a clean repository has to say so.
+//
+// This reverses what the test used to assert. It required review mode *not* to
+// open, with "nothing to review" in the status bar — but the panel then said
+// "No changes / Your working tree is clean.", so the two disagreed about the
+// same question, and the wording the issue asked for appeared nowhere. Review
+// mode opens and the panel answers.
 func TestStartInReviewMode_SaysSoWhenThereIsNothingToReview(t *testing.T) {
 	t.Parallel()
 	tr := testutil.NewRepo(t)
@@ -179,10 +200,11 @@ func TestStartInReviewMode_SaysSoWhenThereIsNothingToReview(t *testing.T) {
 	}
 
 	m.StartInReviewMode()
-	if m.mode == modeReview {
-		t.Error("review mode opened with nothing to review")
+	if m.mode != modeReview {
+		t.Error("differ review did not open review mode")
 	}
-	if m.statusMsg == "" {
-		t.Error("nothing was said about review being skipped")
+	got := stripANSI(m.renderFileList())
+	if !strings.Contains(got, "Nothing to review") {
+		t.Errorf("the panel does not say there is nothing to review:\n%s", got)
 	}
 }
