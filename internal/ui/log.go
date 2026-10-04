@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/viewport"
@@ -232,18 +231,20 @@ func (m LogModel) frame(body string) string {
 func (m LogModel) renderHeader() string {
 	name := m.styles.HeaderName.Render(" differ")
 	ctx := m.styles.HeaderBranch.Render("log")
+	identity := name + m.styles.Chrome.Render(headerSep) + ctx
+
 	summary := m.styles.HeaderMeta.Render(plural(len(m.commits), "commit") + " ")
 	if m.mode == logModeDiff && m.cursor < len(m.commits) {
 		c := m.commits[m.cursor]
-		summary = m.styles.HeaderMeta.Render(c.Short + "  " + c.Author + " ")
+		summary = m.styles.HeaderMeta.Render(c.Short + headerSep + c.Author + " ")
 	}
 
-	gap := m.width - lipgloss.Width(name) - lipgloss.Width(ctx) - lipgloss.Width(summary) - 2
+	gap := m.width - lipgloss.Width(identity) - lipgloss.Width(summary)
 	if gap < 1 {
-		return lipgloss.NewStyle().Width(m.width).MaxHeight(1).Render(name + "  " + ctx)
+		return lipgloss.NewStyle().Width(m.width).MaxHeight(1).Render(identity)
 	}
 	return lipgloss.NewStyle().Width(m.width).MaxHeight(1).
-		Render(name + "  " + ctx + strings.Repeat(" ", gap) + summary)
+		Render(identity + strings.Repeat(" ", gap) + summary)
 }
 
 func (m LogModel) viewList() string {
@@ -283,9 +284,16 @@ func (m LogModel) clampLogScroll() LogModel {
 }
 
 func (m LogModel) renderCommitLine(c git.Commit, selected bool) string {
-	hash := m.styles.Accent.Render(c.Short)
-	date := m.styles.HelpDesc.Render(c.Date)
-	line := fmt.Sprintf("%s  %s  %s", hash, c.Subject, date)
+	// Three columns, not three words with two spaces between them: the hash
+	// is fixed width, the date sits against the right edge and the subject
+	// takes what is left. The changed-file list is built the same way, so the
+	// eye can run down the right-hand column on either screen.
+	room := max(m.width-lipgloss.Width(c.Short)-4, 0)
+	subjectRoom := max(room-lipgloss.Width(c.Date), 0)
+	subject := truncateEnd(c.Subject, subjectRoom)
+
+	line := m.styles.Accent.Render(c.Short) + "  " +
+		padTo(subject, subjectRoom) + " " + m.styles.HelpDesc.Render(c.Date) + " "
 	if selected {
 		// The same marker the changed-file list and the diff use. Bold and a
 		// foreground were the only difference before, so stripped of colour

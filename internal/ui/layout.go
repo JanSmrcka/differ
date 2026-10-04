@@ -14,6 +14,10 @@ import (
 // No boxes: the chrome is dim structure and the diff gets the room.
 
 const (
+	// headerSep joins the things the header names. One separator, so the bar
+	// does not mix a double space with a middle dot on the same line.
+	headerSep = " · "
+
 	verticalDivider = "│"
 	horizontalRule  = "─"
 	focusBar        = "▍"
@@ -108,22 +112,42 @@ func (m Model) leftPanel() []string {
 	// meant choosing a branch cost you sight of the changeset; it is a box
 	// over the view now, and the panel behind it keeps showing what you were
 	// looking at.
-	return append(m.panelHeader(m.leftPanelLabel(), m.focusOn(paneFiles)),
+	return append(m.panelHeader(m.leftPanelLabel(), m.changesetSummary(), m.listWidth(), m.focusOn(paneFiles)),
 		strings.Split(m.renderFileList(), "\n")...)
 }
 
 // rightPanel is the diff, under a label naming the file on show.
 func (m Model) rightPanel() []string {
-	return append(m.panelHeader(m.diffLabel(), m.focusOn(paneDiff)), strings.Split(m.viewport.View(), "\n")...)
+	label, meta := m.diffLabel()
+	return append(m.panelHeader(label, meta, m.diffWidth(), m.focusOn(paneDiff)),
+		strings.Split(m.viewport.View(), "\n")...)
 }
 
-// panelHeader is a panel's label plus the blank line under it. The focused
-// panel is marked with a bar, so focus survives a terminal without colour.
-func (m Model) panelHeader(label string, focused bool) []string {
+// panelHeader is a panel's one header row: the label on the left and that
+// panel's own summary against the right edge — the same shape as every row
+// beneath it, so a panel reads as a table rather than a caption over a list.
+//
+// It used to be two rows, the label and a blank one under it. The blank cost
+// a row in both panels at every height and bought separation that the rule
+// above the content already provides.
+//
+// The focused panel is marked with a bar, so focus survives a terminal
+// without colour.
+func (m Model) panelHeader(label, meta string, width int, focused bool) []string {
+	mark, style := " ", m.styles.PanelLabel
 	if focused {
-		return []string{m.styles.Accent.Render(focusBar) + m.styles.PanelLabelFocus.Render(label), ""}
+		mark, style = m.styles.Accent.Render(focusBar), m.styles.PanelLabelFocus
 	}
-	return []string{" " + m.styles.PanelLabel.Render(label), ""}
+	// The meta ends in the column the rows' own right-hand column ends in,
+	// which is what makes the header read as the top of a table rather than
+	// a caption over one. One column goes to the focus mark.
+	room := max(width-1, 0)
+	gap := room - lipgloss.Width(label) - lipgloss.Width(meta)
+	if meta == "" || gap < 1 {
+		return []string{mark + style.Render(truncateEnd(label, room))}
+	}
+	return []string{mark + style.Render(label) + strings.Repeat(" ", gap) +
+		m.styles.PanelLabel.Render(meta)}
 }
 
 // pane identifies a side of the layout.
@@ -145,38 +169,46 @@ func (m Model) focusOn(p pane) bool {
 	}
 }
 
-func (m Model) leftPanelLabel() string { return "CHANGED FILES" }
+func (m Model) leftPanelLabel() string { return "Files" }
 
-// diffLabel names the file on show, with its staged and review state.
-func (m Model) diffLabel() string {
+// diffLabel names the file on show, and separately what is true of it. The
+// two are returned apart because the panel header puts the state against the
+// right edge, where the file rows keep their own.
+func (m Model) diffLabel() (label, meta string) {
 	if len(m.files) == 0 || m.cursor >= len(m.files) {
-		return ""
+		return "", ""
 	}
 	f := m.files[m.cursor]
-	label := f.change.Path
+	var parts []string
 	if f.change.Staged {
-		label += "  staged"
+		parts = append(parts, "staged")
 	}
 	if m.mode == modeReview && m.session != nil {
 		if n := m.session.CountFor(f.change.Path); n > 0 {
-			label += "  " + plural(n, "comment")
+			parts = append(parts, plural(n, "comment"))
 		}
 	}
-	return truncateEnd(label, max(m.diffWidth()-2, 0))
+	return truncateEnd(f.change.Path, max(m.diffWidth()-2, 0)), strings.Join(parts, " · ")
 }
 
 // renderHeader is the one-line identity and summary bar.
 func (m Model) renderHeader() string {
 	name := m.styles.HeaderName.Render(" differ")
 	ctx := m.styles.HeaderBranch.Render(m.headerContext())
-	summary := m.styles.HeaderMeta.Render(m.headerSummary() + " ")
+	identity := name + m.styles.Chrome.Render(headerSep) + ctx
 
-	gap := m.width - lipgloss.Width(name) - lipgloss.Width(ctx) - lipgloss.Width(summary) - 2
+	summary := m.headerSummary()
+	if summary == "" {
+		return m.renderBar(lipgloss.NewStyle(), identity)
+	}
+	meta := m.styles.HeaderMeta.Render(summary + " ")
+
+	gap := m.width - lipgloss.Width(identity) - lipgloss.Width(meta)
 	if gap < 1 {
 		// Too narrow for both: the identity and branch matter more.
-		return m.renderBar(lipgloss.NewStyle(), name+"  "+ctx)
+		return m.renderBar(lipgloss.NewStyle(), identity)
 	}
-	return m.renderBar(lipgloss.NewStyle(), name+"  "+ctx+strings.Repeat(" ", gap)+summary)
+	return m.renderBar(lipgloss.NewStyle(), identity+strings.Repeat(" ", gap)+meta)
 }
 
 // headerContext is the branch, what is being compared, and the active mode.
@@ -189,25 +221,39 @@ func (m Model) headerContext() string {
 		ctx += " staged"
 	}
 	if m.mode == modeReview {
-		ctx += "  ·  review"
+		ctx += " · review"
 	}
 	return ctx
 }
 
-// headerSummary describes the changeset as a whole.
+// headerSummary is what the header bar says on the right: how this branch
+// stands against its upstream, and nothing else.
+//
+// It used to carry the file counts as well, which the file list's own header
+// now states — and stating it twice on one screen is how a frame starts
+// reading as chrome rather than as information.
 func (m Model) headerSummary() string {
+	if m.upstream.Upstream == "" || (m.upstream.Ahead == 0 && m.upstream.Behind == 0) {
+		return ""
+	}
+	return fmt.Sprintf("↑%d ↓%d", m.upstream.Ahead, m.upstream.Behind)
+}
+
+// changesetSummary is the file list's own header: how many files, and how
+// many of them are staged.
+func (m Model) changesetSummary() string {
+	if len(m.files) == 0 {
+		return ""
+	}
 	staged := 0
 	for _, f := range m.files {
 		if f.change.Staged {
 			staged++
 		}
 	}
-	parts := []string{plural(len(m.files), "file")}
+	parts := []string{fmt.Sprintf("%d", len(m.files))}
 	if staged > 0 {
 		parts = append(parts, fmt.Sprintf("%d staged", staged))
-	}
-	if m.upstream.Upstream != "" && (m.upstream.Ahead > 0 || m.upstream.Behind > 0) {
-		parts = append(parts, fmt.Sprintf("↑%d ↓%d", m.upstream.Ahead, m.upstream.Behind))
 	}
 	return strings.Join(parts, " · ")
 }

@@ -38,7 +38,7 @@ func TestBranchModal_IsABoxOverTheView(t *testing.T) {
 		t.Fatalf("no box drawn:\n%s", view)
 	}
 	// The file list is still there, header and contents.
-	for _, want := range []string{"CHANGED FILES", "src.ts"} {
+	for _, want := range []string{"Files", "src.ts"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("the view lost %q while the picker was open:\n%s", want, view)
 		}

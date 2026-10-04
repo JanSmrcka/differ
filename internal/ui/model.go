@@ -506,10 +506,10 @@ func (m Model) contentHeight() int {
 	return max(m.height-chromeRows-min(m.footerHeight(), m.footerBudget()), 0)
 }
 
-// listHeight is the rows a panel's list actually gets: the panel area less its
-// label and the blank line under it. Scroll clamping and rendering must both
-// use this, or the cursor can sit outside the visible window.
-func (m Model) listHeight() int { return max(m.contentHeight()-2, 0) }
+// listHeight is the rows a panel's list actually gets: the panel area less
+// its one header row. Scroll clamping and rendering must both use this, or
+// the cursor can sit outside the visible window.
+func (m Model) listHeight() int { return max(m.contentHeight()-panelHeaderRows, 0) }
 
 // listWidth is what the file list actually gets.
 //

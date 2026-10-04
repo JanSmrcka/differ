@@ -69,7 +69,7 @@ func TestModal_TheViewShowsAroundIt(t *testing.T) {
 	t.Parallel()
 	m := modalModel(t, 120, 24)
 	before := m.View()
-	if !strings.Contains(before, "CHANGED FILES") {
+	if !strings.Contains(before, "Files") {
 		t.Fatal("the file list is not on screen to begin with")
 	}
 
@@ -77,7 +77,7 @@ func TestModal_TheViewShowsAroundIt(t *testing.T) {
 	m = updated.(Model)
 	view := m.View()
 
-	if !strings.Contains(view, "CHANGED FILES") {
+	if !strings.Contains(view, "Files") {
 		t.Errorf("the modal blanked the view behind it:\n%s", view)
 	}
 	if !strings.Contains(view, "comment · line") {

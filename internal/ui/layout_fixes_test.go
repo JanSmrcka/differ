@@ -95,7 +95,7 @@ func TestDiffCardTitle_SingularCommentCount(t *testing.T) {
 	m.session = review.NewSession()
 	m.session.Add(review.Comment{File: "a.ts", Side: review.SideNew, StartLine: 1, EndLine: 1, Body: "x"})
 
-	title := m.diffLabel()
+	_, title := m.diffLabel()
 	if strings.Contains(title, "1 comments") {
 		t.Errorf("title says %q, want a singular form", title)
 	}
@@ -104,7 +104,7 @@ func TestDiffCardTitle_SingularCommentCount(t *testing.T) {
 	}
 
 	m.session.Add(review.Comment{File: "a.ts", Side: review.SideNew, StartLine: 2, EndLine: 2, Body: "y"})
-	if got := m.diffLabel(); !strings.Contains(got, "2 comments") {
+	if _, got := m.diffLabel(); !strings.Contains(got, "2 comments") {
 		t.Errorf("title = %q, want plural for two", got)
 	}
 }
@@ -119,7 +119,7 @@ func TestDiffCardTitle_SurvivesAMissingSession(t *testing.T) {
 			t.Fatalf("diffCardTitle panicked without a session: %v", r)
 		}
 	}()
-	if got := m.diffLabel(); !strings.Contains(got, "a.ts") {
+	if got, _ := m.diffLabel(); !strings.Contains(got, "a.ts") {
 		t.Errorf("title = %q", got)
 	}
 }

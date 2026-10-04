@@ -166,7 +166,7 @@ func newTestModel(t *testing.T, files []fileItem) Model {
 	}
 }
 
-func TestRenderHeader_StagedCount(t *testing.T) {
+func TestChangesetSummary_StagedCount(t *testing.T) {
 	t.Parallel()
 	files := []fileItem{
 		{change: git.FileChange{Path: "a.go", Staged: true}},
@@ -174,13 +174,17 @@ func TestRenderHeader_StagedCount(t *testing.T) {
 	}
 	m := newTestModel(t, files)
 	m.width = 100
-	// Changeset counts live in the header, not repeated in the footer.
-	header := m.renderHeader()
-	if !strings.Contains(header, "1 staged") {
-		t.Errorf("header should show staged count, got %q", header)
+	// The counts belong to the panel that lists the files, and are stated
+	// there only — not in the header bar and not in the footer.
+	summary := m.changesetSummary()
+	if !strings.Contains(summary, "1 staged") {
+		t.Errorf("the file list should show the staged count, got %q", summary)
 	}
-	if !strings.Contains(header, "2 files") {
-		t.Errorf("header should show file count, got %q", header)
+	if !strings.Contains(summary, "2") {
+		t.Errorf("the file list should show the file count, got %q", summary)
+	}
+	if strings.Contains(m.renderHeader(), "staged") {
+		t.Errorf("header repeats the counts, got %q", m.renderHeader())
 	}
 	if strings.Contains(m.statusSegment(), "staged") {
 		t.Errorf("footer should not repeat the counts, got %q", m.statusSegment())

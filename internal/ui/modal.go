@@ -98,7 +98,16 @@ func placeModal(box string, width, height, avoid int) string {
 	top := max((height-tall)/2, 0)
 
 	if avoid >= 0 && avoid >= top && avoid < top+tall {
-		// It would cover the row. Below it if there is room, otherwise above.
+		// It would cover the row. Below it if there is room, otherwise above,
+		// ending on the row before it.
+		//
+		// The clamp is a floor, not a placement decision. It is reached only
+		// by a box too tall to fit on either side, and such a box covers the
+		// line wherever it is put — so nothing here can prevent that case,
+		// and nothing here pretends to. What prevents it is
+		// commentModalMinHeight, which sizes the content area to hold twice
+		// the box; the comment modal is the only caller that passes an avoid
+		// at all, so that is the whole of the guarantee.
 		if below := avoid + 1; below+tall <= height {
 			top = below
 		} else {
@@ -124,7 +133,19 @@ func placeModal(box string, width, height, avoid int) string {
 // contentHeight asks how tall the footer is, and the footer asks whether the
 // editor is in it — which is this decision. The first version recursed until
 // the stack ran out.
-const commentModalMinHeight = 17
+//
+// The number is geometry, not taste. The box must fit entirely above or
+// entirely below the line it is about, and the worst case is a cursor sitting
+// one row too low to clear it above — which needs twice the box's height in
+// the content area. The smallest box is one body row inside modalChrome and a
+// border, so 2*(modalChrome+1+modalBorderRows) = 14 rows of content, and the
+// frame spends three on chrome and two on the footer: 19.
+//
+// It was 17, which held only while the panels drew a blank row under their
+// label and pushed the cursor one row further down. When that row went, a
+// cursor in the middle of a 12-row content area fitted on neither side and
+// placeModal put the box over the line — the one thing it exists to avoid.
+const commentModalMinHeight = 19
 
 // modalBorderRows is the top and bottom of the box, which are not content.
 const modalBorderRows = 2
@@ -334,8 +355,8 @@ func (m Model) modal(height int) string {
 // cursorContentRow is the row of the content area the diff cursor is drawn on,
 // or -1 when there is none.
 //
-// The panel starts with a label and a blank line, and the viewport is scrolled,
-// so the cursor's line index is not its row on screen.
+// The panel starts with its one label row, and the viewport is scrolled, so
+// the cursor's line index is not its row on screen.
 func (m Model) cursorContentRow() int {
 	if m.renderer == nil {
 		return -1
@@ -351,9 +372,9 @@ func (m Model) cursorContentRow() int {
 	return row
 }
 
-// panelHeaderRows is the label and the blank line under it, which every panel
+// panelHeaderRows is the one label row every panel
 // draws before its content.
-const panelHeaderRows = 2
+const panelHeaderRows = 1
 
 // modalBodyRoom is how many rows of content the box can hold at this height,
 // after the border, the title and the closing line — and after the cap that
