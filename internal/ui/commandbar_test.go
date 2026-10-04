@@ -25,7 +25,7 @@ func barModel(t *testing.T, width int) Model {
 func TestCommandBar_StaysOnOneLineAtEveryWidth(t *testing.T) {
 	for _, width := range []int{80, 100, 120, 200} {
 		m := barModel(t, width)
-		for _, mode := range []viewMode{modeFileList, modeDiff, modeReview} {
+		for _, mode := range []viewMode{modeFileList, modeDiff} {
 			m.mode = mode
 			bar := m.renderCommandBar()
 			if h := lipgloss.Height(bar); h != 1 {
@@ -41,7 +41,7 @@ func TestCommandBar_StaysOnOneLineAtEveryWidth(t *testing.T) {
 // Truncating must never drop the two keys that get the user out.
 func TestCommandBar_KeepsHelpAndQuitWhenItHasToTruncate(t *testing.T) {
 	m := barModel(t, 40)
-	m.mode = modeReview
+	m.mode = modeDiff
 	bar := m.renderCommandBar()
 
 	for _, want := range []string{"?", "q"} {
@@ -76,7 +76,7 @@ func TestCommandBar_SendAppearsOnlyWithSomethingToSend(t *testing.T) {
 	tr := testutil.NewRepo(t)
 	tr.ApplyFixture(testutil.Fixture(t, "multi_hunk"))
 	m := liveModel(t, tr)
-	u, _ := m.updateFileListMode(key("r"))
+	u, _ := m.updateFileListMode(key("enter"))
 	m = u.(Model)
 
 	if bar := m.renderCommandBar(); strings.Contains(bar, "send") {
@@ -139,7 +139,7 @@ func TestHelpOverlay_DoesNotResizeTheLayout(t *testing.T) {
 // bar's own text, or the two have drifted.
 func TestCommandBar_ShowsWhatTheKeymapMarksForIt(t *testing.T) {
 	m := barModel(t, 200)
-	for _, mode := range []viewMode{modeFileList, modeDiff, modeReview} {
+	for _, mode := range []viewMode{modeFileList, modeDiff} {
 		m.mode = mode
 		bar := m.renderCommandBar()
 		for _, b := range keymapFor(mode) {
@@ -219,7 +219,7 @@ func TestHelpOverlay_HidesCommandsThatWouldDoNothing(t *testing.T) {
 func TestCommandBar_NeverRendersEmpty(t *testing.T) {
 	for _, width := range []int{40, 50, 60, 80} {
 		m := barModel(t, width)
-		for _, mode := range []viewMode{modeFileList, modeDiff, modeReview, modeBranchPicker, modeCommit} {
+		for _, mode := range []viewMode{modeFileList, modeDiff, modeBranchPicker, modeCommit} {
 			m.mode = mode
 			if bar := strings.TrimSpace(stripANSI(m.renderCommandBar())); bar == "" {
 				t.Errorf("width %d mode %v: the bar is empty", width, mode)

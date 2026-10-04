@@ -415,7 +415,7 @@ func TestProbe_EveryModeThatShouldPollDoes(t *testing.T) {
 	}{
 		{"file list", modeFileList, true},
 		{"diff", modeDiff, true},
-		{"review", modeReview, true},
+		{"review", modeDiff, true},
 		// Typing a commit message or picking a branch: the screen must not
 		// move underneath the input.
 		{"commit", modeCommit, false},

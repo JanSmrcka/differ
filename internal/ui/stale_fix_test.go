@@ -56,9 +56,9 @@ func TestStaleConfirm_IsRequiredEveryTime(t *testing.T) {
 
 	m = stale()
 	// First stale comment: warn, then send.
-	u, _ := m.updateReviewMode(key("S"))
+	u, _ := m.updateDiffMode(key("S"))
 	m = u.(Model)
-	u, cmd := m.updateReviewMode(key("S"))
+	u, cmd := m.updateDiffMode(key("S"))
 	m = runCmd(t, u.(Model), cmd)
 	if len(fake.Sent()) != 1 {
 		t.Fatalf("expected the confirmed send, got %d payloads", len(fake.Sent()))
@@ -70,7 +70,7 @@ func TestStaleConfirm_IsRequiredEveryTime(t *testing.T) {
 	tr.ExternalEdit("src.ts", strings.Replace(content, "return user", "return user!", 1))
 	m = reload(t, m)
 
-	u, cmd = m.updateReviewMode(key("S"))
+	u, cmd = m.updateDiffMode(key("S"))
 	m = u.(Model)
 	if cmd != nil {
 		t.Error("the stale guard fired only once — a later stale comment sent without confirmation")
@@ -88,13 +88,13 @@ func TestStaleConfirm_ClearedByOtherKeys(t *testing.T) {
 	tr.ExternalEdit("src.ts", strings.Replace(content, "getUser(id", "getUser(id, opts", 1))
 	m = reload(t, m)
 
-	u, _ := m.updateReviewMode(key("S"))
+	u, _ := m.updateDiffMode(key("S"))
 	m = u.(Model)
 	if !m.staleConfirm {
 		t.Fatal("precondition: the guard should be armed")
 	}
 
-	u, _ = m.updateReviewMode(key("j"))
+	u, _ = m.updateDiffMode(key("j"))
 	m = u.(Model)
 	if m.staleConfirm {
 		t.Error("moving the cursor should disarm the stale confirmation")
@@ -107,7 +107,7 @@ func TestSend_DoesNotResendDeliveredCommentsThatWentStale(t *testing.T) {
 	fake := feedback.NewFake()
 	m.target = fake
 
-	u, cmd := m.updateReviewMode(key("S"))
+	u, cmd := m.updateDiffMode(key("S"))
 	m = runCmd(t, u.(Model), cmd)
 	if len(fake.Sent()) != 1 {
 		t.Fatalf("precondition: expected one send, got %d", len(fake.Sent()))
@@ -118,12 +118,12 @@ func TestSend_DoesNotResendDeliveredCommentsThatWentStale(t *testing.T) {
 	tr.Commit("apply the review")
 	m = reload(t, m)
 
-	u, cmd = m.updateReviewMode(key("S"))
+	u, cmd = m.updateDiffMode(key("S"))
 	if cmd != nil {
 		t.Error("there is nothing left to send, so S should not dispatch")
 	}
 	m = u.(Model)
-	u, cmd = m.updateReviewMode(key("S"))
+	u, cmd = m.updateDiffMode(key("S"))
 	m = runCmd(t, u.(Model), cmd)
 
 	if len(fake.Sent()) != 1 {
@@ -150,7 +150,7 @@ func TestReanchor_CoversFilesNotCurrentlyOpen(t *testing.T) {
 	tr := testutil.NewRepo(t)
 	tr.AgentChangeset()
 	m := liveModel(t, tr)
-	u, _ := m.updateFileListMode(key("r"))
+	u, _ := m.updateFileListMode(key("enter"))
 	m = u.(Model)
 
 	// Comment on login.ts, then move to a different file.

@@ -67,9 +67,9 @@ func (m Model) openFileInEditor() (tea.Model, tea.Cmd) {
 // above the code the reviewer was reading. Returns 0 when there is nothing to
 // aim at, as in the file list.
 func (m Model) editorLine() int {
-	// Only the diff and review modes have a cursor that means a line; the
-	// file list just shows a preview.
-	if m.mode != modeDiff && m.mode != modeReview {
+	// Only the diff has a cursor that means a line; the file list just shows
+	// a preview.
+	if m.mode != modeDiff {
 		return 0
 	}
 	// Diffs load asynchronously, so the renderer on screen may still be the

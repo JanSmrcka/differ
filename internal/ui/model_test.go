@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/jansmrcka/differ/internal/config"
 	"github.com/jansmrcka/differ/internal/git"
+	"github.com/jansmrcka/differ/internal/review"
 	"github.com/jansmrcka/differ/internal/theme"
 )
 
@@ -163,6 +164,7 @@ func newTestModel(t *testing.T, files []fileItem) Model {
 		commitInput:  textinput.New(),
 		branchFilter: bf,
 		branchInput:  bi,
+		session:      review.NewSession(),
 	}
 }
 

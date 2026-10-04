@@ -187,11 +187,18 @@ func (m Model) diffStale() bool {
 // holdsTheDiff reports whether the content on screen belongs to someone who
 // would rather be asked before it changes.
 //
-// Reviewing is close reading with comments attached to particular lines, so a
-// silent swap can leave a pending comment describing something that is no
-// longer there. Outside review mode differ stays live, which is the point of
-// the poll.
+// A comment is attached to particular lines, so a silent swap can leave it
+// describing something that is no longer there — and a comment being written
+// is the same, only unsaved. Without either the diff stays live, which is the
+// point of the poll: differ is left running beside an agent, and holding every
+// open diff froze the one pane meant to follow it.
 func (m Model) holdsTheDiff() bool {
+	if m.mode != modeDiff || m.renderer == nil {
+		return false
+	}
+	if !m.commenting && (m.session == nil || m.session.CountFor(m.rendererPath) == 0) {
+		return false
+	}
 	// The renderer has to be the cursor's file, not just any file: diffs load
 	// asynchronously, so right after n or p it is still the previous one.
 	//
@@ -201,7 +208,7 @@ func (m Model) holdsTheDiff() bool {
 	// the two can only disagree while a navigation's own load is in flight,
 	// which supersedes the reload this would have skipped. It stays because
 	// the function's name is a claim about the diff on screen.
-	return m.mode == modeReview && m.renderer != nil && m.rendererPath == m.currentFilePath()
+	return m.rendererPath == m.currentFilePath()
 }
 
 // noteRenderedDiff records what the diff on screen was built from.

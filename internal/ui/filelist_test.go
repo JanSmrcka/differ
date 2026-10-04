@@ -149,7 +149,7 @@ func TestFileList_ShowsReviewState(t *testing.T) {
 		{change: git.FileChange{Path: "four.ts", Status: git.StatusModified}},
 		{change: git.FileChange{Path: "five.ts", Status: git.StatusModified}},
 	})
-	m.mode = modeReview
+	m.mode = modeDiff
 	m.session = review.NewSession()
 	m.session.MarkViewed("one.ts")
 	m.session.Add(review.Comment{File: "two.ts", StartLine: 1, EndLine: 1, Body: "x"})
@@ -185,18 +185,17 @@ func TestFileList_ShowsReviewState(t *testing.T) {
 	}
 }
 
-// Outside review mode there is no review state to show, and the column would
-// be dead space in the narrowest panel differ has.
-func TestFileList_NoReviewColumnOutsideReviewMode(t *testing.T) {
+// Review is not a mode any more, so the list says what has been read from
+// the start: it is how the reader sees what is left.
+func TestFileList_ReviewStateShowsInThePlainFileList(t *testing.T) {
 	t.Parallel()
 	m := newTestModel(t, []fileItem{{change: git.FileChange{Path: "a.ts", Status: git.StatusModified}}})
-	m.session = review.NewSession()
 	m.session.MarkViewed("a.ts")
 	m.session.NoteChange("a.ts")
 	m.mode = modeFileList
 
-	if got := stripANSI(m.renderFileList()); strings.Contains(got, "changed") {
-		t.Errorf("review state leaked into the plain file list:\n%s", got)
+	if got := stripANSI(m.renderFileList()); !strings.Contains(got, "changed") {
+		t.Errorf("the file list does not say a.ts changed since it was read:\n%s", got)
 	}
 }
 

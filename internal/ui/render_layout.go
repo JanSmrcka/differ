@@ -128,7 +128,7 @@ func (m Model) rightColumn(f fileItem) rightColumn {
 		added:   f.change.AddedLines,
 		deleted: f.change.DeletedLines,
 	}
-	// While reviewing, how far the user has got with the file takes the place
+	// Once a file has been read, how far the user has got with it takes the place
 	// of the line counts: it is what they are navigating by, and 35 columns
 	// does not hold both.
 	if badge := m.reviewBadge(f.change.Path); badge != "" {
@@ -159,10 +159,10 @@ func (c rightColumn) render(styles Styles) string {
 }
 
 // reviewBadge is the one-word review state of a file, or "" when there is
-// nothing worth saying — outside review mode, or for a file nobody has looked
-// at yet, which is the normal state and needs no badge.
+// nothing worth saying — for a file nobody has looked at yet, which is the
+// normal state and needs no badge.
 func (m Model) reviewBadge(path string) string {
-	if m.mode != modeReview || m.session == nil {
+	if m.session == nil {
 		return ""
 	}
 	switch m.session.FileStateOf(path) {

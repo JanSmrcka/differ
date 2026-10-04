@@ -60,7 +60,7 @@ func TestEditor_PressingEDoesNotQuitDiffer(t *testing.T) {
 // to earn a place in the command bar, so the keymap is where it has to appear.
 func TestEditor_TheDiffAndReviewKeymapsDocumentE(t *testing.T) {
 	t.Parallel()
-	for _, mode := range []viewMode{modeFileList, modeDiff, modeReview} {
+	for _, mode := range []viewMode{modeFileList, modeDiff} {
 		found := false
 		for _, b := range keymapFor(mode) {
 			for _, k := range b.Keys {

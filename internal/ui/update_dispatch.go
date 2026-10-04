@@ -111,13 +111,8 @@ func (m Model) routeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			mm, cmd := m.openAgentPicker()
 			return mm, cmd
 		case "H":
-			// H closes the history, but does not open one from the help
-			// overlay: unlike ?, it is not a global — it exists only in
-			// review mode, and the file list's help does not list it.
-			if m.showHistory {
-				m.showHistory = false
-				return m, nil
-			}
+			m.showHistory, m.showHelp, m.showProblem = !m.showHistory, false, false
+			return m, nil
 		case "esc", "q":
 			m.showHelp, m.showHistory, m.showProblem = false, false, false
 			return m, nil
@@ -137,6 +132,11 @@ func (m Model) routeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// mode that has since been left.
 			m.showProblem = true
 			return m, nil
+		case "H":
+			// Global, because what was sent is about the whole changeset, not
+			// the file the cursor happens to be on.
+			m.showHistory = true
+			return m, nil
 		case "t":
 			return m.openThemePicker()
 		case agentKey:
@@ -154,8 +154,6 @@ func (m Model) routeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.updateCommitMode(msg)
 	case modeBranchPicker:
 		return m.updateBranchMode(msg)
-	case modeReview:
-		return m.updateReviewMode(msg)
 	}
 	return m, nil
 }
@@ -380,11 +378,11 @@ func (m Model) handleFilesRefreshed(msg filesRefreshedMsg) (tea.Model, tea.Cmd) 
 	if hold {
 		return m, m.reanchorCmd(true)
 	}
-	// resetScroll only outside review mode. The changeset changing is not a
-	// reason to send a reviewer back to the top of the file they are reading —
+	// resetScroll only in the file list. The changeset changing is not a
+	// reason to send a reader back to the top of the file they are reading —
 	// and with an agent working, another file changing is the common case, not
 	// the rare one.
-	return m, tea.Batch(m.loadDiffCmd(m.mode != modeReview), m.reanchorAllCmd())
+	return m, tea.Batch(m.loadDiffCmd(m.mode != modeDiff), m.reanchorAllCmd())
 }
 
 func (m Model) handleReanchor(msg reanchorMsg) (tea.Model, tea.Cmd) {

@@ -48,10 +48,10 @@ func (m Model) applyTheme(t theme.Theme) (Model, tea.Cmd) {
 	// Every in-flight diff was built with the old palette. The counter lets
 	// their results be dropped rather than installed after this one.
 	m.themeGen++
-	// Same as a resize, guard included: outside review mode diffStale() is
-	// briefly true between a refresh installing new keys and the load it
-	// batched landing, and re-rendering there would keep old content in a mode
-	// where R is unbound.
+	// Same as a resize, guard included: on a diff that is not held
+	// diffStale() is briefly true between a refresh installing new keys and
+	// the load it batched landing, and re-rendering there would keep old
+	// content nobody asked to keep.
 	if m.holdsTheDiff() && m.diffStale() {
 		return m, m.rerenderCmd()
 	}

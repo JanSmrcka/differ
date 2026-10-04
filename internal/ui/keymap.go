@@ -52,6 +52,7 @@ func (b binding) help() string {
 func globalBindings() []binding {
 	return []binding{
 		{Keys: []string{"?"}, Desc: "help", Help: "show every key for this view", Bar: true},
+		{Keys: []string{"H"}, Desc: "history", Help: "what has been sent, and whether it arrived"},
 		{Keys: []string{"!"}, Desc: "problem", Help: "show the last failure in full, including what the tool said"},
 		{Keys: []string{"t"}, Desc: "theme", Help: "try the themes; the screen changes as you move"},
 		{Keys: []string{agentKey}, Desc: "agent", Help: "choose which agent in tmux the review is sent to"},
@@ -64,9 +65,7 @@ func globalBindings() []binding {
 func keymapFor(mode viewMode) []binding {
 	switch mode {
 	case modeDiff:
-		return diffBindings(false)
-	case modeReview:
-		return diffBindings(true)
+		return diffBindings()
 	case modeCommit:
 		return []binding{
 			{Keys: []string{"enter"}, Desc: "commit", Help: "commit the staged changes with this message", Bar: true},
@@ -95,7 +94,6 @@ func fileListBindings() []binding {
 		{Keys: []string{"j", "down"}, Label: "j/k", Desc: "navigate", Help: "move through the changed files", Bar: true},
 		{Keys: []string{"k", "up"}},
 		{Keys: []string{"enter", "l", "right"}, Label: "enter", Desc: "open", Help: "open this file's diff", Bar: true},
-		{Keys: []string{"r"}, Desc: "review", Help: "open this file in review mode, where you can comment", Bar: true},
 		{Keys: []string{"tab"}, Desc: "stage", Help: "stage or unstage this file", Bar: true},
 		{Keys: []string{"a"}, Desc: "stage all", Help: "stage every change"},
 		{Keys: []string{"c"}, Desc: "commit", Help: "write a commit message for the staged changes", Bar: true},
@@ -110,12 +108,9 @@ func fileListBindings() []binding {
 	}
 }
 
-// diffBindings are the diff view's keys, plus review's own when reviewing.
-//
-// The two share navigation deliberately: a cursor position means the same
-// thing in both, so the keys that move it must too.
-func diffBindings(review bool) []binding {
-	nav := []binding{
+// diffBindings are the diff view's keys: reading and reviewing are one view.
+func diffBindings() []binding {
+	return []binding{
 		{Keys: []string{"j", "down"}, Label: "j/k", Desc: "line", Help: "move the cursor a line", Bar: true},
 		{Keys: []string{"k", "up"}},
 		{Keys: []string{"}", "]"}, Label: "}/{", Desc: "hunk", Help: "jump to the next or previous hunk", Bar: true},
@@ -126,42 +121,17 @@ func diffBindings(review bool) []binding {
 		{Keys: []string{"p"}},
 		{Keys: []string{"g"}, Desc: "top", Help: "jump to the first line"},
 		{Keys: []string{"G"}, Desc: "bottom", Help: "jump to the last line"},
-	}
-
-	var own []binding
-	if review {
-		own = []binding{
-			{Keys: []string{"c"}, Desc: "comment", Help: "comment on the line under the cursor", Bar: true},
-			{Keys: []string{"C"}, Desc: "hunk comment", Help: "comment on the whole hunk", Bar: true},
-			{Keys: []string{"x"}, Desc: "delete", Help: "delete the comment under the cursor"},
-			{Keys: []string{"s"}, Label: "s/S", Desc: "send", Help: "send the comment under the cursor, or S for all of them", Bar: true},
-			{Keys: []string{"S"}},
-			{Keys: []string{"H"}, Desc: "history", Help: "what has been sent, and whether it arrived"},
-			{Keys: []string{"R"}, Desc: "reload", Help: "re-read this file after it changed underneath you"},
-			{Keys: []string{"r"}, Desc: "exit review", Help: "go back to the plain diff", Bar: true},
-		}
-	} else {
-		own = []binding{
-			{Keys: []string{"r"}, Desc: "review", Help: "start reviewing this file", Bar: true},
-		}
-	}
-
-	tail := []binding{
+		{Keys: []string{"c"}, Desc: "comment", Help: "comment on the line under the cursor", Bar: true},
+		{Keys: []string{"C"}, Desc: "hunk comment", Help: "comment on the whole hunk"},
+		{Keys: []string{"x"}, Desc: "delete", Help: "delete the comment under the cursor"},
+		{Keys: []string{"s"}, Label: "s/S", Desc: "send", Help: "send the comment under the cursor, or S for all of them", Bar: true},
+		{Keys: []string{"S"}},
+		{Keys: []string{"R"}, Desc: "reload", Help: "re-read this file after it changed underneath you"},
+		{Keys: []string{"esc", "h", "left"}, Label: "esc", Desc: "back", Help: "back to the file list", Bar: true},
 		{Keys: []string{"e"}, Desc: "edit", Help: "open this file in your editor"},
 		{Keys: []string{"tab"}, Desc: "stage", Help: "stage or unstage this file"},
 		{Keys: []string{"v"}, Desc: "split", Help: "toggle the side-by-side diff"},
 		{Keys: []string{"b"}, Desc: "branch", Help: "switch branches"},
 		{Keys: []string{"q"}, Desc: "quit", Help: "quit differ", Bar: true},
 	}
-	if !review {
-		tail = append([]binding{
-			{Keys: []string{"esc", "h", "left"}, Label: "esc", Desc: "back", Help: "back to the file list", Bar: true},
-		}, tail...)
-	} else {
-		tail = append([]binding{
-			{Keys: []string{"esc"}, Desc: "back", Help: "back to the file list"},
-		}, tail...)
-	}
-
-	return append(append(nav, own...), tail...)
 }

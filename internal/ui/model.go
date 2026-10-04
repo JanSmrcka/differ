@@ -25,7 +25,6 @@ const (
 	modeDiff
 	modeCommit
 	modeBranchPicker
-	modeReview
 )
 
 const (
@@ -197,16 +196,16 @@ type Model struct {
 	ticksSinceRefresh int
 	// Whether the diff on screen is older than the repository.
 	//
-	// Only set in review mode: everywhere else a refresh lands straight away,
-	// which is what makes differ feel live. A reviewer is reading one diff
-	// closely and may have a comment half-written against it, so the content
-	// is held and they are told, rather than swapped and left to notice.
+	// Only while the diff is held (holdsTheDiff): everywhere else a refresh
+	// lands straight away, which is what makes differ feel live. A reviewer
+	// with comments against a diff, or one half-written, is shown what they
+	// commented on and told it moved, rather than swapped and left to notice.
 	// What the diff on screen was built from: the file's content key, and its
 	// added/removed counts at that moment.
 	//
 	// Staleness is derived from these rather than stored as a flag. A flag has
 	// to be cleared, and every path that failed to clear it — an empty
-	// changeset, a failed load, leaving review mode — left the bar describing
+	// changeset, a failed load, leaving review mode (when there was one) — left the bar describing
 	// something that was not on screen, sometimes permanently. These cannot
 	// disagree with the renderer, because they are written where it is.
 	rendererKey   string
@@ -310,8 +309,8 @@ type Model struct {
 	editorEnv editor.Env
 
 	// session holds review state — comments and per-file progress. It is
-	// created on first entering review mode, or restored from store at
-	// startup when a previous run left something behind.
+	// restored from store at startup when a previous run left something
+	// behind, and otherwise starts empty: the diff is always reviewable.
 	session *review.Session
 	// store is where the review is kept between runs: one file in this
 	// checkout's own git directory. Nil when there is nowhere to write it, in
@@ -320,6 +319,9 @@ type Model struct {
 	// reviewLock is this process's claim on the review file. Nil when there
 	// is nothing to claim, or when another differ holds it.
 	reviewLock *review.Lock
+	// reviewAsked is set by `differ review`, so an empty changeset is
+	// described in the words the user asked in.
+	reviewAsked bool
 }
 
 type fileItem struct {
@@ -367,6 +369,9 @@ func NewModel(repo *git.Repo, cfg config.Config, changes []git.FileChange, untra
 	// answer, and the comments that do come back are only the ones whose file
 	// is still what it was.
 	store, session, lock, lockNote := openReviewStore(repo)
+	if session == nil {
+		session = review.NewSession()
+	}
 
 	return Model{
 		// Open, so a change arriving in the first seconds refreshes at once
@@ -439,18 +444,16 @@ func filesEqual(a, b []fileItem) bool {
 	return true
 }
 
-// StartInReviewMode opens straight into review, for `differ review`.
+// StartInReviewMode opens straight into the diff, for `differ review`.
 //
-// It enters review mode even with nothing to review, so the panel can say so
-// in the words the user asked for it in. Refusing to enter and putting
-// "nothing to review" in the status bar meant the panel said "No changes" and
-// the bar said something else — two answers to the same question.
+// It opens the diff even with nothing to review, so the panel can say so in
+// the words the user asked for it in. Refusing and putting "nothing to
+// review" in the status bar meant the panel said "No changes" and the bar
+// said something else — two answers to the same question.
 func (m *Model) StartInReviewMode() {
-	m.mode = modeReview
+	m.mode = modeDiff
+	m.reviewAsked = true
 	if m.session == nil {
-		// Not unconditionally: a session restored from the last run is
-		// already here, and replacing it would throw away the comments that
-		// were just read back.
 		m.session = review.NewSession()
 	}
 	if len(m.files) > 0 {

@@ -17,7 +17,7 @@ func modalModel(t *testing.T, w, h int) Model {
 	tr.CommitFile("src.ts", "one\ntwo\nthree\nfour\n", "first")
 	tr.Modify("src.ts", "one\nCHANGED\nthree\nfour\n")
 	m := settle(t, liveModel(t, tr), tea.WindowSizeMsg{Width: w, Height: h})
-	return settle(t, m, key("r"))
+	return settle(t, m, key("enter"))
 }
 
 // A modal is a box over the view, not a replacement for it: the frame stays
@@ -27,7 +27,7 @@ func TestModal_IsABoxOverTheViewAtEverySize(t *testing.T) {
 	for _, w := range []int{40, 60, 80, 120, 200} {
 		for _, h := range []int{10, 14, 24, 40} {
 			m := modalModel(t, w, h)
-			updated, _ := m.updateReviewMode(key("c"))
+			updated, _ := m.updateDiffMode(key("c"))
 			m = updated.(Model)
 			view := m.View()
 
@@ -50,7 +50,7 @@ func TestModal_IsABoxOverTheViewAtEverySize(t *testing.T) {
 func TestModal_CoveringARowDoesNotMarkItTruncated(t *testing.T) {
 	t.Parallel()
 	m := modalModel(t, 96, 22)
-	updated, _ := m.updateReviewMode(key("c"))
+	updated, _ := m.updateDiffMode(key("c"))
 	m = updated.(Model)
 
 	for i, row := range strings.Split(m.View(), "\n") {
@@ -73,7 +73,7 @@ func TestModal_TheViewShowsAroundIt(t *testing.T) {
 		t.Fatal("the file list is not on screen to begin with")
 	}
 
-	updated, _ := m.updateReviewMode(key("c"))
+	updated, _ := m.updateDiffMode(key("c"))
 	m = updated.(Model)
 	view := m.View()
 
@@ -89,7 +89,7 @@ func TestModal_TheViewShowsAroundIt(t *testing.T) {
 func TestModal_OnlyOneIsEverDrawn(t *testing.T) {
 	t.Parallel()
 	m := modalModel(t, 120, 24)
-	updated, _ := m.updateReviewMode(key("c"))
+	updated, _ := m.updateDiffMode(key("c"))
 	m = updated.(Model)
 	m.showAgents = true // both flags set, which should not be reachable
 
@@ -112,7 +112,7 @@ func TestModal_TheTextAreaIsVisibleAtEveryHeight(t *testing.T) {
 	t.Parallel()
 	for _, h := range []int{8, 9, 10, 11, 12, 13, 14, 20, 40} {
 		m := modalModel(t, 100, h)
-		updated, _ := m.updateReviewMode(key("c"))
+		updated, _ := m.updateDiffMode(key("c"))
 		m = updated.(Model)
 		m.commentInput.SetValue("HELLOWORLD")
 
@@ -137,17 +137,17 @@ func TestModal_DoesNotCoverTheLineBeingCommentedOn(t *testing.T) {
 
 	for _, h := range []int{14, 20, 24, 30, 40} {
 		m := settle(t, liveModel(t, tr), tea.WindowSizeMsg{Width: 120, Height: h})
-		m = settle(t, m, key("r"))
+		m = settle(t, m, key("enter"))
 		// Scroll to the changed line, which is near the end.
 		for i := 0; i < 70; i++ {
-			updated, _ := m.updateReviewMode(key("j"))
+			updated, _ := m.updateDiffMode(key("j"))
 			m = updated.(Model)
 		}
 		if !strings.Contains(m.View(), "THE LINE I AM COMMENTING ON") {
 			t.Fatalf("h=%d: the line is not on screen before the editor opens", h)
 		}
 
-		updated, _ := m.updateReviewMode(key("c"))
+		updated, _ := m.updateDiffMode(key("c"))
 		m = updated.(Model)
 		if !strings.Contains(m.View(), "THE LINE I AM COMMENTING ON") {
 			t.Errorf("h=%d: the modal covers the line being commented on:\n%s", h, m.View())
@@ -182,7 +182,7 @@ func TestModal_TheBarAdvertisesOnlyTheModalsKeys(t *testing.T) {
 	t.Parallel()
 	m := modalModel(t, 120, 30)
 
-	updated, _ := m.updateReviewMode(key("c"))
+	updated, _ := m.updateDiffMode(key("c"))
 	editing := updated.(Model)
 	bar := editing.View()
 	if !strings.Contains(bar, "ctrl+s") {
@@ -234,7 +234,7 @@ func TestModal_IsTheWidthItSaysItIs(t *testing.T) {
 	t.Parallel()
 	for _, w := range []int{40, 60, 80, 120, 200, 220} {
 		m := modalModel(t, w, 40)
-		updated, _ := m.updateReviewMode(key("c"))
+		updated, _ := m.updateDiffMode(key("c"))
 		m = updated.(Model)
 
 		lead, width, _, _ := boxGeometry(t, m.View())
@@ -266,7 +266,7 @@ func TestModal_StaysInsideTheContentArea(t *testing.T) {
 	t.Parallel()
 	for h := commentModalMinHeight; h <= 60; h++ {
 		m := modalModel(t, 120, h)
-		updated, _ := m.updateReviewMode(key("c"))
+		updated, _ := m.updateDiffMode(key("c"))
 		m = updated.(Model)
 		view := m.View()
 
@@ -298,7 +298,7 @@ func TestModal_StaysInsideTheContentArea(t *testing.T) {
 func TestModal_ThePickerWinsOverTheEditor(t *testing.T) {
 	t.Parallel()
 	m := modalModel(t, 120, 30)
-	updated, _ := m.updateReviewMode(key("c"))
+	updated, _ := m.updateDiffMode(key("c"))
 	m = updated.(Model)
 	m.showAgents, m.agentsScanned = true, true
 	m.agents = []feedback.Agent{{Pane: "%1", Session: "work", Window: "2", Tool: "claude"}}
@@ -334,7 +334,7 @@ func TestModal_KeepsWhatIsLeftOfTheBox(t *testing.T) {
 func TestModal_AHunkCommentsTitleSaysTheRange(t *testing.T) {
 	t.Parallel()
 	m := modalModel(t, 120, 30)
-	updated, _ := m.updateReviewMode(key("C"))
+	updated, _ := m.updateDiffMode(key("C"))
 	m = updated.(Model)
 
 	title := m.commentTitle()
@@ -351,7 +351,7 @@ func TestModal_TheEditorWrapsWhereItIsDrawn(t *testing.T) {
 	t.Parallel()
 	for _, w := range []int{40, 80, 120, 220} {
 		m := modalModel(t, w, 30)
-		updated, _ := m.updateReviewMode(key("c"))
+		updated, _ := m.updateDiffMode(key("c"))
 		m = updated.(Model)
 
 		// The draw path calls SetWidth on a value copy. If the model already
@@ -476,10 +476,10 @@ func TestModal_TheDiffIsStillThereBesideTheBox(t *testing.T) {
 	tr.Modify("src.ts", after.String())
 
 	m := settle(t, liveModel(t, tr), tea.WindowSizeMsg{Width: 200, Height: 40})
-	m = settle(t, m, key("r"))
+	m = settle(t, m, key("enter"))
 	before := m.View()
 
-	updated, _ := m.updateReviewMode(key("c"))
+	updated, _ := m.updateDiffMode(key("c"))
 	drawn := updated.(Model).View()
 
 	_, _, first, last := boxGeometry(t, drawn)
@@ -532,13 +532,13 @@ func TestModal_LeavesTheLineVisibleAtEveryHeightItDrawsAt(t *testing.T) {
 
 	for h := commentModalMinHeight; h <= 40; h++ {
 		m := settle(t, liveModel(t, tr), tea.WindowSizeMsg{Width: 120, Height: h})
-		m = settle(t, m, key("r"))
+		m = settle(t, m, key("enter"))
 		m = cursorOnContent(t, m, "THE LINE I AM COMMENTING ON")
 
 		if !strings.Contains(m.View(), "THE LINE I AM COMMENTING ON") {
 			continue // the cursor's line is not on screen to begin with
 		}
-		updated, _ := m.updateReviewMode(key("c"))
+		updated, _ := m.updateDiffMode(key("c"))
 		if !strings.Contains(updated.(Model).View(), "THE LINE I AM COMMENTING ON") {
 			t.Errorf("h=%d: the box covers the line being commented on:\n%s",
 				h, updated.(Model).View())
@@ -568,7 +568,7 @@ func TestModal_TheFooterEditorShowsWhatYouType(t *testing.T) {
 	t.Parallel()
 	for _, w := range []int{80, 120, 220} {
 		m := modalModel(t, w, commentModalMinHeight-3)
-		updated, _ := m.updateReviewMode(key("c"))
+		updated, _ := m.updateDiffMode(key("c"))
 		m = updated.(Model)
 		if m.modal(m.contentHeight()) != "" {
 			t.Fatalf("w=%d: this size draws a box, so it is not the footer path", w)
@@ -587,7 +587,7 @@ func TestModal_TheFooterEditorShowsWhatYouType(t *testing.T) {
 			if mark, ok := marks[i+1]; ok {
 				ch = mark
 			}
-			updated, _ := typed.updateReviewMode(key(ch))
+			updated, _ := typed.updateDiffMode(key(ch))
 			typed = updated.(Model)
 			if mark, ok := marks[i+1]; ok && !strings.Contains(typed.View(), mark) {
 				t.Errorf("w=%d: %d characters in and what was just typed (%q) "+

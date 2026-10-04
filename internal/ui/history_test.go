@@ -22,7 +22,7 @@ import (
 func historyModel(t *testing.T) Model {
 	t.Helper()
 	m := newTestModel(t, []fileItem{{change: git.FileChange{Path: "a.ts", Status: git.StatusModified}}})
-	m.mode = modeReview
+	m.mode = modeDiff
 	m.session = review.NewSession()
 	return m
 }
@@ -259,7 +259,7 @@ func TestOverlays_ViewDrawsThemOverThePanelsWithoutResizing(t *testing.T) {
 	tr := testutil.NewRepo(t)
 	tr.ApplyFixture(testutil.Fixture(t, "multi_hunk"))
 	m := liveModel(t, tr)
-	m.mode = modeReview
+	m.mode = modeDiff
 	m.session = review.NewSession()
 	m.session.RecordDelivery(review.Delivery{
 		At: time.Date(2026, 9, 29, 16, 0, 0, 0, time.UTC), Target: "clipboard",
@@ -378,7 +378,7 @@ func TestOverlays_TheClosingLineSurvivesASmallPanel(t *testing.T) {
 func TestOverlays_WhatWasDroppedIsCounted(t *testing.T) {
 	t.Parallel()
 	m := historyModel(t)
-	m.mode = modeReview
+	m.mode = modeDiff
 
 	full := strings.Count(stripANSI(m.renderHelpOverlay(80, 40)), "\n")
 	got := stripANSI(m.renderHelpOverlay(80, 8))
@@ -403,25 +403,26 @@ func TestOverlays_ANonEmptyHistoryNeverClaimsNothingWasSent(t *testing.T) {
 	}
 }
 
-// H is a review-mode key, not a global. With the file list's help open it was
-// reaching the overlay's own switch and opening a history the file list does
-// not offer and the README does not document.
-func TestOverlays_HDoesNotOpenTheHistoryWhereItIsNotABinding(t *testing.T) {
+// H is a global: what was sent is about the changeset, not the file under
+// the cursor. From another overlay it switches to the history, as ? and ! do,
+// and pressed again it closes it.
+func TestOverlays_HOpensTheHistoryFromAnywhere(t *testing.T) {
 	t.Parallel()
 	m := historyModel(t)
 	m.mode = modeFileList
-	m.showHelp = true
 
 	updated, _ := m.routeKey(key("H"))
-	got := updated.(Model)
-	if got.showHistory {
-		t.Error("H opened the history from the file list's help overlay")
-	}
-	if !got.showHelp {
-		t.Error("H closed the help overlay instead of being ignored")
+	if !updated.(Model).showHistory {
+		t.Error("H did not open the history from the file list")
 	}
 
-	// In review mode, where it is a binding, it still closes the history.
+	m.showHelp = true
+	updated, _ = m.routeKey(key("H"))
+	got := updated.(Model)
+	if !got.showHistory || got.showHelp {
+		t.Errorf("H from the help overlay: history %v, help %v", got.showHistory, got.showHelp)
+	}
+
 	m = historyModel(t)
 	m.showHistory = true
 	if updated, _ = m.routeKey(key("H")); updated.(Model).showHistory {

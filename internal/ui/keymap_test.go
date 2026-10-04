@@ -149,7 +149,6 @@ func literals(exprs []ast.Expr) []string {
 var handlerFor = map[viewMode]string{
 	modeFileList:     "updateFileListMode",
 	modeDiff:         "updateDiffMode",
-	modeReview:       "updateReviewMode",
 	modeCommit:       "updateCommitMode",
 	modeBranchPicker: "updateBranchMode",
 }
@@ -330,7 +329,6 @@ func TestKeymap_TheREADMEMatchesTheKeymap(t *testing.T) {
 	sections := map[viewMode]string{
 		modeFileList: "### File List",
 		modeDiff:     "### Diff View",
-		modeReview:   "### Review Mode",
 	}
 	for mode, heading := range sections {
 		table := sectionTable(t, string(readme), heading)
@@ -453,7 +451,7 @@ func TestKeymap_TheGlobalKeysWorkInEveryMode(t *testing.T) {
 	}{
 		{"file list", func(m Model) Model { m.mode = modeFileList; return m }},
 		{"diff", func(m Model) Model { m.mode = modeDiff; return m }},
-		{"review", func(m Model) Model { m.mode = modeReview; return m }},
+		{"review", func(m Model) Model { m.mode = modeDiff; return m }},
 		{"commit", func(m Model) Model { m.mode = modeCommit; return m }},
 		{"branch picker", func(m Model) Model { m.mode = modeBranchPicker; return m }},
 		{"branch create", func(m Model) Model {
@@ -462,12 +460,12 @@ func TestKeymap_TheGlobalKeysWorkInEveryMode(t *testing.T) {
 			return m
 		}},
 		{"comment editor", func(m Model) Model {
-			m.mode = modeReview
+			m.mode = modeDiff
 			m.commenting = true
 			return m
 		}},
 		{"help overlay", func(m Model) Model { m.showHelp = true; return m }},
-		{"history overlay", func(m Model) Model { m.mode = modeReview; m.showHistory = true; return m }},
+		{"history overlay", func(m Model) Model { m.mode = modeDiff; m.showHistory = true; return m }},
 	}
 
 	for _, s := range states {
@@ -541,7 +539,6 @@ func TestKeymap_TheREADMEParserReadsEverySection(t *testing.T) {
 	}{
 		{"### File List", "tab"},
 		{"### Diff View", "}"},
-		{"### Review Mode", "C"},
 		{"### Commit Mode", "enter"},
 		{"### Branch Picker", "ctrl+n"},
 	} {

@@ -21,7 +21,7 @@ func sendModel(t *testing.T) (Model, *feedback.Fake) {
 	tr := testutil.NewRepo(t)
 	tr.ApplyFixture(testutil.Fixture(t, "multi_hunk"))
 	m := liveModel(t, tr)
-	updated, _ := m.updateFileListMode(key("r"))
+	updated, _ := m.updateFileListMode(key("enter"))
 	m = updated.(Model)
 
 	m = commentAt(t, m, LineAdded, "  const user = await getUser(id)", "first note")
@@ -46,7 +46,7 @@ func TestSend_OneCommentUnderTheCursor(t *testing.T) {
 	m, fake := sendModel(t)
 	m = cursorOn(t, m, LineAdded, "  const user = await getUser(id)")
 
-	updated, cmd := m.updateReviewMode(key("s"))
+	updated, cmd := m.updateDiffMode(key("s"))
 	runCmd(t, updated.(Model), cmd)
 
 	sent := fake.Sent()
@@ -65,7 +65,7 @@ func TestSend_OneCommentMarksOnlyItSent(t *testing.T) {
 	m, _ := sendModel(t)
 	m = cursorOn(t, m, LineAdded, "  const user = await getUser(id)")
 
-	updated, cmd := m.updateReviewMode(key("s"))
+	updated, cmd := m.updateDiffMode(key("s"))
 	m = runCmd(t, updated.(Model), cmd)
 
 	if got := m.session.SentCount(); got != 1 {
@@ -79,7 +79,7 @@ func TestSend_OneCommentMarksOnlyItSent(t *testing.T) {
 func TestSend_AllPendingComments(t *testing.T) {
 	m, fake := sendModel(t)
 
-	updated, cmd := m.updateReviewMode(key("S"))
+	updated, cmd := m.updateDiffMode(key("S"))
 	m = runCmd(t, updated.(Model), cmd)
 
 	sent := fake.Sent()
@@ -99,7 +99,7 @@ func TestSend_FailureKeepsCommentsPending(t *testing.T) {
 	m, fake := sendModel(t)
 	fake.Err = errors.New("clipboard unavailable")
 
-	updated, cmd := m.updateReviewMode(key("S"))
+	updated, cmd := m.updateDiffMode(key("S"))
 	m = runCmd(t, updated.(Model), cmd)
 
 	if got := m.session.PendingCount(); got != 2 {
@@ -116,7 +116,7 @@ func TestSend_FailureKeepsCommentsPending(t *testing.T) {
 func TestSend_SuccessConfirmsToTheUser(t *testing.T) {
 	m, _ := sendModel(t)
 
-	updated, cmd := m.updateReviewMode(key("S"))
+	updated, cmd := m.updateDiffMode(key("S"))
 	m = runCmd(t, updated.(Model), cmd)
 
 	if m.statusMsg == "" {
@@ -131,11 +131,11 @@ func TestSend_NothingPendingIsReported(t *testing.T) {
 	tr := testutil.NewRepo(t)
 	tr.ApplyFixture(testutil.Fixture(t, "multi_hunk"))
 	m := liveModel(t, tr)
-	updated, _ := m.updateFileListMode(key("r"))
+	updated, _ := m.updateFileListMode(key("enter"))
 	m = updated.(Model)
 	m.target = feedback.NewFake()
 
-	updated, cmd := m.updateReviewMode(key("S"))
+	updated, cmd := m.updateDiffMode(key("S"))
 	m = runCmd(t, updated.(Model), cmd)
 
 	if !strings.Contains(m.statusMsg, "no ") {
@@ -146,9 +146,9 @@ func TestSend_NothingPendingIsReported(t *testing.T) {
 func TestSend_SentCommentsAreNotResent(t *testing.T) {
 	m, fake := sendModel(t)
 
-	updated, cmd := m.updateReviewMode(key("S"))
+	updated, cmd := m.updateDiffMode(key("S"))
 	m = runCmd(t, updated.(Model), cmd)
-	updated, cmd = m.updateReviewMode(key("S"))
+	updated, cmd = m.updateDiffMode(key("S"))
 	runCmd(t, updated.(Model), cmd)
 
 	if n := len(fake.Sent()); n != 1 {
@@ -159,7 +159,7 @@ func TestSend_SentCommentsAreNotResent(t *testing.T) {
 func TestSend_SentCommentsRenderAsSent(t *testing.T) {
 	m, _ := sendModel(t)
 
-	updated, cmd := m.updateReviewMode(key("S"))
+	updated, cmd := m.updateDiffMode(key("S"))
 	m = runCmd(t, updated.(Model), cmd)
 
 	view := m.View()
@@ -170,7 +170,7 @@ func TestSend_SentCommentsRenderAsSent(t *testing.T) {
 
 func TestSend_StatusBarCountsSent(t *testing.T) {
 	m, _ := sendModel(t)
-	updated, cmd := m.updateReviewMode(key("S"))
+	updated, cmd := m.updateDiffMode(key("S"))
 	m = runCmd(t, updated.(Model), cmd)
 
 	if bar := m.statusSegment(); !strings.Contains(bar, "2 sent") {
@@ -183,7 +183,7 @@ func TestSend_WithNoTargetConfiguredReportsTheProblem(t *testing.T) {
 	m.target = nil
 	m.targetErr = errors.New("no clipboard command found")
 
-	updated, cmd := m.updateReviewMode(key("S"))
+	updated, cmd := m.updateDiffMode(key("S"))
 	m = runCmd(t, updated.(Model), cmd)
 
 	if !strings.Contains(m.statusMsg, "no clipboard command found") {
@@ -196,7 +196,7 @@ func TestSend_WithNoTargetConfiguredReportsTheProblem(t *testing.T) {
 
 func TestSend_PayloadIsTheFormattedFeedback(t *testing.T) {
 	m, fake := sendModel(t)
-	updated, cmd := m.updateReviewMode(key("S"))
+	updated, cmd := m.updateDiffMode(key("S"))
 	m = runCmd(t, updated.(Model), cmd)
 
 	want := review.FormatFeedback(m.session.Comments())
@@ -250,7 +250,7 @@ func TestSend_EndToEndIntoATmuxPane(t *testing.T) {
 	}
 	m.target = target
 
-	updated, cmd := m.updateReviewMode(key("S"))
+	updated, cmd := m.updateDiffMode(key("S"))
 	m = runCmd(t, updated.(Model), cmd)
 
 	if m.session.PendingCount() != 0 {
@@ -287,7 +287,7 @@ func TestSend_StdoutTargetSurvivesTheTUI(t *testing.T) {
 	}
 	m.target = target
 
-	updated, cmd := m.updateReviewMode(key("S"))
+	updated, cmd := m.updateDiffMode(key("S"))
 	m = runCmd(t, updated.(Model), cmd)
 
 	if m.session.PendingCount() != 0 {

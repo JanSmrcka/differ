@@ -150,15 +150,15 @@ func TestIntegration_ReviewModeRendersOnRealRepo(t *testing.T) {
 	tr.AgentChangeset()
 
 	m := liveModel(t, tr)
-	updated, cmd := m.updateFileListMode(key("r"))
+	updated, cmd := m.updateFileListMode(key("enter"))
 	m = updated.(Model)
 	if cmd != nil {
 		updated, _ = m.Update(cmd())
 		m = updated.(Model)
 	}
 
-	if m.mode != modeReview {
-		t.Fatalf("mode = %v, want modeReview", m.mode)
+	if m.mode != modeDiff {
+		t.Fatalf("mode = %v, want modeDiff", m.mode)
 	}
 	view := m.View()
 	if !strings.Contains(view, "review") {
@@ -172,15 +172,15 @@ func TestIntegration_WriteACommentAndSeeItInTheDiff(t *testing.T) {
 	tr.ApplyFixture(testutil.Fixture(t, "multi_hunk"))
 
 	m := liveModel(t, tr)
-	updated, _ := m.updateFileListMode(key("r"))
+	updated, _ := m.updateFileListMode(key("enter"))
 	m = updated.(Model)
 
 	// Put the cursor on the changed line and write a comment.
 	m = m.setCursor(lineIndexOf(t, m.renderer.Parsed(), LineAdded, "  const user = await getUser(id)"))
-	updated, _ = m.updateReviewMode(key("c"))
+	updated, _ = m.updateDiffMode(key("c"))
 	m = updated.(Model)
 	m = typeText(t, m, "keep this awaited")
-	updated, _ = m.updateReviewMode(tea.KeyMsg{Type: tea.KeyCtrlS})
+	updated, _ = m.updateDiffMode(tea.KeyMsg{Type: tea.KeyCtrlS})
 	m = updated.(Model)
 
 	view := m.View()
@@ -208,10 +208,10 @@ func TestIntegration_CommentEditorBarRenders(t *testing.T) {
 	tr := testutil.NewRepo(t)
 	tr.ApplyFixture(testutil.Fixture(t, "multi_hunk"))
 	m := liveModel(t, tr)
-	updated, _ := m.updateFileListMode(key("r"))
+	updated, _ := m.updateFileListMode(key("enter"))
 	m = updated.(Model)
 	m = m.setCursor(lineIndexOf(t, m.renderer.Parsed(), LineAdded, "  const user = await getUser(id)"))
-	updated, _ = m.updateReviewMode(key("c"))
+	updated, _ = m.updateDiffMode(key("c"))
 	m = updated.(Model)
 	m = typeText(t, m, "needs await\nsecond line")
 

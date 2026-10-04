@@ -232,10 +232,10 @@ func (m Model) emptyState() []string {
 		return []string{"No differences", fmt.Sprintf("Nothing differs from %s.", m.ref)}
 	case m.stagedOnly:
 		return []string{"Nothing staged", "Stage a file, or drop -s."}
-	case m.mode == modeReview:
-		// Reached two ways: opening `differ review` on a clean tree, and the
-		// changeset emptying while a review is open. "yet" would be wrong for
-		// the second — everything was just committed.
+	case m.reviewAsked:
+		// Reached two ways after `differ review`: a clean tree at the start,
+		// and the changeset emptying later. "yet" would be wrong for the
+		// second — everything was just committed.
 		return []string{"Nothing to review", "No changes to review."}
 	default:
 		return []string{"No changes", "Your working tree is clean."}

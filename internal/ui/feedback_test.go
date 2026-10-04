@@ -12,10 +12,10 @@ import (
 func commentAt(t *testing.T, m Model, typ DiffLineType, content, body string) Model {
 	t.Helper()
 	m = cursorOn(t, m, typ, content)
-	updated, _ := m.updateReviewMode(key("c"))
+	updated, _ := m.updateDiffMode(key("c"))
 	m = updated.(Model)
 	m = typeText(t, m, body)
-	updated, _ = m.updateReviewMode(tea.KeyMsg{Type: tea.KeyCtrlS})
+	updated, _ = m.updateDiffMode(tea.KeyMsg{Type: tea.KeyCtrlS})
 	return updated.(Model)
 }
 
@@ -23,7 +23,7 @@ func TestFeedback_FromARealCommentHasCorrectContext(t *testing.T) {
 	tr := testutil.NewRepo(t)
 	tr.ApplyFixture(testutil.Fixture(t, "multi_hunk"))
 	m := liveModel(t, tr)
-	updated, _ := m.updateFileListMode(key("r"))
+	updated, _ := m.updateFileListMode(key("enter"))
 	m = updated.(Model)
 
 	m = commentAt(t, m, LineAdded, "  const user = await getUser(id)", "keep this awaited")
@@ -69,7 +69,7 @@ func TestFeedback_IdenticalWhetherWrittenInUnifiedOrSplit(t *testing.T) {
 				m = updated.(Model)
 			}
 		}
-		updated, _ := m.updateFileListMode(key("r"))
+		updated, _ := m.updateFileListMode(key("enter"))
 		m = updated.(Model)
 		m = commentAt(t, m, LineAdded, "  persist(data)", "same note")
 		return review.FormatFeedback(m.session.Comments())
@@ -85,7 +85,7 @@ func TestFeedback_RemovedLineReportsTheOldSide(t *testing.T) {
 	tr := testutil.NewRepo(t)
 	tr.ApplyFixture(testutil.Fixture(t, "multi_hunk"))
 	m := liveModel(t, tr)
-	updated, _ := m.updateFileListMode(key("r"))
+	updated, _ := m.updateFileListMode(key("enter"))
 	m = updated.(Model)
 
 	m = commentAt(t, m, LineRemoved, "  await persist(data)", "why was the await dropped?")
@@ -100,14 +100,14 @@ func TestFeedback_HunkCommentReportsTheRange(t *testing.T) {
 	tr := testutil.NewRepo(t)
 	tr.ApplyFixture(testutil.Fixture(t, "multi_hunk"))
 	m := liveModel(t, tr)
-	updated, _ := m.updateFileListMode(key("r"))
+	updated, _ := m.updateFileListMode(key("enter"))
 	m = updated.(Model)
 
 	m = cursorOn(t, m, LineAdded, "  const user = await getUser(id)")
-	updated, _ = m.updateReviewMode(key("C"))
+	updated, _ = m.updateDiffMode(key("C"))
 	m = updated.(Model)
 	m = typeText(t, m, "restructure this")
-	updated, _ = m.updateReviewMode(tea.KeyMsg{Type: tea.KeyCtrlS})
+	updated, _ = m.updateDiffMode(tea.KeyMsg{Type: tea.KeyCtrlS})
 	m = updated.(Model)
 
 	out := review.FormatFeedback(m.session.Comments())
@@ -134,7 +134,7 @@ func TestFeedback_UntrackedFileComment(t *testing.T) {
 		updated, _ := m.Update(cmd())
 		m = updated.(Model)
 	}
-	updated, _ := m.updateFileListMode(key("r"))
+	updated, _ := m.updateFileListMode(key("enter"))
 	m = updated.(Model)
 
 	m = commentAt(t, m, LineAdded, "export const fmt = (s: string) => s.trim()", "add a test for this")
@@ -157,7 +157,7 @@ func TestFeedback_MultipleCommentsAcrossFiles(t *testing.T) {
 	tr := testutil.NewRepo(t)
 	tr.AgentChangeset()
 	m := liveModel(t, tr)
-	updated, _ := m.updateFileListMode(key("r"))
+	updated, _ := m.updateFileListMode(key("enter"))
 	m = updated.(Model)
 
 	m.session.Add(review.Comment{File: "src/api/client.ts", Side: review.SideNew, StartLine: 2, EndLine: 2, Body: "b"})

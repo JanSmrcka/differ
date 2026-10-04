@@ -16,14 +16,22 @@ func pressIn(t *testing.T, m Model, k string) Model {
 	return updated.(Model)
 }
 
+// openIn opens the file under the cursor the way the reader does: from the
+// file list, with enter.
+func openIn(t *testing.T, m Model) Model {
+	t.Helper()
+	m.mode = modeFileList
+	return pressIn(t, m, "enter")
+}
+
 func TestReviewMode_EnteredFromFileList(t *testing.T) {
 	m := diffModel(t, "multi_hunk", 20)
 	m.mode = modeFileList
 
-	m = pressIn(t, m, "r")
+	m = openIn(t, m)
 
-	if m.mode != modeReview {
-		t.Fatalf("mode = %v, want modeReview", m.mode)
+	if m.mode != modeDiff {
+		t.Fatalf("mode = %v, want modeDiff", m.mode)
 	}
 	if m.session == nil {
 		t.Fatal("entering review mode must create a session")
@@ -35,10 +43,10 @@ func TestReviewMode_EnteredFromDiffViewKeepsCursor(t *testing.T) {
 	m = press(t, m, "j", "j")
 	before := m.diffCursor
 
-	m = pressIn(t, m, "r")
+	m = openIn(t, m)
 
-	if m.mode != modeReview {
-		t.Fatalf("mode = %v, want modeReview", m.mode)
+	if m.mode != modeDiff {
+		t.Fatalf("mode = %v, want modeDiff", m.mode)
 	}
 	if m.diffCursor != before {
 		t.Errorf("entering review moved the cursor from %d to %d", before, m.diffCursor)
@@ -47,9 +55,9 @@ func TestReviewMode_EnteredFromDiffViewKeepsCursor(t *testing.T) {
 
 func TestReviewMode_EscReturnsToFileList(t *testing.T) {
 	m := diffModel(t, "multi_hunk", 20)
-	m = pressIn(t, m, "r")
+	m = openIn(t, m)
 
-	updated, _ := m.updateReviewMode(tea.KeyMsg{Type: tea.KeyEsc})
+	updated, _ := m.updateDiffMode(tea.KeyMsg{Type: tea.KeyEsc})
 	m = updated.(Model)
 
 	if m.mode != modeFileList {
@@ -59,12 +67,12 @@ func TestReviewMode_EscReturnsToFileList(t *testing.T) {
 
 func TestReviewMode_SessionSurvivesLeavingAndReentering(t *testing.T) {
 	m := diffModel(t, "multi_hunk", 20)
-	m = pressIn(t, m, "r")
+	m = openIn(t, m)
 	m.session.Add(review.Comment{File: "src.ts", StartLine: 2, EndLine: 2, Body: "keep me"})
 
-	updated, _ := m.updateReviewMode(tea.KeyMsg{Type: tea.KeyEsc})
+	updated, _ := m.updateDiffMode(tea.KeyMsg{Type: tea.KeyEsc})
 	m = updated.(Model)
-	m = pressIn(t, m, "r")
+	m = openIn(t, m)
 
 	if got := m.session.CountFor("src.ts"); got != 1 {
 		t.Errorf("comment count after re-entering = %d, want 1", got)
@@ -73,16 +81,16 @@ func TestReviewMode_SessionSurvivesLeavingAndReentering(t *testing.T) {
 
 func TestReviewMode_NavigationWorks(t *testing.T) {
 	m := diffModel(t, "multi_hunk", 20)
-	m = pressIn(t, m, "r")
+	m = openIn(t, m)
 	start := m.diffCursor
 
-	updated, _ := m.updateReviewMode(key("j"))
+	updated, _ := m.updateDiffMode(key("j"))
 	m = updated.(Model)
 	if m.diffCursor != start+1 {
 		t.Errorf("j in review mode: cursor = %d, want %d", m.diffCursor, start+1)
 	}
 
-	updated, _ = m.updateReviewMode(key("}"))
+	updated, _ = m.updateDiffMode(key("}"))
 	m = updated.(Model)
 	if want := m.renderer.Parsed().Hunks[1].StartLine + 1; m.diffCursor != want {
 		t.Errorf("} in review mode: cursor = %d, want %d", m.diffCursor, want)
@@ -91,7 +99,7 @@ func TestReviewMode_NavigationWorks(t *testing.T) {
 
 func TestReviewMode_MarksCurrentFileViewed(t *testing.T) {
 	m := diffModel(t, "multi_hunk", 20)
-	m = pressIn(t, m, "r")
+	m = openIn(t, m)
 
 	if got := m.session.FileStateOf("src.ts"); got != review.FileViewed {
 		t.Errorf("file state = %v, want viewed", got)
@@ -100,12 +108,9 @@ func TestReviewMode_MarksCurrentFileViewed(t *testing.T) {
 
 func TestReviewMode_StatusBarShowsProgress(t *testing.T) {
 	m := diffModel(t, "multi_hunk", 20)
-	m = pressIn(t, m, "r")
+	m = openIn(t, m)
 
 	m.width = 100
-	if header := m.renderHeader(); !strings.Contains(header, "review") {
-		t.Errorf("header should say review mode is active: %q", header)
-	}
 	if seg := m.statusSegment(); !strings.Contains(seg, "1/1") {
 		t.Errorf("footer should show review progress: %q", seg)
 	}
@@ -113,7 +118,7 @@ func TestReviewMode_StatusBarShowsProgress(t *testing.T) {
 
 func TestReviewMode_HelpBarIsReviewSpecific(t *testing.T) {
 	m := diffModel(t, "multi_hunk", 20)
-	m = pressIn(t, m, "r")
+	m = openIn(t, m)
 
 	help := m.renderHintBar()
 	if !strings.Contains(help, "hunk") {
@@ -132,9 +137,9 @@ func TestReviewMode_DoesNotTouchGitState(t *testing.T) {
 	beforeHead := tr.Git("rev-parse", "HEAD")
 
 	m := liveModel(t, tr)
-	m = pressIn(t, m, "r")
+	m = openIn(t, m)
 	for _, k := range []string{"j", "j", "}", "k", "{", "G", "g"} {
-		updated, _ := m.updateReviewMode(key(k))
+		updated, _ := m.updateDiffMode(key(k))
 		m = updated.(Model)
 	}
 
@@ -164,13 +169,13 @@ func TestReviewMode_MovingToNextFileMarksItViewed(t *testing.T) {
 		{change: git.FileChange{Path: "b.ts", Status: git.StatusModified}},
 	})
 	m.mode = modeFileList
-	m = pressIn(t, m, "r")
+	m = openIn(t, m)
 
 	if got := m.session.FileStateOf("b.ts"); got != review.FileUnreviewed {
 		t.Fatalf("b.ts starts %v, want unreviewed", got)
 	}
 
-	updated, _ := m.updateReviewMode(key("n"))
+	updated, _ := m.updateDiffMode(key("n"))
 	m = updated.(Model)
 
 	if got := m.session.FileStateOf("b.ts"); got != review.FileViewed {
@@ -188,7 +193,7 @@ func TestReviewMode_ProgressCountsOnlyVisitedFiles(t *testing.T) {
 		{change: git.FileChange{Path: "c.ts", Status: git.StatusModified}},
 	})
 	m.mode = modeFileList
-	m = pressIn(t, m, "r")
+	m = openIn(t, m)
 
 	p := m.reviewProgress()
 	if p.Reviewed != 1 || p.Total != 3 {

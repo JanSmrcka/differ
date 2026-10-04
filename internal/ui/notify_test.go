@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/jansmrcka/differ/internal/review"
 	"github.com/jansmrcka/differ/internal/testutil"
 )
 
@@ -72,16 +73,19 @@ func reviewing(t *testing.T, tr *testutil.Repo) Model {
 	if m.fileKeys == nil {
 		t.Fatal("the first refresh recorded no file keys")
 	}
-	updated, cmd := m.enterReviewMode()
+	updated, cmd := m.openDiff()
 	m = updated.(Model)
 	m = settle(t, m, cmdMsg(cmd))
-	if m.mode != modeReview {
-		t.Fatalf("mode = %v, want modeReview", m.mode)
+	if m.mode != modeDiff {
+		t.Fatalf("mode = %v, want modeDiff", m.mode)
 	}
 	if m.renderer == nil {
 		t.Fatal("no diff on screen")
 	}
-	return m
+	// A reviewer is someone with something to say: a diff with no comment
+	// against it stays live, so these tests need one to be about holding.
+	m.session.Add(review.Comment{File: m.currentFilePath(), StartLine: 1, EndLine: 1, Body: "reviewing"})
+	return settle(t, m, cmdMsg(m.rerenderCmd()))
 }
 
 func cmdMsg(cmd tea.Cmd) tea.Msg {
@@ -225,6 +229,7 @@ func TestNotify_ACommentWhoseLineVanishedIsMarkedStaleAfterReload(t *testing.T) 
 	tr.Modify("src.ts", "one\nDOOMED\nthree\n")
 
 	m := reviewing(t, tr)
+	had := m.session.CountFor("src.ts")
 	m = m.cursorTo(t, "DOOMED")
 	updated, _ := m.startComment()
 	m = updated.(Model)
@@ -232,7 +237,7 @@ func TestNotify_ACommentWhoseLineVanishedIsMarkedStaleAfterReload(t *testing.T) 
 	updated, _ = m.saveComment()
 	m = updated.(Model)
 
-	if n := m.session.CountFor("src.ts"); n != 1 {
+	if n := m.session.CountFor("src.ts"); n != had+1 {
 		t.Fatalf("the comment was not saved (%d on the file)", n)
 	}
 	if m.session.StaleCount() != 0 {
@@ -244,7 +249,7 @@ func TestNotify_ACommentWhoseLineVanishedIsMarkedStaleAfterReload(t *testing.T) 
 	m = settle(t, m, m.refreshFilesCmd()())
 	m = settle(t, m, key(reloadKey))
 
-	if m.session.CountFor("src.ts") != 1 {
+	if m.session.CountFor("src.ts") != had+1 {
 		t.Error("the comment was dropped rather than marked")
 	}
 	if m.session.StaleCount() != 1 {
@@ -310,11 +315,10 @@ func TestNotify_TheDiffIsHeldForEveryShapeOfEdit(t *testing.T) {
 	}
 }
 
-// The hold belongs to review mode. It was not gated on it, so leaving review
-// with the notice up left the flag set — and the plain diff view, which the
-// poll exists to keep live, then refused every refresh for the rest of the
-// session.
-func TestNotify_LeavingReviewDoesNotFreezeThePlainDiff(t *testing.T) {
+// The hold belongs to the comments. It was once not released with them, which
+// left the flag set — and a diff the poll exists to keep live then refused
+// every refresh for the rest of the session.
+func TestNotify_DeletingTheLastCommentDoesNotFreezeTheDiff(t *testing.T) {
 	t.Parallel()
 	tr := testutil.NewRepo(t)
 	tr.CommitFile("src.ts", "one\ntwo\n", "first")
@@ -327,21 +331,19 @@ func TestNotify_LeavingReviewDoesNotFreezeThePlainDiff(t *testing.T) {
 		t.Fatal("the diff was not held")
 	}
 
-	// r leaves review mode, notice still up.
-	m = settle(t, m, key("r"))
-	if m.mode != modeDiff {
-		t.Fatalf("mode = %v, want modeDiff", m.mode)
+	for _, c := range m.session.CommentsFor("src.ts") {
+		m.session.Remove(c.ID)
 	}
 
-	// The plain diff must go live again.
+	// With nothing written against it the diff must go live again.
 	tr.Modify("src.ts", "one\nAGAIN\n")
 	m = settle(t, m, m.refreshFilesCmd()())
 
 	if got := m.renderer.Content(m.diffCursor); !strings.Contains(got, "AGAIN") {
-		t.Errorf("the plain diff is frozen:\n%s", got)
+		t.Errorf("the diff is frozen:\n%s", got)
 	}
 	if strings.Contains(m.View(), "to reload") {
-		t.Error("the notice is still up outside review mode")
+		t.Error("the notice is still up with nothing held")
 	}
 }
 
@@ -498,7 +500,7 @@ func TestNotify_NoNoticeBeforeADiffIsOnScreen(t *testing.T) {
 
 	m := settle(t, liveModel(t, tr), tea.WindowSizeMsg{Width: 120, Height: 30})
 	m = settle(t, m, m.refreshFilesCmd()())
-	m.mode = modeReview
+	m.mode = modeDiff
 	m.renderer = nil // nothing drawn yet
 
 	tr.Modify("a.ts", "one\nREWRITTEN\n")
@@ -570,7 +572,7 @@ func TestNotify_NoNoticeWhileTheCursorAndTheDiffDisagree(t *testing.T) {
 	}
 
 	// Move the cursor without letting the new diff land.
-	updated, _ := m.updateReviewMode(key("n"))
+	updated, _ := m.updateDiffMode(key("n"))
 	m = updated.(Model)
 	if m.rendererPath == "" {
 		t.Fatal("no renderer path to compare against")
@@ -659,7 +661,7 @@ func TestNotify_AResizeDoesNotSwapAHeldDiff(t *testing.T) {
 	}
 }
 
-// The notice belongs to the key that clears it. Outside review mode R is
+// The notice belongs to the key that clears it. Outside the diff R is
 // unbound, so offering it there is a wrong instruction.
 func TestNotify_TheNoticeIsOnlyOfferedWhereItWorks(t *testing.T) {
 	t.Parallel()
@@ -674,7 +676,7 @@ func TestNotify_TheNoticeIsOnlyOfferedWhereItWorks(t *testing.T) {
 		t.Fatal("no notice in review mode")
 	}
 
-	for _, mode := range []viewMode{modeFileList, modeDiff, modeCommit, modeBranchPicker} {
+	for _, mode := range []viewMode{modeFileList, modeCommit, modeBranchPicker} {
 		probe := m
 		probe.mode = mode
 		if strings.Contains(probe.View(), "to reload") {
@@ -848,7 +850,7 @@ func TestNotify_AnotherFileChangingKeepsTheReviewersPlace(t *testing.T) {
 
 	m := reviewing(t, tr)
 	for i := 0; i < 10; i++ {
-		updated, _ := m.updateReviewMode(key("j"))
+		updated, _ := m.updateDiffMode(key("j"))
 		m = updated.(Model)
 	}
 	cursor := m.diffCursor
@@ -929,7 +931,7 @@ func TestNotify_ARefreshDoesNotUndoNavigation(t *testing.T) {
 	start := m.currentFilePath()
 
 	// n, without letting the new diff land.
-	updated, _ := m.updateReviewMode(key("n"))
+	updated, _ := m.updateDiffMode(key("n"))
 	m = updated.(Model)
 	asked := m.currentFilePath()
 	if asked == start {
@@ -1218,7 +1220,7 @@ func TestNotify_NavigatingStillLoadsTheFileAskedFor(t *testing.T) {
 	// Navigate, and let a refresh land in the window before the diff does —
 	// with the file we navigated *away* from having changed, which is what
 	// makes an ungated hold engage.
-	updated, nav := m.updateReviewMode(key("n"))
+	updated, nav := m.updateDiffMode(key("n"))
 	m = updated.(Model)
 	asked := m.currentFilePath()
 	tr.Modify(start, "one\nREWRITTEN\n")
@@ -1394,7 +1396,7 @@ func TestNotify_ALoadIsMatchedToItsFileNotItsIndex(t *testing.T) {
 
 	m := reviewing(t, tr)
 	for m.currentFilePath() != "b.ts" {
-		updated, _ := m.updateReviewMode(key("n"))
+		updated, _ := m.updateDiffMode(key("n"))
 		mm := updated.(Model)
 		if mm.currentFilePath() == m.currentFilePath() {
 			t.Fatal("could not reach b.ts")
@@ -1416,7 +1418,7 @@ func TestNotify_ALoadIsMatchedToItsFileNotItsIndex(t *testing.T) {
 		m.session.StaleCount(), m.cursor, m.currentFilePath(), m.rendererPath)
 
 	// n, keeping the load in flight.
-	updated, nav := m.updateReviewMode(key("n"))
+	updated, nav := m.updateDiffMode(key("n"))
 	m = updated.(Model)
 	pending := cmdMsg(nav)
 	t.Logf("after n:  stale=%d cursor=%d path=%q renderer=%q",

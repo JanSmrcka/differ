@@ -162,7 +162,7 @@ func (m Model) focusOn(p pane) bool {
 	switch m.mode {
 	case modeFileList, modeBranchPicker:
 		return p == paneFiles
-	case modeDiff, modeReview:
+	case modeDiff:
 		return p == paneDiff
 	default:
 		return false
@@ -183,7 +183,7 @@ func (m Model) diffLabel() (label, meta string) {
 	if f.change.Staged {
 		parts = append(parts, "staged")
 	}
-	if m.mode == modeReview && m.session != nil {
+	if m.session != nil {
 		if n := m.session.CountFor(f.change.Path); n > 0 {
 			parts = append(parts, plural(n, "comment"))
 		}
@@ -219,9 +219,6 @@ func (m Model) headerContext() string {
 		ctx += " ← " + m.ref
 	case m.stagedOnly:
 		ctx += " staged"
-	}
-	if m.mode == modeReview {
-		ctx += " · review"
 	}
 	return ctx
 }
@@ -332,7 +329,7 @@ func (m Model) statusSegment() string {
 	var parts []string
 	// First, above even what just happened: it says the screen is not showing
 	// the repository, and every other word in this row describes that screen.
-	// Only where the key that clears it works. Outside review mode the bar was
+	// Only where the key that clears it works. Outside the diff the bar was
 	// still telling people to press R, which is unbound there.
 	// A failure comes before everything, the notice included. An earlier
 	// version put the notice first, reasoning that it describes the screen
@@ -344,7 +341,7 @@ func (m Model) statusSegment() string {
 	if failed {
 		parts = append(parts, m.statusMsg)
 	}
-	if m.mode == modeReview && m.diffStale() {
+	if m.mode == modeDiff && m.diffStale() {
 		notice := "diff moved"
 		// The summary is the first thing dropped when the row is tight: what
 		// moved is available by reloading, and the half that says what to
@@ -357,7 +354,7 @@ func (m Model) statusSegment() string {
 	if !failed && m.statusMsg != "" {
 		parts = append(parts, m.statusMsg)
 	}
-	if m.mode == modeReview {
+	if m.mode == modeDiff {
 		parts = append(parts, m.reviewSummary())
 	}
 	if m.splitDiff {

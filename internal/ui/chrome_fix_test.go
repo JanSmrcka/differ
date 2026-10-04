@@ -62,13 +62,13 @@ func TestStatusMsg_VisibleWhileTheCommentEditorIsOpen(t *testing.T) {
 	m := liveModel(t, tr)
 	u, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
 	m = u.(Model)
-	u, _ = m.Update(key("r"))
+	u, _ = m.Update(key("enter"))
 	m = u.(Model)
-	u, _ = m.updateReviewMode(key("c"))
+	u, _ = m.updateDiffMode(key("c"))
 	m = u.(Model)
 
 	// Saving an empty comment must say so rather than silently doing nothing.
-	u, _ = m.updateReviewMode(tea.KeyMsg{Type: tea.KeyCtrlS})
+	u, _ = m.updateDiffMode(tea.KeyMsg{Type: tea.KeyCtrlS})
 	m = u.(Model)
 
 	if m.statusMsg == "" {

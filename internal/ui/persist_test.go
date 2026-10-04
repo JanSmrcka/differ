@@ -61,9 +61,9 @@ func started(t *testing.T, tr *testutil.Repo, reviewing bool) Model {
 func writeComment(t *testing.T, m Model, line, body string) Model {
 	t.Helper()
 	m = cursorOn(t, m, LineAdded, line)
-	updated, _ := m.updateReviewMode(key("c"))
+	updated, _ := m.updateDiffMode(key("c"))
 	m = typeText(t, updated.(Model), body)
-	updated, _ = m.updateReviewMode(key("ctrl+s"))
+	updated, _ = m.updateDiffMode(key("ctrl+s"))
 	m = updated.(Model)
 	if m.commenting {
 		t.Fatalf("the editor is still open: %s", m.statusMsg)
@@ -252,7 +252,7 @@ func TestPersist_EveryChangeToACommentIsWrittenOut(t *testing.T) {
 	}
 
 	m = cursorOn(t, m, LineAdded, line)
-	if _, cmd := m.updateReviewMode(key("x")); cmd != nil {
+	if _, cmd := m.updateDiffMode(key("x")); cmd != nil {
 		t.Fatalf("deleting a comment should not need a command")
 	}
 
@@ -395,7 +395,7 @@ func TestPersist_CommentsSurviveAModeChange(t *testing.T) {
 
 	// Written in plain mode.
 	m := liveModelMode(t, tr, false)
-	m = settle(t, m, key("r"))
+	m = settle(t, m, key("enter"))
 	updated, _ := m.startComment()
 	m = updated.(Model)
 	m.commentInput.SetValue("this needs a second look")
@@ -432,7 +432,7 @@ func TestPersist_CommentsWrittenUnderStagedModeSurvivePlainMode(t *testing.T) {
 	if len(m.files) == 0 {
 		t.Skip("nothing staged in this fixture")
 	}
-	m = settle(t, m, key("r"))
+	m = settle(t, m, key("enter"))
 	updated, _ := m.startComment()
 	m = updated.(Model)
 	m.commentInput.SetValue("written while reviewing the index")
@@ -461,7 +461,7 @@ func TestPersist_AReSavedFileLosesItsCommentsInEitherMode(t *testing.T) {
 	tr.Modify("src.ts", "one\nCHANGED\n")
 
 	m := liveModelMode(t, tr, false)
-	m = settle(t, m, key("r"))
+	m = settle(t, m, key("enter"))
 	updated, _ := m.startComment()
 	m = updated.(Model)
 	m.commentInput.SetValue("about the old content")
@@ -492,7 +492,7 @@ func TestPersist_AnUntouchedFileKeepsItsCommentsInEitherMode(t *testing.T) {
 	tr.Modify("src.ts", "one\nCHANGED\n")
 
 	m := liveModelMode(t, tr, false)
-	m = settle(t, m, key("r"))
+	m = settle(t, m, key("enter"))
 	updated, _ := m.startComment()
 	m = updated.(Model)
 	m.commentInput.SetValue("about the current content")
@@ -553,7 +553,7 @@ func TestPersist_ACommentIsKeyedToTheContentItsAuthorRead(t *testing.T) {
 	tr.Modify("a.ts", "one\nV1\n")
 	tr.Modify("b.ts", "BETA\n")
 
-	m := settle(t, liveModel(t, tr), key("r"))
+	m := settle(t, liveModel(t, tr), key("enter"))
 	m = writeComment(t, m, "V1", "about v1")
 
 	// The agent rewrites a.ts, and differ's poll notices: this is what put
@@ -582,7 +582,7 @@ func TestPersist_UnderStagedOnlyAnUnstagedEditKeepsTheComments(t *testing.T) {
 	tr.Modify("src.ts", "one\nSTAGED\n")
 	tr.Stage("src.ts")
 
-	m := settle(t, liveModelMode(t, tr, true), key("r"))
+	m := settle(t, liveModelMode(t, tr, true), key("enter"))
 	writeComment(t, m, "STAGED", "about the staged content")
 
 	// The working tree moves; the index does not.
@@ -603,7 +603,7 @@ func TestPersist_UnderStagedOnlyStagingSomethingElseDropsThem(t *testing.T) {
 	tr.Modify("src.ts", "one\nSTAGED\n")
 	tr.Stage("src.ts")
 
-	m := settle(t, liveModelMode(t, tr, true), key("r"))
+	m := settle(t, liveModelMode(t, tr, true), key("enter"))
 	writeComment(t, m, "STAGED", "about the staged content")
 
 	tr.ExternalEdit("src.ts", "one\nRESTAGED\n")
@@ -628,7 +628,7 @@ func TestPersist_TheScopeComesFromTheEntryNotTheFlag(t *testing.T) {
 	tr.Stage("src.ts")
 	tr.ExternalEdit("src.ts", "one\nSTAGED\nunstaged tail\n")
 
-	m := settle(t, liveModel(t, tr), key("r"))
+	m := settle(t, liveModel(t, tr), key("enter"))
 	if !m.files[m.cursor].change.Staged {
 		t.Fatalf("the fixture does not put the cursor on the staged entry: %+v",
 			m.files[m.cursor].change)
@@ -669,7 +669,7 @@ func TestPersist_ASecondDifferDoesNotDestroyTheFirstsReview(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(gitDir, "differ"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	first := settle(t, liveModel(t, tr), key("r"))
+	first := settle(t, liveModel(t, tr), key("enter"))
 	writeComment(t, first, "AAA", "from the first differ")
 	writeForeignLock(t, gitDir)
 
@@ -678,7 +678,7 @@ func TestPersist_ASecondDifferDoesNotDestroyTheFirstsReview(t *testing.T) {
 	if !strings.Contains(fresh.statusMsg, "another differ") {
 		t.Errorf("the second differ starts saying %q, which does not mention the first", fresh.statusMsg)
 	}
-	second := settle(t, fresh, key("r"))
+	second := settle(t, fresh, key("enter"))
 	if second.store != nil {
 		t.Error("the second differ took the review file")
 	}
@@ -732,7 +732,7 @@ func TestPersist_AFailedSendIsWrittenOut(t *testing.T) {
 	tr.CommitFile("a.ts", "one\n", "first")
 	tr.Modify("a.ts", "AAA\n")
 
-	m := settle(t, liveModel(t, tr), key("r"))
+	m := settle(t, liveModel(t, tr), key("enter"))
 	m = writeComment(t, m, "AAA", "please fix")
 	ids := []string{m.session.CommentsFor("a.ts")[0].ID}
 
@@ -771,7 +771,7 @@ func TestPersist_AFileReadWithoutCommentComesBackRead(t *testing.T) {
 	tr.Modify("a.ts", "AAA\n")
 	tr.Modify("b.ts", "BBB\n")
 
-	m := settle(t, liveModel(t, tr), key("r"))
+	m := settle(t, liveModel(t, tr), key("enter"))
 	// b.ts is commented on, which saves the review; a.ts is only read.
 	m = moveTo(t, m, "b.ts")
 	writeComment(t, m, "BBB", "a note")
@@ -791,7 +791,7 @@ func TestPersist_AFileReadThenRewrittenComesBackUnread(t *testing.T) {
 	tr.Modify("a.ts", "AAA\n")
 	tr.Modify("b.ts", "BBB\n")
 
-	m := settle(t, liveModel(t, tr), key("r"))
+	m := settle(t, liveModel(t, tr), key("enter"))
 	m = moveTo(t, m, "b.ts")
 	writeComment(t, m, "BBB", "a note")
 
@@ -817,7 +817,7 @@ func TestPersist_ARestoredCommentClaimsNoLineUntilTheDiffSaysSo(t *testing.T) {
 	tr.CommitFile("src.ts", "one\ntwo\nthree\n", "first")
 	tr.Modify("src.ts", "one\nCHANGED\nthree\n")
 
-	first := settle(t, liveModel(t, tr), key("r"))
+	first := settle(t, liveModel(t, tr), key("enter"))
 	writeComment(t, first, "CHANGED", "why?")
 
 	// Straight off the disk, before anything has looked at a diff.
@@ -840,7 +840,7 @@ func TestPersist_ARestoredCommentClaimsNoLineUntilTheDiffSaysSo(t *testing.T) {
 	}
 
 	// And the reanchor a restored file gets at startup gives it its answer.
-	second := settle(t, liveModel(t, tr), key("r"))
+	second := settle(t, liveModel(t, tr), key("enter"))
 	got := second.session.CommentsFor("src.ts")
 	if len(got) != 1 {
 		t.Fatalf("restored %d comments", len(got))

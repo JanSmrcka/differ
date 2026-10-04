@@ -213,7 +213,7 @@ func TestEmptyState_SaysWhatIsTrueAndWhatToDo(t *testing.T) {
 		},
 		{
 			name:  "nothing to review",
-			setup: func(m Model) Model { m.mode = modeReview; return m },
+			setup: func(m Model) Model { m.mode = modeDiff; m.reviewAsked = true; return m },
 			wants: []string{"Nothing to review"},
 		},
 	}
@@ -334,7 +334,7 @@ func TestEmptyState_FitsThePanelWhateverItSays(t *testing.T) {
 		func(m Model) Model { return m },
 		func(m Model) Model { m.stagedOnly = true; return m },
 		func(m Model) Model { m.ref = "origin/feat/errors-and-empty-states-55"; return m },
-		func(m Model) Model { m.mode = modeReview; return m },
+		func(m Model) Model { m.mode = modeDiff; return m },
 	} {
 		// The smallest terminal differ draws, with a status message — which
 		// costs the panel a row and is where the breathing room around the
@@ -377,10 +377,10 @@ func TestEmptyState_FitsThePanelWhateverItSays(t *testing.T) {
 func TestProblem_AnEmptyReviewIsStillAWorkingReview(t *testing.T) {
 	t.Parallel()
 	m := newTestModel(t, nil)
-	updated, _ := m.enterReviewMode()
+	updated, _ := m.openDiff()
 	m = updated.(Model)
 
-	if m.mode != modeReview {
+	if m.mode != modeDiff {
 		t.Fatalf("mode = %v, want review", m.mode)
 	}
 	if m.session == nil {
@@ -397,7 +397,7 @@ func TestProblem_AnEmptyReviewIsStillAWorkingReview(t *testing.T) {
 	})
 	m = arrived.(Model)
 
-	moved, _ := m.updateReviewMode(key("n"))
+	moved, _ := m.updateDiffMode(key("n"))
 	m = moved.(Model)
 	if got := m.reviewSummary(); !strings.Contains(got, "/2") {
 		t.Errorf("progress = %q, want it to count the two files that arrived", got)
@@ -410,7 +410,7 @@ func TestProblem_AnEmptyReviewIsStillAWorkingReview(t *testing.T) {
 func TestProblem_TheAffordanceSurvivesANarrowBar(t *testing.T) {
 	t.Parallel()
 	m := newTestModel(t, []fileItem{{change: git.FileChange{Path: "a.ts", Status: git.StatusModified}}})
-	m.mode = modeReview
+	m.mode = modeDiff
 	m.session = review.NewSession()
 	m.splitDiff = true
 	m = m.fail("generating a commit message", errors.New("fatal: Unable to create '/r/.git/index.lock': File exists."))
