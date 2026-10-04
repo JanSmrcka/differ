@@ -30,11 +30,19 @@ func shortDir(t *testing.T) string {
 // environment, and returns the socket path.
 func headlessNvim(t *testing.T, env []string, args ...string) string {
 	t.Helper()
+	return nvimListeningOn(t, filepath.Join(shortDir(t), "s"), env, args...)
+}
+
+// nvimListeningOn starts a headless nvim on the given socket path.
+func nvimListeningOn(t *testing.T, sock string, env []string, args ...string) string {
+	t.Helper()
 	if _, err := exec.LookPath("nvim"); err != nil {
 		t.Skip("nvim not installed")
 	}
-	dir := shortDir(t)
-	sock := filepath.Join(dir, "s")
+	dir := filepath.Dir(sock)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
 
 	cmd := exec.Command("nvim", append([]string{"--clean", "--headless", "--listen", sock}, args...)...)
 	cmd.Dir = dir
@@ -74,6 +82,28 @@ func TestQueryNvim_ReportsThePaneItRunsIn(t *testing.T) {
 	}
 	if got != "%42" {
 		t.Errorf("TMUX_PANE = %q, want %%42", got)
+	}
+}
+
+// herdr exports HERDR_PANE_ID into every pane exactly as tmux exports
+// TMUX_PANE, so discovery asks for both and the caller matches whichever its
+// multiplexer uses.
+func TestDiscoverNvim_ReportsTheHerdrPaneItRunsIn(t *testing.T) {
+	t.Parallel()
+	root := shortDir(t)
+	sock := filepath.Join(root, "nvim.me", "x", "nvim.1.0")
+	nvimListeningOn(t, sock, []string{"HERDR_PANE_ID=w9:p9", "TMUX_PANE="})
+
+	found := discoverNvim(context.Background(), 0, Env{XDGRuntimeDir: root, User: "me"})
+	if len(found) != 1 {
+		t.Fatalf("found %d servers, want 1: %+v", len(found), found)
+	}
+	got := found[0]
+	if got.Socket != sock || got.HerdrPane != "w9:p9" || got.Pane != "" {
+		t.Errorf("server = %+v, want socket %s in herdr pane w9:p9 and no tmux pane", got, sock)
+	}
+	if got.CWD == "" {
+		t.Error("CWD is empty, want nvim's working directory")
 	}
 }
 

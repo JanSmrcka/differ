@@ -138,6 +138,23 @@ injected `editor.Env` rather than being read inside, so the whole decision tree
 is a pure function of its inputs and its tests need no `t.Setenv` (which would
 bar `t.Parallel`).
 
+**The editor knows two multiplexers**, read from `Env` with the same
+precedence as `feedback.DetectMux` (`Env.mux`). An nvim is tied to its pane by
+its own environment — `$TMUX_PANE` or `$HERDR_PANE_ID`, asked in one
+`--remote-expr` — never by pid: the socket's pid is a child of the TUI nvim.
+In herdr the pane must still be in `pane list` (a moved pane gets a new id and
+the nvim keeps the old one) and `process-info` must show an editor in front (a
+ctrl-z'd nvim answers on its socket behind a shell). Default reach is differ's
+workspace only — not even the same repository's other workspace, because
+focusing it takes the user out of the one they are in; a new pane does not.
+Focusing goes through the **socket's `pane.focus`** — the CLI's `pane focus`
+only moves to a neighbour — which switches workspace and tab by itself.
+`window` is a pane split off differ's (right when wide, down when not)
+running `exec <argv>` via `pane run`, since herdr cannot start a pane on a
+command; `exec` closes it when the editor quits. The argv is quoted for the
+pane's actual shell — `process-info`'s `shell_pid` — because fish reads `\'`
+inside single quotes where POSIX needs `'\''`.
+
 The frame is the same on every screen, `differ log` included: a header, a
 rule, the content, a rule, one bar. There are no boxes in it — `renderCard` is
 gone, and two tests sweep every mode for box-drawing corners.
