@@ -11,6 +11,7 @@ package review
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"time"
 )
@@ -109,6 +110,11 @@ type Comment struct {
 	FileKey string
 	Scope   KeyScope
 	State   State
+	// Agent is what the agent has done with the comment since it was sent,
+	// when the target can say: the latest delivery it went out in, as
+	// NoteAgent recorded it. Empty means nothing is known.
+	Agent string
+
 	// StaleReason says why a comment no longer matches the diff, so the user
 	// can judge whether to re-create or discard it.
 	StaleReason string
@@ -414,6 +420,10 @@ type Delivery struct {
 	Files    []string
 	// Err is why the delivery failed, empty when it succeeded.
 	Err string
+	// Agent is what the agent has done with it since, when the target can
+	// say — herdr can, tmux cannot: "working", then "idle", "done" or
+	// "blocked". Empty means nothing is known.
+	Agent string
 }
 
 // OK reports whether the delivery succeeded.
@@ -422,8 +432,39 @@ func (d Delivery) OK() bool { return d.Err == "" }
 // RecordDelivery appends an attempt to the history. Failures are recorded too:
 // "did that actually go out?" is the question the history exists to answer,
 // and a send that silently failed is the worst answer to be missing.
-func (s *Session) RecordDelivery(d Delivery) {
+//
+// It returns the delivery's index, which NoteAgent takes.
+func (s *Session) RecordDelivery(d Delivery) int {
 	s.deliveries = append(s.deliveries, d)
+	return len(s.deliveries) - 1
+}
+
+// NoteAgent records what the agent has done with delivery i. An index that
+// names no delivery is ignored: the answer arrives long after the send.
+func (s *Session) NoteAgent(i int, state string) {
+	if i < 0 || i >= len(s.deliveries) {
+		return
+	}
+	s.deliveries[i].Agent = state
+	for _, id := range s.deliveries[i].Comments {
+		for j := range s.comments {
+			if s.comments[j].ID == id {
+				s.comments[j].Agent = s.AgentStateOf(id)
+			}
+		}
+	}
+}
+
+// AgentStateOf is what the agent has done with a comment: its state on the
+// latest successful delivery the comment was in, or "".
+func (s *Session) AgentStateOf(id string) string {
+	for i := len(s.deliveries) - 1; i >= 0; i-- {
+		d := s.deliveries[i]
+		if d.OK() && slices.Contains(d.Comments, id) {
+			return d.Agent
+		}
+	}
+	return ""
 }
 
 // History is every delivery attempt, most recent first.

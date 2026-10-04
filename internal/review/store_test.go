@@ -425,3 +425,22 @@ func TestStore_ACommentIsComparedAgainstTheScopeItWasWrittenIn(t *testing.T) {
 		t.Errorf("a comment survived the staged content being replaced")
 	}
 }
+
+// What the agent did with a delivery is part of its history.
+func TestStore_DeliveryKeepsTheAgentsState(t *testing.T) {
+	t.Parallel()
+	st := NewStore(t.TempDir())
+	s := NewSession()
+	i := s.RecordDelivery(Delivery{At: time.Now(), Target: "herdr", Comments: []string{"c1"}})
+	s.NoteAgent(i, "done")
+	if err := st.Save(s, fixedKeys(nil)); err != nil {
+		t.Fatal(err)
+	}
+	back := st.Load(fixedKeys(nil))
+	if back == nil {
+		t.Fatal("nothing restored")
+	}
+	if got := back.History()[0].Agent; got != "done" {
+		t.Errorf("agent state = %q, want done", got)
+	}
+}

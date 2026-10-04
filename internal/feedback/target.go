@@ -31,14 +31,30 @@ type Target interface {
 
 // Config selects and configures a target.
 type Config struct {
-	// Target names the delivery mechanism: clipboard, stdout or tmux.
+	// Target names the delivery mechanism: clipboard, stdout, tmux or herdr.
 	Target string
 	// TmuxTarget is the pane tmux feedback goes to. See the tmux target.
 	TmuxTarget string
+	// HerdrTarget is the herdr agent's own session id, which survives a pane
+	// move, and HerdrPane the pane it was in when chosen — the fallback.
+	// Their own keys, not TmuxTarget: a "w2:p2" in tmux_target is a config
+	// that is wrong rather than unset.
+	HerdrTarget string
+	HerdrPane   string
+	// Env is the environment the target reads; the zero value is the
+	// process's own.
+	Env Env
 }
 
 // Available lists the target names a user may configure.
-func Available() []string { return []string{"clipboard", "stdout", "tmux"} }
+func Available() []string { return []string{"clipboard", "stdout", "tmux", "herdr"} }
+
+// Watcher is a target that can tell when the agent it last delivered to has
+// finished with it: idle, done or blocked. Asserted like Flusher, because
+// only herdr can be asked — tmux cannot tell an agent from a shell.
+type Watcher interface {
+	Wait(ctx context.Context) (string, error)
+}
 
 // Resolve builds the configured target. An empty name means clipboard, which
 // works everywhere and needs no setup.
@@ -50,6 +66,8 @@ func Resolve(cfg Config) (Target, error) {
 		return newStdoutTarget(), nil
 	case "tmux":
 		return newTmuxTarget(cfg.TmuxTarget)
+	case "herdr":
+		return newHerdrTarget(cfg)
 	default:
 		return nil, fmt.Errorf("unknown feedback target %q — set feedback_target to one of: %s",
 			cfg.Target, strings.Join(Available(), ", "))

@@ -117,3 +117,42 @@ func TestSession_ProgressCountsAChangedFileAsUnreviewed(t *testing.T) {
 		t.Errorf("Changed = %d, want 1", p.Changed)
 	}
 }
+
+// Under herdr a delivery learns what the agent did with it: picked it up,
+// then finished. A comment reads that from the latest delivery it was in.
+func TestSession_ADeliveryRecordsWhatTheAgentDid(t *testing.T) {
+	t.Parallel()
+	s := NewSession()
+	at := time.Date(2026, 10, 4, 12, 0, 0, 0, time.UTC)
+	first := s.RecordDelivery(Delivery{At: at, Target: "herdr", Comments: []string{"c1", "c2"}})
+	second := s.RecordDelivery(Delivery{At: at.Add(time.Minute), Target: "herdr", Comments: []string{"c2"}})
+
+	s.NoteAgent(first, "working")
+	s.NoteAgent(second, "working")
+	s.NoteAgent(first, "done")
+
+	if got := s.History()[1].Agent; got != "done" {
+		t.Errorf("first delivery's agent state = %q, want done", got)
+	}
+	if got := s.AgentStateOf("c1"); got != "done" {
+		t.Errorf("c1 = %q, want done", got)
+	}
+	// The latest delivery it was in is what counts: c2 went out again and
+	// that one is still being worked on.
+	if got := s.AgentStateOf("c2"); got != "working" {
+		t.Errorf("c2 = %q, want working", got)
+	}
+	// And it rides on the comment, so whatever renders comments can say it.
+	added := s.Add(Comment{File: "a.ts"})
+	third := s.RecordDelivery(Delivery{At: at, Target: "herdr", Comments: []string{added.ID}})
+	s.NoteAgent(third, "blocked")
+	if c, _ := s.Get(added.ID); c.Agent != "blocked" {
+		t.Errorf("comment %s carries %q, want blocked", added.ID, c.Agent)
+	}
+	if got := s.AgentStateOf("c9"); got != "" {
+		t.Errorf("never-sent comment = %q, want empty", got)
+	}
+	// An index that is not a delivery is ignored rather than a panic: the
+	// wait answers long after it was started.
+	s.NoteAgent(99, "done")
+}

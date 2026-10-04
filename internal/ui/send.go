@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -131,15 +132,16 @@ func (m Model) send(cs []review.Comment) (tea.Model, tea.Cmd) {
 	}
 
 	target := m.target
+	watcher, _ := target.(feedback.Watcher)
 	m.statusMsg = fmt.Sprintf("sending %s…", plural(len(cs), "comment"))
 	return m, func() tea.Msg {
 		err := target.Send(context.Background(), payload)
-		return feedbackSentMsg{ids: ids, target: target.Name(), err: err}
+		return feedbackSentMsg{ids: ids, target: target.Name(), err: err, watcher: watcher}
 	}
 }
 
 func (m Model) handleFeedbackSent(msg feedbackSentMsg) (tea.Model, tea.Cmd) {
-	m.recordDelivery(msg)
+	delivery := m.recordDelivery(msg)
 	if msg.err != nil {
 		// Comments stay pending: the user can retry or switch target. The
 		// attempt is still written out — the history is what stops the same
@@ -165,11 +167,68 @@ func (m Model) handleFeedbackSent(msg feedbackSentMsg) (tea.Model, tea.Cmd) {
 		m.session.MarkSent(msg.ids)
 	}
 	m.statusMsg = fmt.Sprintf("sent %s to %s", plural(len(msg.ids), "comment"), msg.target)
+	var wait tea.Cmd
+	if msg.watcher != nil && m.session != nil && delivery >= 0 {
+		// The target saw the agent pick the review up before reporting
+		// success, so it is working on it now — and the wait starts from
+		// there, not from idle, because herdr does not track turns.
+		m.session.NoteAgent(delivery, "working")
+		wait = m.waitForAgentCmd(msg.watcher, delivery)
+	}
 	// After the status message, not before: if the write fails, what it has
 	// to say is more important than the send having worked, and fail() would
 	// otherwise be painted over by the line above.
 	m = m.persistReview()
+	return m.refreshCommentMarks(), wait
+}
+
+// waitForAgentCmd waits, off the update loop, for the agent to finish with a
+// delivery. One process per delivery and no polling: herdr blocks
+// server-side. Close cancels it.
+func (m Model) waitForAgentCmd(w feedback.Watcher, delivery int) tea.Cmd {
+	ctx := m.waits
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return func() tea.Msg {
+		state, err := w.Wait(ctx)
+		return agentSettledMsg{delivery: delivery, state: state, err: err}
+	}
+}
+
+// handleAgentSettled records what the agent did with a delivery and says so.
+//
+// A wait that failed — cancelled at quit, timed out, herdr gone — is left
+// quiet: the review arrived, which was the part that mattered, and a failure
+// to watch it is not worth taking the bar from whatever is there.
+func (m Model) handleAgentSettled(msg agentSettledMsg) (tea.Model, tea.Cmd) {
+	if msg.err != nil || m.session == nil {
+		return m, nil
+	}
+	m.session.NoteAgent(msg.delivery, msg.state)
+	m.statusMsg = "the " + agentWord(msg.state)
+	if m.diffStale() {
+		// The information was already in progress.go; this is its trigger.
+		m.statusMsg += " — " + m.rendererPath + " changed, R to reload"
+	}
+	m = m.persistReview()
 	return m.refreshCommentMarks(), nil
+}
+
+// agentWord is what the agent has done with a review, in words — the
+// comment marks, H and the bar all say it the same way.
+func agentWord(state string) string {
+	switch state {
+	case "working":
+		return "agent working"
+	case "idle", "done":
+		return "agent answered"
+	case "blocked":
+		return "agent waiting for you"
+	case "":
+		return ""
+	}
+	return "agent " + state
 }
 
 // targetProblem explains why there is nowhere to send to.
@@ -191,9 +250,11 @@ func plural(n int, word string) string {
 // not. It is called before anything is marked sent, so the history is written
 // even when the delivery failed — a send that silently went nowhere is the one
 // the user most needs to be able to look up.
-func (m Model) recordDelivery(msg feedbackSentMsg) {
+//
+// It returns the delivery's index, or -1 when nothing was recorded.
+func (m Model) recordDelivery(msg feedbackSentMsg) int {
 	if m.session == nil || len(msg.ids) == 0 {
-		return
+		return -1
 	}
 	d := review.Delivery{
 		At:       time.Now(),
@@ -204,7 +265,7 @@ func (m Model) recordDelivery(msg feedbackSentMsg) {
 	if msg.err != nil {
 		d.Err = msg.err.Error()
 	}
-	m.session.RecordDelivery(d)
+	return m.session.RecordDelivery(d)
 }
 
 // filesOf names the files a set of comments came from, each once, in the order
@@ -238,6 +299,11 @@ func (m Model) filesOf(ids []string) []string {
 func paneIsGone(err error) bool {
 	if err == nil {
 		return false
+	}
+	// herdr says it in a code rather than in words.
+	var he *feedback.HerdrError
+	if errors.As(err, &he) {
+		return he.Code == "agent_not_found" || he.Code == "pane_not_found"
 	}
 	text := strings.ToLower(err.Error())
 	for _, said := range []string{

@@ -120,6 +120,7 @@ type storedDelivery struct {
 	Comments []string `json:"comments"`
 	Files    []string `json:"files"`
 	Err      string   `json:"err,omitempty"`
+	Agent    string   `json:"agent,omitempty"`
 }
 
 // Save writes the session out.
@@ -152,6 +153,7 @@ func (st *Store) Save(s *Session, keys Keys) error {
 		out.History = append(out.History, storedDelivery{
 			At:     d.At.Format(time.RFC3339Nano),
 			Target: d.Target, Comments: d.Comments, Files: d.Files, Err: d.Err,
+			Agent: d.Agent,
 		})
 	}
 
@@ -192,6 +194,7 @@ func (st *Store) Load(keys Keys) *Session {
 		s.deliveries = append(s.deliveries, Delivery{
 			At:     parseTime(sd.At),
 			Target: sd.Target, Comments: sd.Comments, Files: sd.Files, Err: sd.Err,
+			Agent: sd.Agent,
 		})
 	}
 	if len(s.comments) == 0 && len(s.deliveries) == 0 && len(s.viewed) == 0 {
