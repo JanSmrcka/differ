@@ -99,11 +99,16 @@ func (m Model) persistReview() Model {
 }
 
 // Close gives up this process's claim on the review file, so the next differ
-// in this repository can save.
+// in this repository can save, and cancels any wait on the agent still
+// outstanding, so quitting neither hangs on it nor leaves a herdr process
+// behind.
 //
 // Called by cmd once the program has returned, rather than on every path that
 // quits: there are five of those and a sixth would not be noticed. A claim
 // left behind by a kill is taken over by the next start.
 func (m Model) Close() {
+	if m.stopWaits != nil {
+		m.stopWaits()
+	}
 	m.reviewLock.Release()
 }

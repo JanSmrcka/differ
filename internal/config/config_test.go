@@ -116,3 +116,19 @@ func TestEditorSettings_RoundTripAndDefaults(t *testing.T) {
 		t.Errorf("round trip lost settings:\n got %+v\nwant %+v", got, want)
 	}
 }
+
+// The herdr choice has keys of its own and survives a round trip.
+func TestHerdrSettings_RoundTrip(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "config.json")
+	want := Default()
+	want.FeedbackTarget = "herdr"
+	want.HerdrTarget = "01729727-58c0-46f8-90ba-5cb2723b2a5a"
+	want.HerdrPane = "w2:p2"
+	if err := SaveTo(want, path); err != nil {
+		t.Fatal(err)
+	}
+	if got := LoadFrom(path); !reflect.DeepEqual(got, want) {
+		t.Errorf("round trip lost settings:\n got %+v\nwant %+v", got, want)
+	}
+}

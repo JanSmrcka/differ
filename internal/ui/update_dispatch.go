@@ -34,6 +34,8 @@ func (m Model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleReanchor(msg)
 	case feedbackSentMsg:
 		return m.handleFeedbackSent(msg)
+	case agentSettledMsg:
+		return m.handleAgentSettled(msg)
 	case editorPlanMsg:
 		return m.handleEditorPlan(msg)
 	case editorDoneMsg:

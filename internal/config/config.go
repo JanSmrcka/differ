@@ -42,11 +42,17 @@ type Config struct {
 	EditorProbeTimeoutMS int `json:"editor_probe_timeout_ms"`
 
 	// FeedbackTarget selects where review feedback is delivered:
-	// "clipboard" (default), "stdout" or "tmux".
+	// "clipboard" (default), "stdout", "tmux" or "herdr".
 	FeedbackTarget string `json:"feedback_target"`
 	// TmuxTarget is the tmux pane feedback is sent to when FeedbackTarget is
 	// "tmux". Empty means the last active pane in the current window.
 	TmuxTarget string `json:"tmux_target"`
+	// HerdrTarget is the herdr agent's session id feedback is sent to when
+	// FeedbackTarget is "herdr" — stable across pane moves, unlike a pane id.
+	HerdrTarget string `json:"herdr_target"`
+	// HerdrPane is the pane that agent was in when chosen, used when herdr
+	// no longer lists its session.
+	HerdrPane string `json:"herdr_pane"`
 }
 
 // Default returns the default configuration.

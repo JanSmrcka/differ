@@ -73,32 +73,51 @@ Nothing here touches git. Staging and committing stay explicit.
 
 ## Sending to an agent
 
-`A` lists the coding agents running in tmux and sends the review to the one
-you pick.
+`A` lists the coding agents running in tmux or [herdr](https://herdr.dev) and
+sends the review to the one you pick. Which of the two is detected from the
+environment, nothing to configure; inside neither, the review goes to the
+clipboard or stdout.
 
 ### Choosing the agent
 
 ```
  agent
 
+ filter…                                                                     4/4
+
 ▍ differ:2  claude  /Users/you/git/private/differ
   ELI-panda:2  claude  /Users/you/git/work/ELI-panda
   personal-web:2 %5  opencode  /Users/you/git/private/personal-web
   personal-web:2 %6  claude  /Users/you/git/private/personal-web
 
- j/k · enter chooses · esc cancels
+ type filters · ↑/↓ · enter chooses · esc closes
 ```
 
-The choice applies at once and is written to the config, so it survives a
-restart. The agent in differ's own tmux session sorts first, then one working
-in this repository; two in the same window are told apart by pane id.
+Typing narrows the list — by session or workspace, agent, state or title — and
+`esc` clears the filter before it closes the picker. The choice applies at
+once and is written to the config, so it survives a restart.
 
+**Under tmux** the agent in differ's own tmux session sorts first, then one
+working in this repository; two in the same window are told apart by pane id.
 Discovery walks each pane's **process tree** rather than reading its current
 command, so an agent started through `npx`, a shell function or a wrapper
 script is still found. It knows `claude`, `codex`, `gemini`, `copilot`,
 `opencode` and `aider`, including forms like `npx @anthropic-ai/claude-code`
 and `uvx --from aider-chat aider`. It never starts an agent, and it will not
-offer a one-shot such as `claude -p`.
+offer a one-shot such as `claude -p`. The review is **pasted, not submitted**:
+tmux cannot tell an agent from a shell, so differ never presses Enter.
+
+**Under herdr** herdr is asked (`herdr agent list`), so each row also shows
+the agent's state and what it says it is working on, and an agent that is
+`blocked`, `idle` or `done` sorts above one that is `working`. The review is
+**submitted** with `herdr agent prompt`, which refuses before sending anything
+if the agent is blocked on a question — the comments then stay pending and the
+bar says why. differ remembers the agent by its own session id, so moving its
+pane does not lose it.
+
+After a send under herdr, differ follows the agent: the comments and `H` say
+`agent working`, then `agent answered` (or `agent waiting for you`), and the
+bar points out a reviewed file that changed in the meantime.
 
 What the agent receives, per comment:
 
@@ -301,12 +320,15 @@ Config file: `~/.config/differ/config.json`
   "editor_probe_timeout_ms": 0,
   "split_diff": false,
   "feedback_target": "clipboard",
-  "tmux_target": ""
+  "tmux_target": "",
+  "herdr_target": "",
+  "herdr_pane": ""
 }
 ```
 
-`feedback_target` is where a review goes: `clipboard` (default), `stdout` or
-`tmux`. `A` sets it for you. The clipboard target shells out to `pbcopy` or
+`feedback_target` is where a review goes: `clipboard` (default), `stdout`,
+`tmux` or `herdr`. `A` sets it for you, along with `tmux_target` or the herdr
+agent's session id (`herdr_target`) and the pane it was in (`herdr_pane`). The clipboard target shells out to `pbcopy` or
 `wl-copy`/`xclip`/`xsel`, so it does the right thing over SSH.
 
 `commit_msg_cmd` generates a commit message from the staged diff when you

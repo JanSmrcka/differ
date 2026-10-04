@@ -109,6 +109,8 @@ var remedies = []remedy{
 	{"permission denied", "check the permissions on that path"},
 
 	// The tools other than git.
+	{"agent_blocked", "the agent is waiting on a question — answer it, then send again"},
+	{"agent_not_found", "that agent has gone — choose another with A"},
 	{"can't find pane", "the tmux target is gone — check tmux_target"},
 	{"can't find session", "the tmux target is gone — check tmux_target"},
 	{"no server running", "tmux is not running — check feedback_target"},

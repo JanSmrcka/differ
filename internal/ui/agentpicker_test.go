@@ -141,6 +141,10 @@ func TestAgentPicker_AnEmptyListSaysWhatItLookedFor(t *testing.T) {
 	tr.CommitFile("a.ts", "one\n", "first")
 	tr.Modify("a.ts", "two\n")
 	m := settle(t, liveModel(t, tr), tea.WindowSizeMsg{Width: 120, Height: 30})
+	// Whatever multiplexer the tests happen to run in, this one is tmux.
+	m.mux, _ = feedback.DetectMux(feedback.Env{Getenv: func(k string) string {
+		return map[string]string{"TMUX": "/tmp/tmux/default,1,0"}[k]
+	}})
 	m, _ = m.openAgentPicker()
 	m = withAgents(t, m) // scanned, found none
 
@@ -539,9 +543,10 @@ func TestAgentPicker_ScanningDoesNotLookLikeFoundNone(t *testing.T) {
 	}
 }
 
-// j and k move through the list. They are in the keymap and the bar
-// advertises them; making them do nothing left the suite green.
-func TestAgentPicker_JAndKMoveTheCursor(t *testing.T) {
+// The arrows and ^j/^k move through the list — j and k type into the
+// filter, as in the branch picker. They are in the bar; making them do
+// nothing left the suite green.
+func TestAgentPicker_ArrowsMoveTheCursor(t *testing.T) {
 	t.Parallel()
 	tr := testutil.NewRepo(t)
 	tr.CommitFile("a.ts", "one\n", "first")
@@ -550,25 +555,25 @@ func TestAgentPicker_JAndKMoveTheCursor(t *testing.T) {
 	m = withAgents(t, m, twoAgents()...)
 	m.agentsScanned, m.agentCursor = true, 0
 
-	down, _ := m.agentPickerKey("j")
+	down, _ := m.agentPickerKey("down")
 	if down.agentCursor != 1 {
-		t.Errorf("j left the cursor at %d, want 1", down.agentCursor)
+		t.Errorf("down left the cursor at %d, want 1", down.agentCursor)
 	}
-	up, _ := down.agentPickerKey("k")
+	up, _ := down.agentPickerKey("ctrl+k")
 	if up.agentCursor != 0 {
-		t.Errorf("k left the cursor at %d, want 0", up.agentCursor)
+		t.Errorf("^k left the cursor at %d, want 0", up.agentCursor)
 	}
 	// And it clamps rather than wrapping at both ends.
-	top, _ := m.agentPickerKey("k")
+	top, _ := m.agentPickerKey("ctrl+k")
 	if top.agentCursor != 0 {
-		t.Errorf("k at the top wrapped to %d", top.agentCursor)
+		t.Errorf("^k at the top wrapped to %d", top.agentCursor)
 	}
 	bottom := down
 	for range 5 {
-		bottom, _ = bottom.agentPickerKey("j")
+		bottom, _ = bottom.agentPickerKey("down")
 	}
 	if bottom.agentCursor != len(m.agents)-1 {
-		t.Errorf("j past the bottom left the cursor at %d, want %d",
+		t.Errorf("down past the bottom left the cursor at %d, want %d",
 			bottom.agentCursor, len(m.agents)-1)
 	}
 }
@@ -656,11 +661,178 @@ func TestAgentPicker_TheREADMEShowsWhatIsDrawn(t *testing.T) {
 	drawn, _ := splitANSI(m.View())
 	for _, line := range strings.Split(shown, "\n") {
 		row := strings.TrimSpace(line)
-		if row == "" || !strings.Contains(row, ":") || strings.HasPrefix(row, "j/k") {
+		// Every row, the filter and the closing line included: the closing
+		// line was skipped, and kept advertising j/k after they began typing
+		// into the filter.
+		if row == "" {
 			continue
 		}
 		if !strings.Contains(drawn, row) {
 			t.Errorf("the README shows a row differ does not draw:\n  %q\nin:\n%s", row, drawn)
 		}
+	}
+}
+
+func herdrAgents() []feedback.Agent {
+	return []feedback.Agent{
+		{Pane: "w2:p2", Tool: "claude", Dir: "/repo", Mux: "herdr", Workspace: "differ",
+			WorkspaceID: "w2", State: "idle", Title: "Fix the parser", SessionID: "sess-2"},
+		{Pane: "w1:p3", Tool: "codex", Dir: "/elsewhere", Mux: "herdr", Workspace: "panda",
+			WorkspaceID: "w1", State: "working", Title: "Refactor auth", SessionID: "sess-1"},
+	}
+}
+
+// A herdr agent is chosen by its session id, which survives a pane move, and
+// the review then goes to herdr — the picker does not know which multiplexer
+// it showed.
+func TestAgentPicker_ChoosingAHerdrAgentSendsToHerdr(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("a.ts", "one\n", "first")
+	tr.Modify("a.ts", "two\n")
+	m := settle(t, liveModel(t, tr), tea.WindowSizeMsg{Width: 120, Height: 30})
+	// Any executable will do: resolving the target only checks it exists.
+	m.feedbackEnv = feedback.Env{Getenv: func(k string) string {
+		if k == "HERDR_BIN_PATH" {
+			return "/bin/sh"
+		}
+		return ""
+	}}
+	m, _ = m.openAgentPicker()
+	m = withAgents(t, m, herdrAgents()...)
+
+	m, cmd := m.confirmAgent()
+	if m.targetErr != nil {
+		t.Fatalf("choosing failed: %v", m.targetErr)
+	}
+	if cmd == nil {
+		t.Error("the choice was not saved")
+	}
+	if m.cfg.FeedbackTarget != "herdr" || m.cfg.HerdrTarget != "sess-2" || m.cfg.HerdrPane != "w2:p2" {
+		t.Errorf("config = target %q session %q pane %q",
+			m.cfg.FeedbackTarget, m.cfg.HerdrTarget, m.cfg.HerdrPane)
+	}
+	if m.target == nil || m.target.Name() != "herdr" {
+		t.Errorf("target = %v, want herdr", m.target)
+	}
+	if !strings.Contains(m.statusMsg, "claude in differ") {
+		t.Errorf("bar = %q", m.statusMsg)
+	}
+}
+
+// Under herdr the picker shows what herdr knows and tmux cannot: the
+// workspace, the agent's state and what it says it is working on.
+func TestAgentPicker_ShowsAHerdrAgentsStateAndTitle(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("a.ts", "one\n", "first")
+	tr.Modify("a.ts", "two\n")
+	m := settle(t, liveModel(t, tr), tea.WindowSizeMsg{Width: 120, Height: 30})
+	m, _ = m.openAgentPicker()
+	m = withAgents(t, m, herdrAgents()...)
+
+	view := m.View()
+	for _, want := range []string{"differ", "claude", "idle", "Fix the parser", "panda", "working", "Refactor auth"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("the picker does not show %q:\n%s", want, view)
+		}
+	}
+}
+
+// The empty state says what was looked for, in the terms of the multiplexer
+// that was asked — without the picker knowing which one it was.
+func TestAgentPicker_AnEmptyListNamesTheMultiplexer(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("a.ts", "one\n", "first")
+	tr.Modify("a.ts", "two\n")
+	m := settle(t, liveModel(t, tr), tea.WindowSizeMsg{Width: 120, Height: 30})
+	m.mux, _ = feedback.DetectMux(feedback.Env{Getenv: func(k string) string {
+		return map[string]string{"HERDR_ENV": "1", "HERDR_PANE_ID": "w1:p1"}[k]
+	}})
+	m, _ = m.openAgentPicker()
+	m = withAgents(t, m)
+
+	view := m.View()
+	if !strings.Contains(view, "No agent is running in herdr") {
+		t.Errorf("the empty state does not name herdr:\n%s", view)
+	}
+}
+
+// Typing narrows the picker — by workspace, agent, state or title — the way
+// the branch picker narrows branches, and the selection survives it.
+func TestAgentPicker_TypingFilters(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("a.ts", "one\n", "first")
+	tr.Modify("a.ts", "two\n")
+	m := settle(t, liveModel(t, tr), tea.WindowSizeMsg{Width: 120, Height: 30})
+	m, _ = m.openAgentPicker()
+	m = withAgents(t, m, herdrAgents()...)
+	m, _ = m.agentPickerKey("down") // on panda / codex
+	if m.agents[m.agentCursor].Pane != "w1:p3" {
+		t.Fatalf("setup: cursor on %s", m.agents[m.agentCursor].Pane)
+	}
+
+	for _, k := range []string{"w", "o", "r", "k"} {
+		m, _ = m.agentPickerKey(k)
+	}
+	visible := m.visibleAgents()
+	if len(visible) != 1 || visible[0].Pane != "w1:p3" {
+		t.Fatalf("filter %q left %+v", m.agentFilter, visible)
+	}
+	if got := m.chosenAgent(); got == nil || got.Pane != "w1:p3" {
+		t.Errorf("selection lost under the filter: %+v", got)
+	}
+	view := m.View()
+	if strings.Contains(view, "Fix the parser") {
+		t.Errorf("a filtered-out agent is still drawn:\n%s", view)
+	}
+	if !strings.Contains(view, "work") {
+		t.Errorf("the filter is not shown:\n%s", view)
+	}
+
+	// Narrowing to the other agent moves the selection onto it; esc clears
+	// the filter first and closes only when there is none.
+	for range 4 {
+		m, _ = m.agentPickerKey("backspace")
+	}
+	for _, k := range []string{"p", "a", "r", "s"} {
+		m, _ = m.agentPickerKey(k)
+	}
+	if got := m.chosenAgent(); got == nil || got.Pane != "w2:p2" {
+		t.Errorf("filtering to the parser agent chose %+v", got)
+	}
+	m, _ = m.agentPickerKey("esc")
+	if !m.showAgents || m.agentFilter != "" {
+		t.Errorf("esc with a filter: open=%v filter=%q, want open and cleared", m.showAgents, m.agentFilter)
+	}
+	m, _ = m.agentPickerKey("esc")
+	if m.showAgents {
+		t.Error("esc with no filter did not close the picker")
+	}
+}
+
+// A filter typed while the scan is still out applies to the list when it
+// lands, and the cursor starts on the agent in use within what the filter
+// left — not at its index in the full list, which pointed past the end or at
+// a different agent and sent the review there.
+func TestAgentPicker_AFilterTypedDuringTheScanKeepsTheCursorRight(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("a.ts", "one\n", "first")
+	tr.Modify("a.ts", "two\n")
+	m := settle(t, liveModel(t, tr), tea.WindowSizeMsg{Width: 120, Height: 30})
+	m.cfg.HerdrTarget, m.cfg.HerdrPane = "sess-1", "w1:p3" // second in the full list
+	m, _ = m.openAgentPicker()
+	for _, k := range []string{"w", "o", "r", "k"} {
+		m, _ = m.agentPickerKey(k)
+	}
+	updated, _ := m.Update(agentsLoadedMsg{agents: herdrAgents()})
+	m = updated.(Model)
+
+	got := m.chosenAgent()
+	if got == nil || got.Pane != "w1:p3" {
+		t.Fatalf("cursor %d chose %+v, want w1:p3", m.agentCursor, got)
 	}
 }
