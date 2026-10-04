@@ -34,6 +34,7 @@ type Env struct {
 	XDGRuntimeDir string // $XDG_RUNTIME_DIR — where nvim listens on Linux
 	User          string // $USER — part of nvim's socket directory name
 	TermProgram   string // $TERM_PROGRAM — which multiplexer is innermost
+	Shell         string // $SHELL — what a new herdr pane runs by default
 
 	InHerdr        bool   // $HERDR_ENV is 1 and $HERDR_PANE_ID is set
 	HerdrPane      string // $HERDR_PANE_ID — differ's own pane
@@ -53,6 +54,7 @@ func NewEnv() Env {
 		XDGRuntimeDir: os.Getenv("XDG_RUNTIME_DIR"),
 		User:          currentUser(os.Getenv("USER")),
 		TermProgram:   os.Getenv("TERM_PROGRAM"),
+		Shell:         os.Getenv("SHELL"),
 
 		InHerdr:        os.Getenv("HERDR_ENV") == "1" && os.Getenv("HERDR_PANE_ID") != "",
 		HerdrPane:      os.Getenv("HERDR_PANE_ID"),

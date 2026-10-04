@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -246,6 +247,11 @@ func herdrCall(ctx context.Context, timeout time.Duration, socket, method string
 // says is in its foreground — an nvim suspended with ctrl-z still answers on
 // its socket while its pane shows a shell.
 func herdrReusePlan(ctx context.Context, cfg Config, req Request) (Plan, error) {
+	// Without the socket the pane cannot be focused. Finding that out after
+	// :drop would report a failure for a file that did open, on every press.
+	if req.Env.HerdrSocket == "" {
+		return Plan{}, errors.New("herdr did not say where its socket is (HERDR_SOCKET_PATH) — set editor_strategy to window")
+	}
 	bin := herdrBinOf(req.Env)
 	type answer struct {
 		out []byte
@@ -302,8 +308,12 @@ func herdrOpenPlan(cfg Config, req Request, c herdrCandidate) Plan {
 			if err := openInNvim(ctx, cfg.act(), c.Socket, req.abs(), req.Line); err != nil {
 				return err
 			}
-			return herdrCall(ctx, cfg.act(), req.Env.HerdrSocket, "pane.focus",
-				map[string]string{"pane_id": c.Pane.PaneID})
+			if err := herdrCall(ctx, cfg.act(), req.Env.HerdrSocket, "pane.focus",
+				map[string]string{"pane_id": c.Pane.PaneID}); err != nil {
+				return fmt.Errorf("opened %s in %s, but could not bring it to the front: %w",
+					req.File, label, err)
+			}
+			return nil
 		},
 	}
 }
@@ -440,11 +450,16 @@ func herdrPanePlan(cfg Config, argv []string, req Request) Plan {
 			}
 			pane := body.Result.Pane.PaneID
 			quote := shellQuote
-			if herdrShell(ctx, cfg, bin, pane) == "fish" {
+			if paneShell(ctx, cfg, bin, pane, req.Env.Shell) == "fish" {
 				quote = fishQuote
 			}
-			_, err = runHerdr(ctx, cfg.act(), bin, "pane", "run", pane, "exec "+quote(argv))
-			return err
+			if _, err := runHerdr(ctx, cfg.act(), bin, "pane", "run", pane, "exec "+quote(argv)); err != nil {
+				// --focus already moved the user there; an empty shell away
+				// from differ is no place to leave them with the error.
+				_, _ = runHerdr(ctx, cfg.act(), bin, "pane", "close", pane)
+				return err
+			}
+			return nil
 		},
 	}
 }
@@ -489,9 +504,41 @@ func herdrPaneSize(ctx context.Context, cfg Config, bin, pane string) (int, int)
 	return 0, 0
 }
 
-// herdrShell names the shell a pane runs — herdr's default_shell, else
-// $SHELL — by finding the process herdr calls the pane's shell. "" when herdr
-// will not say, which is quoted for POSIX.
+// shellPollEvery and shellPolls bound waiting for a new pane's shell to
+// appear in process-info: straight after the split it may not have started.
+const (
+	shellPollEvery = 50 * time.Millisecond
+	shellPolls     = 10
+)
+
+// paneShell names the shell a new pane runs, as a bare name: "fish", not
+// "-fish" (a login shell) or a path. It asks herdr, waiting briefly for the
+// shell to start, and otherwise assumes $SHELL — herdr's own default when
+// default_shell is unset.
+func paneShell(ctx context.Context, cfg Config, bin, pane, fallback string) string {
+	name := ""
+	for i := 0; i < shellPolls && name == ""; i++ {
+		if i > 0 {
+			select {
+			case <-ctx.Done():
+				return ""
+			case <-time.After(shellPollEvery):
+			}
+		}
+		name = herdrShell(ctx, cfg, bin, pane)
+		// Between fork and exec the shell's process is still herdr's.
+		if filepath.Base(name) == filepath.Base(bin) {
+			name = ""
+		}
+	}
+	if name == "" {
+		name = fallback
+	}
+	return filepath.Base(strings.TrimPrefix(name, "-"))
+}
+
+// herdrShell is the name of the process herdr calls the pane's shell, or ""
+// when it is not running yet or herdr will not say.
 func herdrShell(ctx context.Context, cfg Config, bin, pane string) string {
 	out, err := runHerdr(ctx, cfg.act(), bin, "pane", "process-info", "--pane", pane)
 	if err != nil {

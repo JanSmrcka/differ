@@ -218,6 +218,27 @@ func TestHerdrCall_NoSocketIsAnError(t *testing.T) {
 // in brackets.
 func fakeHerdr(t *testing.T, fg string) (bin, log string) {
 	t.Helper()
+	return fakeHerdrWith(t, herdrFake{fg: fg})
+}
+
+// herdrFake shapes fakeHerdr. An empty fg is a pane whose shell has not
+// started: process-info lists nothing yet.
+type herdrFake struct {
+	fg       string
+	runFails bool
+}
+
+func fakeHerdrWith(t *testing.T, f herdrFake) (bin, log string) {
+	t.Helper()
+	fg := f.fg
+	procs := `[{"argv0":"` + fg + `","name":"` + fg + `","pid":1}]`
+	if fg == "" {
+		procs = "[]"
+	}
+	run := `echo '{"id":"cli:pane:run","result":{"type":"ok"}}'`
+	if f.runFails {
+		run = `echo '{"error":{"code":"pane_not_found","message":"pane w3:p7 not found"}}' >&2; exit 1`
+	}
 	dir := t.TempDir()
 	log = filepath.Join(dir, "calls")
 	fixtures, err := filepath.Abs("testdata")
@@ -228,10 +249,11 @@ func fakeHerdr(t *testing.T, fg string) (bin, log string) {
 case "$1 $2" in
 "pane split") echo '{"id":"cli:pane:split","result":{"type":"pane_info","pane":{"pane_id":"w3:p7","tab_id":"w3:t1","workspace_id":"w3"}}}' ;;
 "pane layout") echo '{"id":"cli:pane:layout","result":{"layout":{"panes":[{"pane_id":"w3:p1","rect":{"height":45,"width":140,"x":0,"y":0}}]},"type":"pane_layout"}}' ;;
-"pane run") echo '{"id":"cli:pane:run","result":{"type":"ok"}}' ;;
+"pane run") `+run+` ;;
+"pane close") echo '{"id":"cli:pane:close","result":{"type":"ok"}}' ;;
 "pane list") cat '`+fixtures+`/herdr_pane_list.json' ;;
 "workspace list") cat '`+fixtures+`/herdr_workspace_list.json' ;;
-"pane process-info") echo '{"id":"cli:pane:process_info","result":{"process_info":{"foreground_processes":[{"argv0":"`+fg+`","name":"`+fg+`","pid":1}],"pane_id":"'"$4"'","shell_pid":1},"type":"pane_process_info"}}' ;;
+"pane process-info") echo '{"id":"cli:pane:process_info","result":{"process_info":{"foreground_processes":`+procs+`,"pane_id":"'"$4"'","shell_pid":1},"type":"pane_process_info"}}' ;;
 *) echo '{"error":{"code":"unexpected","message":"unexpected call"}}' >&2; exit 1 ;;
 esac`)
 	return bin, log
@@ -313,6 +335,8 @@ func TestResolve_HerdrWindowSplitsDiffersPane(t *testing.T) {
 	}{
 		{"zsh", shellQuote},
 		{"fish", fishQuote},
+		// herdr starts login shells on macOS, which name themselves -fish.
+		{"-fish", fishQuote},
 	}
 	for _, c := range cases {
 		t.Run(c.shell, func(t *testing.T) {
@@ -407,5 +431,87 @@ func TestResolve_AHerdrEditorCmdRunsVerbatim(t *testing.T) {
 	}
 	if plan.Strategy != StrategyCustom {
 		t.Errorf("Strategy = %q, want %q", plan.Strategy, StrategyCustom)
+	}
+}
+
+// A shell that has not started yet is not in process-info. Waiting for it is
+// bounded, and then the pane is assumed to run $SHELL — herdr's own default.
+func TestResolve_HerdrPaneFallsBackToShellWhenThePaneSaysNothing(t *testing.T) {
+	t.Parallel()
+	// Nothing listed yet, and herdr's own child between fork and exec.
+	for _, fg := range []string{"", "herdr"} {
+		t.Run("fg="+fg, func(t *testing.T) {
+			t.Parallel()
+			herdrPaneFallsBackToShell(t, fg)
+		})
+	}
+}
+
+func herdrPaneFallsBackToShell(t *testing.T, fg string) {
+	t.Helper()
+	repo := repoWith(t, "it's.go")
+	bin, log := fakeHerdrWith(t, herdrFake{fg: fg})
+	ed := stubEditor(t, "nvim")
+	req := Request{File: "it's.go", Repo: repo, Env: Env{
+		Editor: ed, Shell: "/opt/homebrew/bin/fish",
+		InHerdr: true, HerdrPane: "w3:p1", HerdrWorkspace: "w3", HerdrBin: bin,
+	}}
+
+	plan, err := Resolve(context.Background(), Config{Strategy: "window"}, req)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if err := runPlan(t, context.Background(), plan); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	calls, _ := os.ReadFile(log)
+	want := "[pane][run][w3:p7][exec " + fishQuote([]string{ed, filepath.Join(repo, "it's.go")}) + "]"
+	if !strings.Contains(string(calls), want) {
+		t.Errorf("herdr calls:\n%s\nwant a line:\n%s", calls, want)
+	}
+}
+
+// split --focus moves the user into the new pane. If the editor then cannot
+// be started there, leaving it would strand them in an empty shell, away
+// from differ, while the bar reports the failure.
+func TestResolve_HerdrPaneIsClosedWhenTheEditorCannotStart(t *testing.T) {
+	t.Parallel()
+	repo := repoWith(t, "a.go")
+	bin, log := fakeHerdrWith(t, herdrFake{fg: "zsh", runFails: true})
+	req := Request{File: "a.go", Repo: repo, Env: Env{
+		Editor: stubEditor(t, "nvim"), InHerdr: true, HerdrPane: "w3:p1", HerdrWorkspace: "w3", HerdrBin: bin,
+	}}
+
+	plan, err := Resolve(context.Background(), Config{Strategy: "window"}, req)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if err := runPlan(t, context.Background(), plan); err == nil {
+		t.Fatal("want the failed pane run reported")
+	}
+	calls, _ := os.ReadFile(log)
+	if !strings.Contains(string(calls), "[pane][close][w3:p7]") {
+		t.Errorf("herdr calls:\n%s\nwant the new pane closed", calls)
+	}
+}
+
+// Without the socket the pane cannot be focused. Reuse must say so before it
+// opens anything — opening and then failing reports an error for a file that
+// did open, every time e is pressed — so auto falls through to a new pane.
+func TestResolve_HerdrReuseNeedsTheSocket(t *testing.T) {
+	t.Parallel()
+	req, _, _ := herdrReuseSetup(t, "nvim")
+	req.Env.HerdrSocket = ""
+
+	if _, err := Resolve(context.Background(), Config{Strategy: "reuse"}, req); err == nil ||
+		!strings.Contains(err.Error(), "HERDR_SOCKET_PATH") {
+		t.Errorf("reuse err = %v, want it to name HERDR_SOCKET_PATH", err)
+	}
+	plan, err := Resolve(context.Background(), Config{}, req)
+	if err != nil {
+		t.Fatalf("auto: %v", err)
+	}
+	if plan.Strategy != StrategyWindow {
+		t.Errorf("auto Strategy = %q, want window", plan.Strategy)
 	}
 }
