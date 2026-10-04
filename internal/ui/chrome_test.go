@@ -39,15 +39,22 @@ func TestChrome_HeaderNamesTheToolAndBranch(t *testing.T) {
 	}
 }
 
-func TestChrome_HeaderSummarisesTheChangeset(t *testing.T) {
+// The changeset is summarised where it is listed: the file list's own header
+// row. It used to be in the header bar as well, and a screen that states the
+// same count twice reads as chrome rather than as information.
+func TestChrome_TheFileListHeaderSummarisesTheChangeset(t *testing.T) {
 	m := chromeModel(t, 120, 30)
-	header := strings.Split(m.View(), "\n")[0]
-
-	if !strings.Contains(header, "4 files") {
-		t.Errorf("header should count the files: %q", header)
+	label := strings.Split(stripANSI(m.View()), "\n")[2]
+	left, _, ok := strings.Cut(label, verticalDivider)
+	if !ok {
+		t.Fatalf("no divider in the label row: %q", label)
 	}
-	if !strings.Contains(header, "staged") {
-		t.Errorf("header should report staged state: %q", header)
+
+	if !strings.Contains(left, "4") {
+		t.Errorf("the file list should count the files: %q", left)
+	}
+	if !strings.Contains(left, "1 staged") {
+		t.Errorf("the file list should report staged state: %q", left)
 	}
 }
 

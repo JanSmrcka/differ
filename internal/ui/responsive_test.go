@@ -84,7 +84,7 @@ func TestResponsive_ANarrowTerminalCollapsesToOnePanel(t *testing.T) {
 
 	// In the file list, that one panel is the file list.
 	m.mode = modeFileList
-	if got := stripANSI(m.View()); !strings.Contains(got, "CHANGED FILES") {
+	if got := stripANSI(m.View()); !strings.Contains(got, "Files") {
 		t.Errorf("collapsed to the wrong panel in file-list mode:\n%s", got)
 	}
 	if strings.Contains(stripANSI(m.View()), verticalDivider) {
@@ -93,7 +93,7 @@ func TestResponsive_ANarrowTerminalCollapsesToOnePanel(t *testing.T) {
 
 	// Reading a diff, it is the diff.
 	m.mode = modeDiff
-	if got := stripANSI(m.View()); strings.Contains(got, "CHANGED FILES") {
+	if got := stripANSI(m.View()); strings.Contains(got, "Files") {
 		t.Errorf("collapsed to the wrong panel in diff mode:\n%s", got)
 	}
 
