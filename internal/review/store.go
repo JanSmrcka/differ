@@ -153,7 +153,7 @@ func (st *Store) Save(s *Session, keys Keys) error {
 		out.History = append(out.History, storedDelivery{
 			At:     d.At.Format(time.RFC3339Nano),
 			Target: d.Target, Comments: d.Comments, Files: d.Files, Err: d.Err,
-			Agent: d.Agent,
+			Agent: settledAgent(d.Agent),
 		})
 	}
 
@@ -165,6 +165,16 @@ func (st *Store) Save(s *Session, keys Keys) error {
 		return err
 	}
 	return writeFileAtomically(st.path, data)
+}
+
+// settledAgent is the agent state worth writing out. "working" is true only
+// while a wait is following the agent, and no wait survives the process:
+// written out, it said "agent working" in H on every later start.
+func settledAgent(state string) string {
+	if state == "working" {
+		return ""
+	}
+	return state
 }
 
 // Load reads the session back, or nil when there is nothing to restore.

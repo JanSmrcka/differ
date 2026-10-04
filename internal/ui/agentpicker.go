@@ -118,8 +118,10 @@ func (m Model) handleAgentsLoaded(msg agentsLoadedMsg) (tea.Model, tea.Cmd) {
 	}
 	m.agents, m.agentsScanned = msg.agents, true
 	m.agentCursor = 0
+	// Within what the filter leaves: it can be typed while the scan is out,
+	// and the cursor indexes visibleAgents, not m.agents.
 	inUse := feedbackConfigOf(m.cfg, m.feedbackEnv)
-	for i, a := range m.agents {
+	for i, a := range m.visibleAgents() {
 		if a.Matches(inUse) {
 			m.agentCursor = i
 			break

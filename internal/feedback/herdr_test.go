@@ -184,6 +184,39 @@ fi
 	if err := target.Send(context.Background(), "x"); err != nil {
 		t.Errorf("stalled prompt reported as failed: %v", err)
 	}
+	// But nothing was seen working, so there is nothing to wait for: the
+	// agent never left idle, and a wait would match that at once and
+	// report an answer nobody gave.
+	if seen := target.(Watcher).Seen(); seen != "" {
+		t.Errorf("Seen after a stall = %q, want nothing", seen)
+	}
+}
+
+// What the prompt's --wait matched is what the send saw: working, or blocked
+// when the agent went straight to a question.
+func TestHerdrTarget_SeenIsWhatThePromptMatched(t *testing.T) {
+	bin, _ := fakeHerdr(t, `if [ "$1 $2" = "agent prompt" ]; then
+  echo '{"id":"cli:agent:prompt","result":{"agent":{"agent_status":"blocked","pane_id":"w1:p3"},"type":"agent_info"}}'; exit 0
+fi
+`)
+	target := newHerdrTargetFor(t, bin, Config{HerdrPane: "w1:p3"})
+	if err := target.Send(context.Background(), "x"); err != nil {
+		t.Fatal(err)
+	}
+	if seen := target.(Watcher).Seen(); seen != "blocked" {
+		t.Errorf("Seen = %q, want blocked", seen)
+	}
+
+	// Output it cannot read still means --wait matched working or blocked;
+	// working is the one that needs following.
+	bin, _ = fakeHerdr(t, "")
+	target = newHerdrTargetFor(t, bin, Config{HerdrPane: "w1:p3"})
+	if err := target.Send(context.Background(), "x"); err != nil {
+		t.Fatal(err)
+	}
+	if seen := target.(Watcher).Seen(); seen != "working" {
+		t.Errorf("Seen with unreadable output = %q, want working", seen)
+	}
 }
 
 // After a send, the target can wait for the agent to finish with it.

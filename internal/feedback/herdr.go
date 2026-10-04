@@ -214,8 +214,9 @@ type herdrTarget struct {
 	fallbackPane string
 
 	mu sync.Mutex
-	// pane is where the last Send went, which is what Wait watches.
-	pane string
+	// pane is where the last Send went, which is what Wait watches, and
+	// seen what that send saw the agent reach.
+	pane, seen string
 }
 
 func newHerdrTarget(cfg Config) (Target, error) {
@@ -245,23 +246,46 @@ func (t *herdrTarget) Send(ctx context.Context, payload string) error {
 	if pane == t.self {
 		return fmt.Errorf("herdr pane %s is differ's own — choose the agent with %s", pane, "A")
 	}
-	_, err = runHerdr(ctx, t.bin, "agent", "prompt", pane, payload,
+	out, err := runHerdr(ctx, t.bin, "agent", "prompt", pane, payload,
 		"--wait", "--until", "working", "--until", "blocked",
 		"--timeout", strconv.Itoa(promptTimeoutMS))
+	seen := seenState(out)
 	var he *HerdrError
 	if errors.As(err, &he) && he.Code == "agent_prompt_stalled" {
 		// Submitted, and herdr did not see the agent start. The text is in
 		// the agent's hands: reporting a failure would invite a retry, and
-		// a retry would send the review twice.
-		err = nil
+		// a retry would send the review twice. Nothing was seen, though, so
+		// there is nothing to follow.
+		err, seen = nil, ""
 	}
 	if err != nil {
 		return err
 	}
 	t.mu.Lock()
-	t.pane = pane
+	t.pane, t.seen = pane, seen
 	t.mu.Unlock()
 	return nil
+}
+
+// seenState reads which state `agent prompt --wait` matched. Success means it
+// matched working or blocked; output it cannot read counts as working, the
+// one that needs following.
+func seenState(out []byte) string {
+	var body struct {
+		Result struct {
+			Agent herdrAgent `json:"agent"`
+		} `json:"result"`
+	}
+	if json.Unmarshal(out, &body) == nil && body.Result.Agent.Status == "blocked" {
+		return "blocked"
+	}
+	return "working"
+}
+
+func (t *herdrTarget) Seen() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.seen
 }
 
 // resolvePane finds the pane the chosen agent is in now: by its session id

@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -14,10 +15,14 @@ import (
 // herdr target can.
 type watchingFake struct {
 	*feedback.Fake
+	// seen is what the send saw the agent reach; "" means stalled.
+	seen  string
 	state string
 	// block, when set, makes Wait wait for cancellation.
 	block bool
 }
+
+func (w *watchingFake) Seen() string { return w.seen }
 
 func (w *watchingFake) Wait(ctx context.Context) (string, error) {
 	if w.block {
@@ -33,7 +38,7 @@ func (w *watchingFake) Wait(ctx context.Context) (string, error) {
 func TestAgentWait_ASentReviewFollowsTheAgent(t *testing.T) {
 	t.Parallel()
 	m, fake := sendModel(t)
-	m.target = &watchingFake{Fake: fake, state: "done"}
+	m.target = &watchingFake{Fake: fake, seen: "working", state: "done"}
 
 	updated, cmd := m.sendAllPending()
 	m = updated.(Model)
@@ -75,7 +80,7 @@ func TestAgentWait_ASentReviewFollowsTheAgent(t *testing.T) {
 func TestAgentWait_ABlockedAgentIsWaitingForYou(t *testing.T) {
 	t.Parallel()
 	m, fake := sendModel(t)
-	m.target = &watchingFake{Fake: fake, state: "blocked"}
+	m.target = &watchingFake{Fake: fake, seen: "working", state: "blocked"}
 	updated, cmd := m.sendAllPending()
 	m = updated.(Model)
 	updated, wait := m.Update(cmd())
@@ -146,7 +151,7 @@ func TestAgentWait_AGoneHerdrAgentReopensThePicker(t *testing.T) {
 func TestAgentWait_CloseCancelsTheWait(t *testing.T) {
 	t.Parallel()
 	m, fake := sendModel(t)
-	m.target = &watchingFake{Fake: fake, block: true}
+	m.target = &watchingFake{Fake: fake, seen: "working", block: true}
 	updated, cmd := m.sendAllPending()
 	m = updated.(Model)
 	updated, wait := m.Update(cmd())
@@ -162,5 +167,64 @@ func TestAgentWait_CloseCancelsTheWait(t *testing.T) {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("the wait outlived Close")
+	}
+}
+
+// A prompt herdr submitted without seeing the agent start is delivered, but
+// there is nothing to follow: no "working", and no wait that would match the
+// idle agent at once and call it an answer.
+func TestAgentWait_AStalledPromptStartsNoWait(t *testing.T) {
+	t.Parallel()
+	m, fake := sendModel(t)
+	m.target = &watchingFake{Fake: fake, seen: "", state: "idle"}
+	updated, cmd := m.sendAllPending()
+	m = updated.(Model)
+	updated, wait := m.Update(cmd())
+	m = updated.(Model)
+	if wait != nil {
+		t.Error("a wait was started after a stalled prompt")
+	}
+	if got := m.session.History()[0].Agent; got != "" {
+		t.Errorf("agent state = %q, want nothing known", got)
+	}
+}
+
+// An agent that went straight to a question is waiting for the user now;
+// that is the answer, and there is nothing further to wait for.
+func TestAgentWait_AnAgentSeenBlockedIsNotWaitedOn(t *testing.T) {
+	t.Parallel()
+	m, fake := sendModel(t)
+	m.target = &watchingFake{Fake: fake, seen: "blocked"}
+	updated, cmd := m.sendAllPending()
+	m = updated.(Model)
+	updated, wait := m.Update(cmd())
+	m = updated.(Model)
+	if wait != nil {
+		t.Error("a wait was started on an agent already blocked")
+	}
+	if got := m.session.History()[0].Agent; got != "blocked" {
+		t.Errorf("agent state = %q, want blocked", got)
+	}
+}
+
+// A wait that fails — timed out, herdr gone — no longer knows the agent is
+// working, so it stops saying so rather than saying it indefinitely.
+func TestAgentWait_AFailedWaitForgetsWorking(t *testing.T) {
+	t.Parallel()
+	m, fake := sendModel(t)
+	m.target = &watchingFake{Fake: fake, seen: "working"}
+	updated, cmd := m.sendAllPending()
+	m = updated.(Model)
+	updated, _ = m.Update(cmd())
+	m = updated.(Model)
+	before := m.statusMsg
+
+	updated, _ = m.Update(agentSettledMsg{delivery: 0, err: errors.New("herdr: timed out waiting for agent status (timeout)")})
+	m = updated.(Model)
+	if got := m.session.History()[0].Agent; got != "" {
+		t.Errorf("agent state after a failed wait = %q, want nothing known", got)
+	}
+	if m.statusMsg != before {
+		t.Errorf("a failed wait took the bar: %q", m.statusMsg)
 	}
 }

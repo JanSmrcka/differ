@@ -122,9 +122,13 @@ reopens the picker like tmux's "can't find pane"; `agent_prompt_stalled` counts
 as delivered, since retrying would send twice). A herdr choice is stored as the
 agent's *session id* plus the pane as fallback, and resolved to a pane through
 `agent list` at send time, because herdr does not accept a session id as a
-target. A target that can also implement `feedback.Watcher` (only herdr) gets a
-`agent wait` started after a successful send; its answer lands on the
-`review.Delivery` and the comments as `Agent`, and `Model.Close` cancels it.
+target. A target that can also implement `feedback.Watcher` (only herdr) gets an
+`agent wait` started after a successful send — but only when `Seen()` says the
+send saw the agent `working`: after a stall the agent never left idle, and a
+wait would match that at once and report an answer nobody gave. Its answer
+lands on the `review.Delivery` and the comments as `Agent`, and `Model.Close`
+cancels it. `working` is never written to `review.json`: no wait survives the
+process, so on disk it would claim forever that the agent is working.
 
 `internal/editor` must not import `internal/ui` either. It both decides how to
 open a file and does it — the one exception is handing the terminal to a child

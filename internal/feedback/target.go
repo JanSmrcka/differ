@@ -53,6 +53,11 @@ func Available() []string { return []string{"clipboard", "stdout", "tmux", "herd
 // finished with it: idle, done or blocked. Asserted like Flusher, because
 // only herdr can be asked — tmux cannot tell an agent from a shell.
 type Watcher interface {
+	// Seen is the state the last successful Send saw the agent reach:
+	// "working", "blocked", or "" when it saw nothing — a stalled prompt,
+	// which was delivered but left the agent idle, so a Wait would match
+	// that at once and report an answer nobody gave.
+	Seen() string
 	Wait(ctx context.Context) (string, error)
 }
 

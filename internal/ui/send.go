@@ -136,7 +136,11 @@ func (m Model) send(cs []review.Comment) (tea.Model, tea.Cmd) {
 	m.statusMsg = fmt.Sprintf("sending %s…", plural(len(cs), "comment"))
 	return m, func() tea.Msg {
 		err := target.Send(context.Background(), payload)
-		return feedbackSentMsg{ids: ids, target: target.Name(), err: err, watcher: watcher}
+		seen := ""
+		if watcher != nil && err == nil {
+			seen = watcher.Seen()
+		}
+		return feedbackSentMsg{ids: ids, target: target.Name(), err: err, watcher: watcher, seen: seen}
 	}
 }
 
@@ -168,12 +172,16 @@ func (m Model) handleFeedbackSent(msg feedbackSentMsg) (tea.Model, tea.Cmd) {
 	}
 	m.statusMsg = fmt.Sprintf("sent %s to %s", plural(len(msg.ids), "comment"), msg.target)
 	var wait tea.Cmd
-	if msg.watcher != nil && m.session != nil && delivery >= 0 {
-		// The target saw the agent pick the review up before reporting
-		// success, so it is working on it now — and the wait starts from
-		// there, not from idle, because herdr does not track turns.
-		m.session.NoteAgent(delivery, "working")
-		wait = m.waitForAgentCmd(msg.watcher, delivery)
+	if msg.watcher != nil && msg.seen != "" && m.session != nil && delivery >= 0 {
+		// What the send saw is what is known: blocked is already the answer;
+		// working is followed, and the wait starts from there rather than
+		// from idle, because herdr does not track turns. A stall saw
+		// nothing and starts nothing — a wait would match the idle agent at
+		// once and call it an answer.
+		m.session.NoteAgent(delivery, msg.seen)
+		if msg.seen == "working" {
+			wait = m.waitForAgentCmd(msg.watcher, delivery)
+		}
 	}
 	// After the status message, not before: if the write fails, what it has
 	// to say is more important than the send having worked, and fail() would
@@ -198,12 +206,18 @@ func (m Model) waitForAgentCmd(w feedback.Watcher, delivery int) tea.Cmd {
 
 // handleAgentSettled records what the agent did with a delivery and says so.
 //
-// A wait that failed — cancelled at quit, timed out, herdr gone — is left
-// quiet: the review arrived, which was the part that mattered, and a failure
-// to watch it is not worth taking the bar from whatever is there.
+// A wait that failed — timed out, herdr gone — is left quiet: the review
+// arrived, which was the part that mattered, and a failure to watch it is not
+// worth taking the bar from whatever is there. It does stop claiming the
+// agent is working, which it no longer knows.
 func (m Model) handleAgentSettled(msg agentSettledMsg) (tea.Model, tea.Cmd) {
-	if msg.err != nil || m.session == nil {
+	if m.session == nil {
 		return m, nil
+	}
+	if msg.err != nil {
+		m.session.NoteAgent(msg.delivery, "")
+		m = m.persistReview()
+		return m.refreshCommentMarks(), nil
 	}
 	m.session.NoteAgent(msg.delivery, msg.state)
 	m.statusMsg = "the " + agentWord(msg.state)

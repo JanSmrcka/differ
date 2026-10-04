@@ -444,3 +444,25 @@ func TestStore_DeliveryKeepsTheAgentsState(t *testing.T) {
 		t.Errorf("agent state = %q, want done", got)
 	}
 }
+
+// "working" is only true while a wait is following the agent, and no wait
+// survives the process. Written out, it said "agent working" in H forever
+// after a quit or a timed-out wait; it is not written, so it comes back as
+// nothing known.
+func TestStore_WorkingIsNotWrittenOut(t *testing.T) {
+	t.Parallel()
+	st := NewStore(t.TempDir())
+	s := NewSession()
+	i := s.RecordDelivery(Delivery{At: time.Now(), Target: "herdr", Comments: []string{"c1"}})
+	s.NoteAgent(i, "working")
+	if err := st.Save(s, fixedKeys(nil)); err != nil {
+		t.Fatal(err)
+	}
+	back := st.Load(fixedKeys(nil))
+	if back == nil {
+		t.Fatal("nothing restored")
+	}
+	if got := back.History()[0].Agent; got != "" {
+		t.Errorf("restored agent state = %q, want nothing known", got)
+	}
+}

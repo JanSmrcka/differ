@@ -124,8 +124,11 @@ type feedbackSentMsg struct {
 	ids    []string
 	target string
 	err    error
-	// watcher is the target, when it can say what the agent does next.
+	// watcher is the target, when it can say what the agent does next, and
+	// seen what the send saw the agent reach — read in the same command as
+	// the send, so a later send cannot change it underneath.
 	watcher feedback.Watcher
+	seen    string
 }
 
 // agentSettledMsg reports that the agent a delivery went to has finished

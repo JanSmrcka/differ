@@ -812,3 +812,27 @@ func TestAgentPicker_TypingFilters(t *testing.T) {
 		t.Error("esc with no filter did not close the picker")
 	}
 }
+
+// A filter typed while the scan is still out applies to the list when it
+// lands, and the cursor starts on the agent in use within what the filter
+// left — not at its index in the full list, which pointed past the end or at
+// a different agent and sent the review there.
+func TestAgentPicker_AFilterTypedDuringTheScanKeepsTheCursorRight(t *testing.T) {
+	t.Parallel()
+	tr := testutil.NewRepo(t)
+	tr.CommitFile("a.ts", "one\n", "first")
+	tr.Modify("a.ts", "two\n")
+	m := settle(t, liveModel(t, tr), tea.WindowSizeMsg{Width: 120, Height: 30})
+	m.cfg.HerdrTarget, m.cfg.HerdrPane = "sess-1", "w1:p3" // second in the full list
+	m, _ = m.openAgentPicker()
+	for _, k := range []string{"w", "o", "r", "k"} {
+		m, _ = m.agentPickerKey(k)
+	}
+	updated, _ := m.Update(agentsLoadedMsg{agents: herdrAgents()})
+	m = updated.(Model)
+
+	got := m.chosenAgent()
+	if got == nil || got.Pane != "w1:p3" {
+		t.Fatalf("cursor %d chose %+v, want w1:p3", m.agentCursor, got)
+	}
+}
