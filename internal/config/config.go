@@ -15,11 +15,12 @@ type Config struct {
 	SplitDiff       bool   `json:"split_diff"`
 	EditorCmd       string `json:"editor_cmd"`
 	// EditorStrategy picks how `e` opens a file:
-	//   "" / "auto" — reuse an editor already open in this tmux session, else
-	//                 a new tmux window, else take over differ's terminal
+	//   "" / "auto" — reuse an editor already open in this tmux session or
+	//                 herdr workspace, else a new tmux window or herdr pane,
+	//                 else take over differ's terminal
 	//   "reuse"     — only reuse; report a problem when there is nothing to
 	//                 reuse
-	//   "window"    — always a new tmux window
+	//   "window"    — always a new tmux window, or a new pane in herdr
 	//   "inline"    — always take over differ's terminal and resume after
 	//   "detach"    — run the editor in the background; for GUI editors that
 	//                 need no terminal and reuse their own window
@@ -28,14 +29,15 @@ type Config struct {
 	// means nvim, vim, vi and view.
 	EditorPanes []string `json:"editor_panes"`
 	// EditorTarget scopes reuse: "" or "session" is differ's own tmux
-	// session, "any" is every session, anything else names one.
+	// session or herdr workspace, "any" is everywhere, anything else names a session or
+	// workspace (by label or id).
 	EditorTarget string `json:"editor_target"`
 	// EditorLineArgs replaces how the file and line reach the editor, as a
 	// whitespace-separated template over {file} and {line} — for an editor
 	// differ does not know, such as "{file}:{line}". Empty means the
 	// built-in table.
 	EditorLineArgs string `json:"editor_line_args"`
-	// EditorTimeoutMS bounds a tmux command or an editor open. 0 means 5000.
+	// EditorTimeoutMS bounds a tmux or herdr command or an editor open. 0 means 5000.
 	EditorTimeoutMS int `json:"editor_timeout_ms"`
 	// EditorProbeTimeoutMS bounds asking a running nvim a question. 0 means
 	// 1000. Raise it over a slow SSH hop.

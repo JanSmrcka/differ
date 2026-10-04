@@ -355,16 +355,18 @@ Where it opens — `editor_strategy`:
 
 | value | what happens |
 |---|---|
-| `auto` (default) | reuse an nvim already open in this tmux session → else a new tmux window → else take over differ's terminal |
+| `auto` (default) | reuse an nvim already open in this tmux session or herdr workspace → else a new tmux window or a pane beside differ in herdr → else take over differ's terminal |
 | `reuse` | only reuse; say so when there is nothing to reuse |
-| `window` | always a new tmux window |
+| `window` | always a new tmux window (a new pane in herdr) |
 | `inline` | take over differ's terminal, resume when the editor exits |
 | `detach` | run it in the background and carry on |
 
-Outside tmux, `reuse` and `window` are refused with a message rather than
-silently downgraded. Reuse needs nvim's RPC socket and sends `:drop`, so
-nothing unsaved is ever at risk. `editor_panes` and `editor_target` adjust
-which panes it will consider and how far it reaches.
+Outside tmux and herdr, `reuse` and `window` are refused with a message
+rather than silently downgraded. Reuse needs nvim's RPC socket and sends
+`:drop`, so nothing unsaved is ever at risk, then focuses that pane. In herdr
+it never leaves differ's workspace unless `editor_target` says so; the new
+pane is quoted for the shell it runs, fish included. `editor_panes` and `editor_target` (`any`, or a session /
+workspace name) adjust which panes it will consider and how far it reaches.
 
 GUI editors reuse their own window already, so give them `detach`:
 

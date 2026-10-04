@@ -340,7 +340,10 @@ func TestResolve_StrategySelection(t *testing.T) {
 		name     string
 		strategy string
 		inTmux   bool
+		inHerdr  bool
+		termProg string
 		want     Strategy
+		wantDesc string
 		wantErr  string
 	}{
 		{name: "auto outside tmux is inline", want: StrategyInline},
@@ -348,6 +351,19 @@ func TestResolve_StrategySelection(t *testing.T) {
 		{name: "explicit inline wins even inside tmux", strategy: "inline", inTmux: true, want: StrategyInline},
 		{name: "window inside tmux", strategy: "window", inTmux: true, want: StrategyWindow},
 		{name: "auto inside tmux with nothing to reuse falls to window", inTmux: true, want: StrategyWindow},
+		{name: "window inside herdr is a new pane", strategy: "window", inHerdr: true, want: StrategyWindow, wantDesc: "new pane"},
+		{name: "auto inside herdr with nothing to reuse falls to a new pane", inHerdr: true, want: StrategyWindow, wantDesc: "new pane"},
+		{name: "explicit inline wins inside herdr", strategy: "inline", inHerdr: true, want: StrategyInline},
+		{
+			// One inside the other: the innermost owns differ's pane, and
+			// TERM_PROGRAM is set by whichever that is.
+			name: "tmux inside herdr is tmux", strategy: "window", inTmux: true, inHerdr: true,
+			termProg: "tmux", want: StrategyWindow, wantDesc: "new window",
+		},
+		{
+			name: "herdr inside tmux is herdr", strategy: "window", inTmux: true, inHerdr: true,
+			termProg: "herdr", want: StrategyWindow, wantDesc: "new pane",
+		},
 		{
 			// An explicit strategy that cannot be honoured is an error, never
 			// a silent downgrade — the same choice feedback's tmux target
@@ -355,7 +371,7 @@ func TestResolve_StrategySelection(t *testing.T) {
 			name:     "window outside tmux is an actionable error",
 			strategy: "window", wantErr: "not running inside tmux",
 		},
-		{name: "reuse outside tmux is an actionable error", strategy: "reuse", wantErr: "not running inside tmux"},
+		{name: "reuse outside tmux is an actionable error", strategy: "reuse", wantErr: "not running inside tmux or herdr"},
 		{name: "an unknown strategy lists the valid ones", strategy: "sideways", wantErr: "editor_strategy"},
 	}
 
@@ -364,10 +380,15 @@ func TestResolve_StrategySelection(t *testing.T) {
 			t.Parallel()
 			root := repoWith(t, "src.ts")
 			ed := stubEditor(t, "myed")
+			// A herdr that knows nothing, so auto has nothing to reuse.
+			herdr := writeScript(t, t.TempDir(), "herdr", "exit 1")
 
 			plan, err := Resolve(context.Background(),
 				Config{Strategy: c.strategy},
-				Request{File: "src.ts", Repo: root, Env: Env{Editor: ed, InTmux: c.inTmux, TmuxPane: "%1"}})
+				Request{File: "src.ts", Repo: root, Env: Env{
+					Editor: ed, InTmux: c.inTmux, TmuxPane: "%1", TermProgram: c.termProg,
+					InHerdr: c.inHerdr, HerdrPane: "w1:p1", HerdrWorkspace: "w1", HerdrBin: herdr,
+				}})
 
 			if c.wantErr != "" {
 				if err == nil {
@@ -383,6 +404,9 @@ func TestResolve_StrategySelection(t *testing.T) {
 			}
 			if plan.Strategy != c.want {
 				t.Errorf("Strategy = %q, want %q", plan.Strategy, c.want)
+			}
+			if !strings.Contains(plan.Desc, c.wantDesc) {
+				t.Errorf("Desc = %q, want it to contain %q", plan.Desc, c.wantDesc)
 			}
 		})
 	}
