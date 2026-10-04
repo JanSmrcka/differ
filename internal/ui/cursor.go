@@ -91,9 +91,9 @@ func (m Model) resizeViewport() Model {
 		return m
 	}
 	m.viewport.Width = m.diffWidth()
-	// listHeight, not contentHeight: the panel spends two rows on its label
-	// and the blank line under it. Using the larger figure clipped the bottom
-	// two diff rows while scrollToCursor still counted them as visible.
+	// listHeight, not contentHeight: the panel spends a row on its label.
+	// Using the larger figure clipped the bottom diff row while
+	// scrollToCursor still counted it as visible.
 	m.viewport.Height = m.listHeight()
 	return m.applyContent(true)
 }

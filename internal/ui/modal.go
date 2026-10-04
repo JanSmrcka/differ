@@ -98,20 +98,21 @@ func placeModal(box string, width, height, avoid int) string {
 	top := max((height-tall)/2, 0)
 
 	if avoid >= 0 && avoid >= top && avoid < top+tall {
-		// It would cover the row. Below it if there is room, otherwise above.
+		// It would cover the row. Below it if there is room, otherwise above,
+		// ending on the row before it.
 		//
-		// Above means ending on the row before it: avoid-tall, and never
-		// clamped up into it. Clamping to 0 was how a box too tall for either
-		// side ended up drawn over the line anyway, reported as placed.
-		// commentModalMinHeight is what guarantees one of the two fits.
+		// The clamp is a floor, not a placement decision. It is reached only
+		// by a box too tall to fit on either side, and such a box covers the
+		// line wherever it is put — so nothing here can prevent that case,
+		// and nothing here pretends to. What prevents it is
+		// commentModalMinHeight, which sizes the content area to hold twice
+		// the box; the comment modal is the only caller that passes an avoid
+		// at all, so that is the whole of the guarantee.
 		if below := avoid + 1; below+tall <= height {
 			top = below
 		} else {
-			top = avoid - tall
+			top = max(avoid-tall, 0)
 		}
-	}
-	if top < 0 {
-		top = 0
 	}
 
 	rows := make([]string, 0, height)
@@ -354,8 +355,8 @@ func (m Model) modal(height int) string {
 // cursorContentRow is the row of the content area the diff cursor is drawn on,
 // or -1 when there is none.
 //
-// The panel starts with a label and a blank line, and the viewport is scrolled,
-// so the cursor's line index is not its row on screen.
+// The panel starts with its one label row, and the viewport is scrolled, so
+// the cursor's line index is not its row on screen.
 func (m Model) cursorContentRow() int {
 	if m.renderer == nil {
 		return -1
