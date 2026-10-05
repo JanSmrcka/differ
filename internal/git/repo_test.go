@@ -808,3 +808,43 @@ func TestGitDir_IsTheWorktreesOwnDirectory(t *testing.T) {
 		t.Errorf("GitDir() = %q, want the linked worktree's own directory", dir)
 	}
 }
+
+// The common directory is the one every worktree of a repository shares —
+// what herdr calls repo_key, so an agent in a sibling worktree is recognised
+// as working on the same repository.
+func TestCommonDir_IsSharedByEveryWorktree(t *testing.T) {
+	main := setupTestRepo(t)
+	writeFile(t, main, "a.txt", "one\n")
+	gitRun(t, main.Dir(), "add", "a.txt")
+	gitRun(t, main.Dir(), "commit", "-m", "init")
+	linked := filepath.Join(t.TempDir(), "wt")
+	gitRun(t, main.Dir(), "worktree", "add", "-b", "side", linked)
+	repo, err := NewRepo(linked)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fromMain, err := main.CommonDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fromLinked, err := repo.CommonDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(main.Dir(), ".git"); fromMain != want {
+		t.Errorf("main CommonDir = %q, want %q", fromMain, want)
+	}
+	if evalPath(t, fromLinked) != evalPath(t, fromMain) {
+		t.Errorf("linked CommonDir = %q, main = %q", fromLinked, fromMain)
+	}
+}
+
+func evalPath(t *testing.T, p string) string {
+	t.Helper()
+	r, err := filepath.EvalSymlinks(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r
+}

@@ -33,6 +33,14 @@ type Env struct {
 	TmpDir        string // $TMPDIR — where nvim listens on macOS
 	XDGRuntimeDir string // $XDG_RUNTIME_DIR — where nvim listens on Linux
 	User          string // $USER — part of nvim's socket directory name
+	TermProgram   string // $TERM_PROGRAM — which multiplexer is innermost
+	Shell         string // $SHELL — what a new herdr pane runs by default
+
+	InHerdr        bool   // $HERDR_ENV is 1 and $HERDR_PANE_ID is set
+	HerdrPane      string // $HERDR_PANE_ID — differ's own pane
+	HerdrWorkspace string // $HERDR_WORKSPACE_ID — differ's own workspace
+	HerdrBin       string // $HERDR_BIN_PATH — the herdr differ runs in
+	HerdrSocket    string // $HERDR_SOCKET_PATH — its API socket
 }
 
 // NewEnv reads the environment. This is the only place in the package that
@@ -45,7 +53,33 @@ func NewEnv() Env {
 		TmpDir:        os.Getenv("TMPDIR"),
 		XDGRuntimeDir: os.Getenv("XDG_RUNTIME_DIR"),
 		User:          currentUser(os.Getenv("USER")),
+		TermProgram:   os.Getenv("TERM_PROGRAM"),
+		Shell:         os.Getenv("SHELL"),
+
+		InHerdr:        os.Getenv("HERDR_ENV") == "1" && os.Getenv("HERDR_PANE_ID") != "",
+		HerdrPane:      os.Getenv("HERDR_PANE_ID"),
+		HerdrWorkspace: os.Getenv("HERDR_WORKSPACE_ID"),
+		HerdrBin:       os.Getenv("HERDR_BIN_PATH"),
+		HerdrSocket:    os.Getenv("HERDR_SOCKET_PATH"),
 	}
+}
+
+// mux names the multiplexer differ's own pane belongs to: "tmux", "herdr",
+// or "" for neither.
+//
+// The same reading as feedback.DetectMux. With both set one runs inside the
+// other, and the innermost is the one that owns differ's pane —
+// TERM_PROGRAM is set by whichever that is.
+func (e Env) mux() string {
+	switch {
+	case e.InHerdr && e.InTmux && e.TermProgram == "tmux":
+		return "tmux"
+	case e.InHerdr:
+		return "herdr"
+	case e.InTmux:
+		return "tmux"
+	}
+	return ""
 }
 
 // currentUser is the login name nvim builds its socket directory from.
@@ -201,10 +235,10 @@ func Resolve(ctx context.Context, cfg Config, req Request) (Plan, error) {
 		return Plan{}, fmt.Errorf("editor %q not found on PATH — set editor_cmd or $EDITOR", argv[0])
 	}
 
-	// An editor_cmd that is itself a tmux command is already a mechanism;
-	// wrapping it in another one would nest tmux inside tmux. It wins over
-	// editor_strategy outright.
-	if filepath.Base(argv[0]) == "tmux" {
+	// An editor_cmd that is itself a tmux or herdr command is already a
+	// mechanism; wrapping it in another one would nest one inside the other.
+	// It wins over editor_strategy outright.
+	if isMuxCommand(argv[0]) {
 		return inlinePlan(argv, req), nil
 	}
 	return planFor(ctx, cfg, want, argv, req)
@@ -235,16 +269,20 @@ func planFor(ctx context.Context, cfg Config, want Strategy, argv []string, req 
 	case StrategyDetach:
 		return detachPlan(argv, req, cfg.Grace), nil
 	}
-	if !req.Env.InTmux {
+	reuse, window := reusePlan, windowPlan
+	switch req.Env.mux() {
+	case "herdr":
+		reuse, window = herdrReusePlan, herdrPanePlan
+	case "":
 		if want == StrategyAuto {
 			return inlinePlan(argv, req), nil
 		}
 		return Plan{}, fmt.Errorf(
-			"editor_strategy is %q but differ is not running inside tmux — set editor_strategy to inline", want)
+			"editor_strategy is %q but differ is not running inside tmux or herdr — set editor_strategy to inline", want)
 	}
 
 	if want == StrategyReuse || want == StrategyAuto {
-		plan, err := reusePlan(ctx, cfg, req)
+		plan, err := reuse(ctx, cfg, req)
 		switch {
 		case err == nil:
 			return plan, nil
@@ -252,15 +290,24 @@ func planFor(ctx context.Context, cfg Config, want Strategy, argv []string, req 
 			return Plan{}, err
 		}
 	}
-	return windowPlan(cfg, argv, req), nil
+	return window(cfg, argv, req), nil
 }
 
 func inlinePlan(argv []string, req Request) Plan {
 	strategy := StrategyInline
-	if filepath.Base(argv[0]) == "tmux" {
+	if isMuxCommand(argv[0]) {
 		strategy = StrategyCustom
 	}
 	return Plan{Kind: KindTerminal, Strategy: strategy, Argv: argv, Dir: req.Repo}
+}
+
+// isMuxCommand reports whether prog is a multiplexer's own CLI.
+func isMuxCommand(prog string) bool {
+	switch filepath.Base(prog) {
+	case "tmux", "herdr":
+		return true
+	}
+	return false
 }
 
 // detachGrace is how long a detached editor is watched before it is declared

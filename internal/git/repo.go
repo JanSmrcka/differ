@@ -84,7 +84,18 @@ func (r *Repo) Dir() string { return r.dir }
 // that to the repository root, so a relative answer is resolved against it
 // rather than against whatever the caller's own directory happens to be.
 func (r *Repo) GitDir() (string, error) {
-	out, err := r.run("rev-parse", "--git-dir")
+	return r.revParseDir("--git-dir")
+}
+
+// CommonDir is the git directory every worktree of the repository shares —
+// `.git` of the main checkout. herdr calls it repo_key, and it is how an
+// agent in a sibling worktree is recognised as working on this repository.
+func (r *Repo) CommonDir() (string, error) {
+	return r.revParseDir("--git-common-dir")
+}
+
+func (r *Repo) revParseDir(flag string) (string, error) {
+	out, err := r.run("rev-parse", flag)
 	if err != nil {
 		return "", err
 	}
@@ -95,7 +106,7 @@ func (r *Repo) GitDir() (string, error) {
 	if !filepath.IsAbs(dir) {
 		dir = filepath.Join(r.dir, dir)
 	}
-	return dir, nil
+	return filepath.Clean(dir), nil
 }
 
 // HasCommits returns true if the repo has at least one commit.

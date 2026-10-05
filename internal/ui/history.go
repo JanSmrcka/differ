@@ -55,7 +55,11 @@ func (m Model) renderDelivery(d review.Delivery, width int) []string {
 	when := m.styles.HelpDesc.Render(d.At.Format("15:04:05"))
 	what := fmt.Sprintf("%s → %s", plural(len(d.Comments), "comment"), d.Target)
 
-	outcome := m.styles.HelpDesc.Render("sent")
+	sent := "sent"
+	if d.Agent != "" {
+		sent += " · " + agentWord(d.Agent)
+	}
+	outcome := m.styles.HelpDesc.Render(sent)
 	if !d.OK() {
 		outcome = m.styles.CommentStale.Render("failed: " + d.Err)
 	}

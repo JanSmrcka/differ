@@ -224,6 +224,11 @@ func (r *DiffRenderer) renderComment(c review.Comment) []string {
 		label = fmt.Sprintf("lines %d-%d", c.StartLine, c.EndLine)
 	}
 	header := fmt.Sprintf("%s · %s", label, c.State)
+	// What the agent did with it since, when the target could say. A word,
+	// like the state itself, so it survives with the colour stripped.
+	if c.WasSent() && c.Agent != "" {
+		header += " · " + agentWord(c.Agent)
+	}
 	meta := r.styles.CommentMeta
 	if c.State == review.StateStale {
 		header = staleMarker + " " + header

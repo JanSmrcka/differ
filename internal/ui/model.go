@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"strings"
 	"time"
 
@@ -122,6 +123,19 @@ type feedbackSentMsg struct {
 	ids    []string
 	target string
 	err    error
+	// watcher is the target, when it can say what the agent does next, and
+	// seen what the send saw the agent reach — read in the same command as
+	// the send, so a later send cannot change it underneath.
+	watcher feedback.Watcher
+	seen    string
+}
+
+// agentSettledMsg reports that the agent a delivery went to has finished
+// with it — idle, done or blocked — or that waiting failed.
+type agentSettledMsg struct {
+	delivery int
+	state    string
+	err      error
 }
 
 type commitMsgGeneratedMsg struct {
@@ -184,6 +198,19 @@ type Model struct {
 	// something different for each.
 	agentsScanned bool
 	agentCursor   int
+	// agentFilter narrows the picker; agentCursor indexes what it leaves.
+	agentFilter string
+	// mux is the multiplexer the picker asks, detected once at start from
+	// the environment; muxErr says why there is none.
+	mux    feedback.Mux
+	muxErr error
+	// feedbackEnv is the environment the feedback targets read. The zero
+	// value is the process's own; tests inject one.
+	feedbackEnv feedback.Env
+	// waits is cancelled by Close, so a wait on the agent outstanding at
+	// quit does not outlive differ. Shared by every copy of the model.
+	waits     context.Context
+	stopWaits context.CancelFunc
 
 	// agentsAfterSendFailure records that the picker was opened because a
 	// send failed, so a scan that then fails does not overwrite the stored
@@ -357,10 +384,9 @@ func NewModel(repo *git.Repo, cfg config.Config, changes []git.FileChange, untra
 	// Resolving the target up front keeps the failure (missing clipboard
 	// command, not inside tmux) attached to the send action rather than
 	// blocking startup.
-	target, targetErr := feedback.Resolve(feedback.Config{
-		Target:     cfg.FeedbackTarget,
-		TmuxTarget: cfg.TmuxTarget,
-	})
+	target, targetErr := feedback.Resolve(feedbackConfigOf(cfg, feedback.Env{}))
+	mux, muxErr := feedback.DetectMux(feedback.Env{})
+	waits, stopWaits := context.WithCancel(context.Background())
 
 	ca := textarea.New()
 	ca.Placeholder = "review comment..."
@@ -408,6 +434,10 @@ func NewModel(repo *git.Repo, cfg config.Config, changes []git.FileChange, untra
 		session:      session,
 		target:       target,
 		targetErr:    targetErr,
+		mux:          mux,
+		muxErr:       muxErr,
+		waits:        waits,
+		stopWaits:    stopWaits,
 		editorEnv:    editor.NewEnv(),
 	}
 }

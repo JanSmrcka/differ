@@ -45,7 +45,7 @@ main.go → cmd/root.go (cobra commands)
              ├── internal/theme    — color hex values only (no lipgloss)
              ├── internal/review   — review session: comments, per-file state, feedback text,
              │                        and its persistence to .git/differ/review.json
-             ├── internal/feedback — Target interface + clipboard/stdout/tmux delivery
+             ├── internal/feedback — Target + Mux interfaces; clipboard/stdout/tmux/herdr
              ├── internal/editor   — decides and performs "open this file in an editor"
              ├── internal/testutil — temp git repos, diff fixtures, golden files (tests only)
              └── internal/ui
@@ -106,6 +106,30 @@ says so in the bar. A lock naming a pid that is no longer running is taken
 over, because a kill is the case the whole feature exists for and must not be
 the one that locks the reviewer out.
 
+**Agents live in a multiplexer, and the picker does not know which.**
+`feedback.Mux` is discovery (list agents, own pane, where it looked);
+`feedback.Target` is delivery. `DetectMux` reads the environment — `HERDR_ENV`
++ `HERDR_PANE_ID`, `TMUX`, and `TERM_PROGRAM` when both are set — with no
+subprocess. The UI gets an `Agent` and asks it for its `FeedbackConfig()` and
+whether a config `Matches()` it; branching on the mux name in `internal/ui` is
+the thing to avoid. Two delivery rules that look contradictory and are not:
+**tmux pastes and never presses Enter**, because tmux cannot tell an agent from
+a shell; **herdr submits** with `agent prompt`, because herdr can, and refuses
+with `agent_blocked` before sending anything. `pane send-text` is not a
+substitute — no bracketed paste, so every newline submits. herdr's errors are
+JSON on stderr; `HerdrError.Code` survives to the UI (`agent_not_found`
+reopens the picker like tmux's "can't find pane"; `agent_prompt_stalled` counts
+as delivered, since retrying would send twice). A herdr choice is stored as the
+agent's *session id* plus the pane as fallback, and resolved to a pane through
+`agent list` at send time, because herdr does not accept a session id as a
+target. A target that can also implement `feedback.Watcher` (only herdr) gets an
+`agent wait` started after a successful send — but only when `Seen()` says the
+send saw the agent `working`: after a stall the agent never left idle, and a
+wait would match that at once and report an answer nobody gave. Its answer
+lands on the `review.Delivery` and the comments as `Agent`, and `Model.Close`
+cancels it. `working` is never written to `review.json`: no wait survives the
+process, so on disk it would claim forever that the agent is working.
+
 `internal/editor` must not import `internal/ui` either. It both decides how to
 open a file and does it — the one exception is handing the terminal to a child
 process, which only the bubbletea program can do, so such a plan comes back as
@@ -113,6 +137,23 @@ an argv the UI runs through `tea.ExecProcess`. Its environment arrives as an
 injected `editor.Env` rather than being read inside, so the whole decision tree
 is a pure function of its inputs and its tests need no `t.Setenv` (which would
 bar `t.Parallel`).
+
+**The editor knows two multiplexers**, read from `Env` with the same
+precedence as `feedback.DetectMux` (`Env.mux`). An nvim is tied to its pane by
+its own environment — `$TMUX_PANE` or `$HERDR_PANE_ID`, asked in one
+`--remote-expr` — never by pid: the socket's pid is a child of the TUI nvim.
+In herdr the pane must still be in `pane list` (a moved pane gets a new id and
+the nvim keeps the old one) and `process-info` must show an editor in front (a
+ctrl-z'd nvim answers on its socket behind a shell). Default reach is differ's
+workspace only — not even the same repository's other workspace, because
+focusing it takes the user out of the one they are in; a new pane does not.
+Focusing goes through the **socket's `pane.focus`** — the CLI's `pane focus`
+only moves to a neighbour — which switches workspace and tab by itself.
+`window` is a pane split off differ's (right when wide, down when not)
+running `exec <argv>` via `pane run`, since herdr cannot start a pane on a
+command; `exec` closes it when the editor quits. The argv is quoted for the
+pane's actual shell — `process-info`'s `shell_pid` — because fish reads `\'`
+inside single quotes where POSIX needs `'\''`.
 
 The frame is the same on every screen, `differ log` included: a header, a
 rule, the content, a rule, one bar. There are no boxes in it — `renderCard` is

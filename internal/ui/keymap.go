@@ -55,7 +55,7 @@ func globalBindings() []binding {
 		{Keys: []string{"H"}, Desc: "history", Help: "what has been sent, and whether it arrived"},
 		{Keys: []string{"!"}, Desc: "problem", Help: "show the last failure in full, including what the tool said"},
 		{Keys: []string{"t"}, Desc: "theme", Help: "try the themes; the screen changes as you move"},
-		{Keys: []string{agentKey}, Desc: "agent", Help: "choose which agent in tmux the review is sent to"},
+		{Keys: []string{agentKey}, Desc: "agent", Help: "choose which agent, in tmux or herdr, the review is sent to"},
 		{Keys: []string{"ctrl+c"}, Desc: "quit", Help: "quit immediately"},
 	}
 }
@@ -121,11 +121,15 @@ func surfaceKeymap(s surface) []binding {
 			{Keys: []string{"esc", "q", "t"}, Label: "esc", Desc: "cancel", Help: "go back to the theme you had", Bar: true},
 		}
 	case surfaceAgents:
+		// A filter, like the branch picker: printable keys are text, so
+		// movement is on the arrows and ctrl, and nothing but esc leaves.
 		return []binding{
-			{Keys: []string{"j", "down"}, Label: "j/k", Desc: "move", Help: "move through the agents", Bar: true},
-			{Keys: []string{"k", "up"}},
+			{Label: "type", Desc: "filter", Help: "type to narrow the list", Bar: true},
+			{Keys: []string{"down", "ctrl+j"}, Label: "↓/^j", Desc: "down", Help: "move down the list", Bar: true},
+			{Keys: []string{"up", "ctrl+k"}, Label: "↑/^k", Desc: "up", Help: "move up the list", Bar: true},
+			{Keys: []string{"backspace"}, Desc: "erase", Help: "delete the last character of the filter"},
 			{Keys: []string{"enter"}, Desc: "choose", Help: "send reviews to this agent", Bar: true},
-			{Keys: []string{"esc", "q", agentKey}, Label: "esc", Desc: "cancel", Help: "keep the agent you had", Bar: true},
+			{Keys: []string{"esc"}, Desc: "clear/close", Help: "clear the filter, or close the picker when it is empty", Bar: true},
 		}
 	case surfaceReading:
 		return []binding{

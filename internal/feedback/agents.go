@@ -21,17 +21,32 @@ import (
 // Discovery is two processes for the whole scan, whatever the number of panes:
 // one tmux listing and one ps listing.
 
-// Agent is a tmux pane with a coding agent running in it.
+// Agent is a pane with a coding agent running in it, in whichever
+// multiplexer found it.
+//
+// The fields below Dir are the ones only herdr can report, and they are empty
+// for tmux. The picker reads them by presence, never by Mux, so it does not
+// learn which multiplexer it is looking at.
 type Agent struct {
-	Pane    string // tmux pane id, e.g. "%12"
-	Session string
-	Window  string
+	Pane    string // pane id: "%12" under tmux, "w2:p2" under herdr
+	Session string // tmux session
+	Window  string // tmux window index
 	Tool    string
 	Dir     string // the pane's working directory
+	Mux     string // the multiplexer it was found in, as Mux.Name says
+
+	Workspace   string // herdr workspace label
+	WorkspaceID string
+	State       string // idle, working, blocked, done or unknown
+	Title       string // what the agent says it is working on
+	SessionID   string // the agent's own session id, stable across pane moves
 }
 
 // Label is how the agent reads in a picker.
 func (a Agent) Label() string {
+	if a.Session == "" && a.Workspace != "" {
+		return a.Workspace
+	}
 	return a.Session + ":" + a.Window
 }
 
@@ -261,7 +276,7 @@ func findAgents(panes []pane, procs procTable, self string) []Agent {
 		if tool := procs.toolUnder(p.pid); tool != "" {
 			found = append(found, Agent{
 				Pane: p.id, Session: p.session, Window: p.window,
-				Tool: tool, Dir: p.dir,
+				Tool: tool, Dir: p.dir, Mux: "tmux",
 			})
 		}
 	}

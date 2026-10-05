@@ -30,9 +30,10 @@ const probeTimeout = 1 * time.Second
 
 // nvimServer is a running nvim differ could hand a file to.
 type nvimServer struct {
-	Socket string
-	Pane   string // $TMUX_PANE as that nvim inherited it
-	CWD    string
+	Socket    string
+	Pane      string // $TMUX_PANE as that nvim inherited it
+	HerdrPane string // $HERDR_PANE_ID, likewise
+	CWD       string
 }
 
 // socketCandidateRoots are the directories nvim may have put its socket in.
@@ -91,19 +92,27 @@ func queryNvim(ctx context.Context, timeout time.Duration, socket, expr string) 
 }
 
 // discoverNvim asks every reachable socket which pane it lives in.
+//
+// Both multiplexers' pane variables are asked for at once: the question costs
+// a process either way, and the caller matches whichever its own uses.
 func discoverNvim(ctx context.Context, timeout time.Duration, env Env) []nvimServer {
 	var found []nvimServer
 	for _, sock := range socketCandidates(env) {
-		out, err := queryNvim(ctx, timeout, sock, `$TMUX_PANE . "\n" . getcwd(-1,-1)`)
+		out, err := queryNvim(ctx, timeout, sock,
+			`$TMUX_PANE . "\n" . $HERDR_PANE_ID . "\n" . getcwd(-1,-1)`)
 		if err != nil {
 			continue
 		}
-		parts := strings.SplitN(out, "\n", 2)
-		s := nvimServer{Socket: sock, Pane: strings.TrimSpace(parts[0])}
-		if len(parts) > 1 {
-			s.CWD = strings.TrimSpace(parts[1])
+		parts := strings.SplitN(out, "\n", 3)
+		for len(parts) < 3 {
+			parts = append(parts, "")
 		}
-		found = append(found, s)
+		found = append(found, nvimServer{
+			Socket:    sock,
+			Pane:      strings.TrimSpace(parts[0]),
+			HerdrPane: strings.TrimSpace(parts[1]),
+			CWD:       strings.TrimSpace(parts[2]),
+		})
 	}
 	return found
 }

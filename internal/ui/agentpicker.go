@@ -2,7 +2,10 @@ package ui
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"time"
+	"unicode"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -30,6 +33,7 @@ func (m Model) openAgentPicker() (Model, tea.Cmd) {
 	m.showAgents = true
 	m.agentsAfterSendFailure = false
 	m.agents, m.agentsScanned = nil, false
+	m.agentFilter = ""
 	m.showHelp, m.showHistory, m.showProblem = false, false, false
 	if m.showThemes {
 		// The theme picker changes the session as you move through it, so it
@@ -42,17 +46,47 @@ func (m Model) openAgentPicker() (Model, tea.Cmd) {
 }
 
 func (m Model) scanAgentsCmd() tea.Cmd {
-	root := ""
-	if m.repo != nil {
-		root = m.repo.Dir()
-	}
+	mux, muxErr, repo := m.mux, m.muxErr, m.repo
 	return func() tea.Msg {
+		if mux == nil {
+			return agentsLoadedMsg{err: muxErr}
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), agentScanTimeout)
 		defer cancel()
-		// The root is passed rather than the ordering done here: forgetting
-		// the one call left the picker unsorted with every test green.
-		found, err := feedback.Agents(ctx, root)
+		// The repository is passed rather than the ordering done here:
+		// forgetting the one call left the picker unsorted with every test
+		// green. Asked here, off the update loop, because it is a git call.
+		var info feedback.RepoInfo
+		if repo != nil {
+			info.Root = repo.Dir()
+			info.CommonDir, _ = repo.CommonDir()
+		}
+		found, err := mux.Agents(ctx, info)
 		return agentsLoadedMsg{agents: found, err: err}
+	}
+}
+
+// feedbackConfigOf is the target configuration the config file describes.
+func feedbackConfigOf(cfg config.Config, env feedback.Env) feedback.Config {
+	return feedback.Config{
+		Target:      cfg.FeedbackTarget,
+		TmuxTarget:  cfg.TmuxTarget,
+		HerdrTarget: cfg.HerdrTarget,
+		HerdrPane:   cfg.HerdrPane,
+		Env:         env,
+	}
+}
+
+// applyChoice writes a chosen agent's target into the config. Each field is
+// written only when the choice has one, so choosing a herdr agent leaves
+// tmux_target as it was — the picker never asks which multiplexer it was.
+func applyChoice(cfg *config.Config, fc feedback.Config) {
+	cfg.FeedbackTarget = fc.Target
+	if fc.TmuxTarget != "" {
+		cfg.TmuxTarget = fc.TmuxTarget
+	}
+	if fc.HerdrPane != "" || fc.HerdrTarget != "" {
+		cfg.HerdrTarget, cfg.HerdrPane = fc.HerdrTarget, fc.HerdrPane
 	}
 }
 
@@ -84,8 +118,11 @@ func (m Model) handleAgentsLoaded(msg agentsLoadedMsg) (tea.Model, tea.Cmd) {
 	}
 	m.agents, m.agentsScanned = msg.agents, true
 	m.agentCursor = 0
-	for i, a := range m.agents {
-		if a.Pane == m.cfg.TmuxTarget {
+	// Within what the filter leaves: it can be typed while the scan is out,
+	// and the cursor indexes visibleAgents, not m.agents.
+	inUse := feedbackConfigOf(m.cfg, m.feedbackEnv)
+	for i, a := range m.visibleAgents() {
+		if a.Matches(inUse) {
 			m.agentCursor = i
 			break
 		}
@@ -105,21 +142,23 @@ func (m Model) confirmAgent() (Model, tea.Cmd) {
 	if !m.agentsScanned {
 		return m, nil
 	}
-	m.showAgents = false
-	if m.agentCursor < 0 || m.agentCursor >= len(m.agents) {
+	picked := m.chosenAgent()
+	if picked == nil {
+		// Nothing under the cursor — a filter with no matches. Closing on it
+		// would throw the filter away for nothing.
+		if len(m.agents) == 0 {
+			m.showAgents = false
+		}
 		return m, nil
 	}
-	chosen := m.agents[m.agentCursor]
-	m.cfg.TmuxTarget = chosen.Pane
-	m.cfg.FeedbackTarget = "tmux"
+	m.showAgents = false
+	chosen := *picked
+	applyChoice(&m.cfg, chosen.FeedbackConfig())
 	// Re-resolve, or the choice changes nothing until a restart. m.target is
 	// the object send() uses and it was built once in NewModel, so writing the
 	// config alone left the bar saying "sending to claude" while the review
 	// went to the clipboard.
-	m.target, m.targetErr = feedback.Resolve(feedback.Config{
-		Target:     m.cfg.FeedbackTarget,
-		TmuxTarget: m.cfg.TmuxTarget,
-	})
+	m.target, m.targetErr = feedback.Resolve(feedbackConfigOf(m.cfg, m.feedbackEnv))
 	m.statusMsg = "sending to " + chosen.Tool + " in " + chosen.Label()
 	if m.targetErr != nil {
 		return m.fail("choosing an agent", m.targetErr), nil
@@ -135,8 +174,56 @@ func (m Model) cancelAgentPicker() (Model, tea.Cmd) {
 }
 
 func (m Model) moveAgentCursor(delta int) (Model, tea.Cmd) {
-	m.agentCursor = clampCursor(m.agentCursor+delta, len(m.agents))
+	m.agentCursor = clampCursor(m.agentCursor+delta, len(m.visibleAgents()))
 	return m, nil
+}
+
+// visibleAgents is the list the filter leaves, in the scan's order. The
+// cursor indexes this, not m.agents.
+func (m Model) visibleAgents() []feedback.Agent {
+	if m.agentFilter == "" {
+		return m.agents
+	}
+	needle := strings.ToLower(m.agentFilter)
+	var out []feedback.Agent
+	for _, a := range m.agents {
+		hay := strings.ToLower(strings.Join([]string{
+			a.Label(), a.Workspace, a.Tool, a.State, a.Title, a.Dir,
+		}, "\x00"))
+		if strings.Contains(hay, needle) {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+// chosenAgent is the agent under the cursor, or nil when the filter leaves
+// none.
+func (m Model) chosenAgent() *feedback.Agent {
+	visible := m.visibleAgents()
+	if m.agentCursor < 0 || m.agentCursor >= len(visible) {
+		return nil
+	}
+	return &visible[m.agentCursor]
+}
+
+// setAgentFilter changes the filter and keeps the cursor on the same agent
+// when it is still listed. Narrowing a list must not quietly swap the choice
+// for whichever agent now happens to sit at the same index.
+func (m Model) setAgentFilter(filter string) Model {
+	pane := ""
+	if a := m.chosenAgent(); a != nil {
+		pane = a.Pane
+	}
+	m.agentFilter = filter
+	m.agentCursor = 0
+	for i, a := range m.visibleAgents() {
+		if a.Pane == pane {
+			m.agentCursor = i
+			break
+		}
+	}
+	return m
 }
 
 // agentClosing is what the picker says it will answer to, which depends on
@@ -147,63 +234,115 @@ func (m Model) agentClosing() string {
 		return "esc cancels"
 	case len(m.agents) == 0:
 		return "esc closes"
+	case len(m.visibleAgents()) == 0:
+		return "esc clears the filter"
 	}
-	return "j/k · enter chooses · esc cancels"
+	return "type filters · ↑/↓ · enter chooses · esc closes"
 }
 
 // agentRows is the picker's content.
 func (m Model) agentRows(room int) []string {
-	width := m.modalWidth() - 2*modalPadding - 2
 	if !m.agentsScanned {
 		return []string{"", " looking for agents…"}
 	}
 	if len(m.agents) == 0 {
-		// Saying what was looked for is the difference between "nothing here"
-		// and "differ is broken".
-		return []string{
-			"",
-			" No agent is running in tmux.",
-			"",
-			" differ looks for claude, codex, gemini,",
-			" copilot, opencode and aider in every pane",
-			" on this tmux server.",
-			"",
-			" Start one and press " + agentKey + " again.",
-		}
+		return m.noAgentRows()
+	}
+
+	// The filter goes first whatever the room, as in the branch picker:
+	// below three rows the blank line goes, and below two the list does.
+	visible := m.visibleAgents()
+	rows := []string{m.agentFilterRow(len(visible))}
+	if room <= 1 {
+		return rows
+	}
+	if room > 2 {
+		rows = append(rows, "")
+	}
+	if len(visible) == 0 {
+		return append(rows, " "+m.styles.HelpDesc.Render("no matches"))[:min(room, 3)]
 	}
 
 	// Scrolled, like the file list. Without an offset fitOverlay dropped the
 	// overflow and printed how many rows it had dropped, so pressing j past
 	// the edge left nothing highlighted anywhere and enter then chose an
 	// agent that was not on screen.
-	first := scrollOffset(m.agentCursor, len(m.agents), room)
-	last := min(first+room, len(m.agents))
-
-	rows := make([]string, 0, last-first)
+	inUse := feedbackConfigOf(m.cfg, m.feedbackEnv)
+	body := room - len(rows)
+	first := scrollOffset(m.agentCursor, len(visible), body)
+	last := min(first+body, len(visible))
 	for i := first; i < last; i++ {
-		a := m.agents[i]
-		// The pane id disambiguates two agents in one window, which share a
-		// session:window label and usually a directory too.
-		name := a.Label()
-		if m.labelIsAmbiguous(a) {
-			name += " " + a.Pane
-		}
-		label := "  " + name
-		if i == m.agentCursor {
-			label = m.styles.Selected.Render(cursorMarker + " " + name)
-		}
-		if a.Pane == m.cfg.TmuxTarget {
-			label += m.styles.HelpDesc.Render("  ·  in use")
-		}
-		row := label + "  " + m.styles.CommentMeta.Render(a.Tool)
-		// The directory is what tells two agents in one session apart, so it
-		// gets whatever room is left rather than being dropped first.
-		if room := width - lipgloss.Width(row) - 3; room > 12 {
-			row += "  " + m.styles.HelpDesc.Render(truncatePath(a.Dir, room))
-		}
-		rows = append(rows, row)
+		rows = append(rows, m.agentRow(visible[i], i == m.agentCursor, visible[i].Matches(inUse)))
 	}
 	return rows
+}
+
+// noAgentRows is the empty state.
+//
+// Saying what was looked for is the difference between "nothing here" and
+// "differ is broken". The multiplexer says it, so the picker does not need to
+// know which one it asked.
+func (m Model) noAgentRows() []string {
+	name, searched := "tmux or herdr", []string(nil)
+	if m.mux != nil {
+		name, searched = m.mux.Name(), m.mux.Searched()
+	}
+	rows := []string{"", " No agent is running in " + name + ".", ""}
+	for _, line := range searched {
+		rows = append(rows, " "+line)
+	}
+	return append(rows, "", " Start one and press "+agentKey+" again.")
+}
+
+// agentFilterRow is what you are typing, with how much of the list it
+// matches pushed to the right — the branch picker's filter row.
+func (m Model) agentFilterRow(matched int) string {
+	input := " " + m.styles.HelpDesc.Render("filter…")
+	if m.agentFilter != "" {
+		input = " " + m.agentFilter
+	}
+	count := m.styles.HelpDesc.Render(fmt.Sprintf("%d/%d", matched, len(m.agents)))
+	gap := m.modalBodyWidth() - lipgloss.Width(input) - lipgloss.Width(count)
+	if gap < 1 {
+		return input
+	}
+	return input + strings.Repeat(" ", gap) + count
+}
+
+// agentRow is one agent: label, whether it is in use, tool, state, and what
+// tells it apart.
+func (m Model) agentRow(a feedback.Agent, selected, inUse bool) string {
+	width := m.modalWidth() - 2*modalPadding - 2
+	// The pane id disambiguates two agents in one window, which share a
+	// session:window label and usually a directory too.
+	name := a.Label()
+	if m.labelIsAmbiguous(a) {
+		name += " " + a.Pane
+	}
+	label := "  " + name
+	if selected {
+		label = m.styles.Selected.Render(cursorMarker + " " + name)
+	}
+	if inUse {
+		label += m.styles.HelpDesc.Render("  ·  in use")
+	}
+	row := label + "  " + m.styles.CommentMeta.Render(a.Tool)
+	// The state is a word, not a colour: waiting and working have to be told
+	// apart with the colour stripped.
+	if a.State != "" {
+		row += "  " + m.styles.CommentMeta.Render(a.State)
+	}
+	// What tells two agents apart gets whatever room is left rather than
+	// being dropped first: the agent's own title when it reports one, else
+	// the directory it is in.
+	if room := width - lipgloss.Width(row) - 3; room > 12 {
+		if a.Title != "" {
+			row += "  " + m.styles.HelpDesc.Render(truncateEnd(a.Title, room))
+		} else {
+			row += "  " + m.styles.HelpDesc.Render(truncatePath(a.Dir, room))
+		}
+	}
+	return row
 }
 
 // agentPickerKey handles the picker's keys while it is open.
@@ -211,16 +350,30 @@ func (m Model) agentRows(room int) []string {
 // No "handled" return: every key is handled, because the picker owns the
 // keyboard while it is open. A stray key reaching the repository behind an
 // overlay would be acting on something the user cannot see.
+//
+// The branch picker's idiom: any printable key types into the filter, so
+// moving is the arrows or ^j/^k, and esc clears the filter before it closes.
 func (m Model) agentPickerKey(key string) (Model, tea.Cmd) {
 	switch key {
-	case "j", "down":
+	case "down", "ctrl+j":
 		return m.moveAgentCursor(1)
-	case "k", "up":
+	case "up", "ctrl+k":
 		return m.moveAgentCursor(-1)
 	case "enter":
 		return m.confirmAgent()
-	case "esc", "q", agentKey:
+	case "backspace":
+		if r := []rune(m.agentFilter); len(r) > 0 {
+			return m.setAgentFilter(string(r[:len(r)-1])), nil
+		}
+		return m, nil
+	case "esc":
+		if m.agentFilter != "" {
+			return m.setAgentFilter(""), nil
+		}
 		return m.cancelAgentPicker()
+	}
+	if r := []rune(key); len(r) == 1 && unicode.IsPrint(r[0]) {
+		return m.setAgentFilter(m.agentFilter + key), nil
 	}
 	return m, nil
 }
