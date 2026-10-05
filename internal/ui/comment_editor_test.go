@@ -15,7 +15,7 @@ func typeText(t *testing.T, m Model, s string) Model {
 		if r == '\n' {
 			msg = tea.KeyMsg{Type: tea.KeyEnter}
 		}
-		updated, _ := m.updateReviewMode(msg)
+		updated, _ := m.updateDiffMode(msg)
 		m = updated.(Model)
 	}
 	return m
@@ -30,7 +30,7 @@ func reviewOnAddedLine(t *testing.T) Model {
 func TestCommentEditor_COpensEditor(t *testing.T) {
 	m := reviewOnAddedLine(t)
 
-	updated, _ := m.updateReviewMode(key("c"))
+	updated, _ := m.updateDiffMode(key("c"))
 	m = updated.(Model)
 
 	if !m.commenting {
@@ -43,11 +43,11 @@ func TestCommentEditor_COpensEditor(t *testing.T) {
 
 func TestCommentEditor_TypingAndSaving(t *testing.T) {
 	m := reviewOnAddedLine(t)
-	updated, _ := m.updateReviewMode(key("c"))
+	updated, _ := m.updateDiffMode(key("c"))
 	m = updated.(Model)
 
 	m = typeText(t, m, "keep this awaited")
-	updated, _ = m.updateReviewMode(tea.KeyMsg{Type: tea.KeyCtrlS})
+	updated, _ = m.updateDiffMode(tea.KeyMsg{Type: tea.KeyCtrlS})
 	m = updated.(Model)
 
 	if m.commenting {
@@ -67,11 +67,11 @@ func TestCommentEditor_TypingAndSaving(t *testing.T) {
 
 func TestCommentEditor_SupportsMultilineBodies(t *testing.T) {
 	m := reviewOnAddedLine(t)
-	updated, _ := m.updateReviewMode(key("c"))
+	updated, _ := m.updateDiffMode(key("c"))
 	m = updated.(Model)
 
 	m = typeText(t, m, "first line\nsecond line")
-	updated, _ = m.updateReviewMode(tea.KeyMsg{Type: tea.KeyCtrlS})
+	updated, _ = m.updateDiffMode(tea.KeyMsg{Type: tea.KeyCtrlS})
 	m = updated.(Model)
 
 	body := m.session.CommentsFor("src.ts")[0].Body
@@ -85,11 +85,11 @@ func TestCommentEditor_SupportsMultilineBodies(t *testing.T) {
 
 func TestCommentEditor_EscCancelsWithoutSaving(t *testing.T) {
 	m := reviewOnAddedLine(t)
-	updated, _ := m.updateReviewMode(key("c"))
+	updated, _ := m.updateDiffMode(key("c"))
 	m = updated.(Model)
 	m = typeText(t, m, "discard me")
 
-	updated, _ = m.updateReviewMode(tea.KeyMsg{Type: tea.KeyEsc})
+	updated, _ = m.updateDiffMode(tea.KeyMsg{Type: tea.KeyEsc})
 	m = updated.(Model)
 
 	if m.commenting {
@@ -98,17 +98,17 @@ func TestCommentEditor_EscCancelsWithoutSaving(t *testing.T) {
 	if n := m.session.CountFor("src.ts"); n != 0 {
 		t.Errorf("cancelled comment was saved anyway (%d comments)", n)
 	}
-	if m.mode != modeReview {
+	if m.mode != modeDiff {
 		t.Errorf("esc in the editor should stay in review mode, got %v", m.mode)
 	}
 }
 
 func TestCommentEditor_EmptyBodyIsNotSaved(t *testing.T) {
 	m := reviewOnAddedLine(t)
-	updated, _ := m.updateReviewMode(key("c"))
+	updated, _ := m.updateDiffMode(key("c"))
 	m = updated.(Model)
 
-	updated, _ = m.updateReviewMode(tea.KeyMsg{Type: tea.KeyCtrlS})
+	updated, _ = m.updateDiffMode(tea.KeyMsg{Type: tea.KeyCtrlS})
 	m = updated.(Model)
 
 	if n := m.session.CountFor("src.ts"); n != 0 {
@@ -122,7 +122,7 @@ func TestCommentEditor_EmptyBodyIsNotSaved(t *testing.T) {
 func TestCommentEditor_NavigationKeysGoToTheTextareaNotTheCursor(t *testing.T) {
 	m := reviewOnAddedLine(t)
 	cursorBefore := m.diffCursor
-	updated, _ := m.updateReviewMode(key("c"))
+	updated, _ := m.updateDiffMode(key("c"))
 	m = updated.(Model)
 
 	m = typeText(t, m, "jjjj")
@@ -138,10 +138,10 @@ func TestCommentEditor_NavigationKeysGoToTheTextareaNotTheCursor(t *testing.T) {
 func TestCommentEditor_ShiftCCommentsTheHunk(t *testing.T) {
 	m := reviewOnAddedLine(t)
 
-	updated, _ := m.updateReviewMode(key("C"))
+	updated, _ := m.updateDiffMode(key("C"))
 	m = updated.(Model)
 	m = typeText(t, m, "whole hunk")
-	updated, _ = m.updateReviewMode(tea.KeyMsg{Type: tea.KeyCtrlS})
+	updated, _ = m.updateDiffMode(tea.KeyMsg{Type: tea.KeyCtrlS})
 	m = updated.(Model)
 
 	got := m.session.CommentsFor("src.ts")
@@ -156,17 +156,17 @@ func TestCommentEditor_ShiftCCommentsTheHunk(t *testing.T) {
 func TestCommentEditor_MultipleCommentsCoexist(t *testing.T) {
 	m := reviewOnAddedLine(t)
 
-	updated, _ := m.updateReviewMode(key("c"))
+	updated, _ := m.updateDiffMode(key("c"))
 	m = updated.(Model)
 	m = typeText(t, m, "first")
-	updated, _ = m.updateReviewMode(tea.KeyMsg{Type: tea.KeyCtrlS})
+	updated, _ = m.updateDiffMode(tea.KeyMsg{Type: tea.KeyCtrlS})
 	m = updated.(Model)
 
 	m = cursorOn(t, m, LineAdded, "  persist(data)")
-	updated, _ = m.updateReviewMode(key("c"))
+	updated, _ = m.updateDiffMode(key("c"))
 	m = updated.(Model)
 	m = typeText(t, m, "second")
-	updated, _ = m.updateReviewMode(tea.KeyMsg{Type: tea.KeyCtrlS})
+	updated, _ = m.updateDiffMode(tea.KeyMsg{Type: tea.KeyCtrlS})
 	m = updated.(Model)
 
 	got := m.session.CommentsFor("src.ts")
@@ -180,14 +180,14 @@ func TestCommentEditor_MultipleCommentsCoexist(t *testing.T) {
 
 func TestCommentEditor_EditingAnExistingComment(t *testing.T) {
 	m := reviewOnAddedLine(t)
-	updated, _ := m.updateReviewMode(key("c"))
+	updated, _ := m.updateDiffMode(key("c"))
 	m = updated.(Model)
 	m = typeText(t, m, "before")
-	updated, _ = m.updateReviewMode(tea.KeyMsg{Type: tea.KeyCtrlS})
+	updated, _ = m.updateDiffMode(tea.KeyMsg{Type: tea.KeyCtrlS})
 	m = updated.(Model)
 
 	// c on a line that already carries a comment edits it.
-	updated, _ = m.updateReviewMode(key("c"))
+	updated, _ = m.updateDiffMode(key("c"))
 	m = updated.(Model)
 	if !m.commenting {
 		t.Fatal("c should reopen the existing comment")
@@ -197,7 +197,7 @@ func TestCommentEditor_EditingAnExistingComment(t *testing.T) {
 	}
 
 	m = typeText(t, m, " and after")
-	updated, _ = m.updateReviewMode(tea.KeyMsg{Type: tea.KeyCtrlS})
+	updated, _ = m.updateDiffMode(tea.KeyMsg{Type: tea.KeyCtrlS})
 	m = updated.(Model)
 
 	got := m.session.CommentsFor("src.ts")
@@ -211,13 +211,13 @@ func TestCommentEditor_EditingAnExistingComment(t *testing.T) {
 
 func TestCommentEditor_DeleteComment(t *testing.T) {
 	m := reviewOnAddedLine(t)
-	updated, _ := m.updateReviewMode(key("c"))
+	updated, _ := m.updateDiffMode(key("c"))
 	m = updated.(Model)
 	m = typeText(t, m, "delete me")
-	updated, _ = m.updateReviewMode(tea.KeyMsg{Type: tea.KeyCtrlS})
+	updated, _ = m.updateDiffMode(tea.KeyMsg{Type: tea.KeyCtrlS})
 	m = updated.(Model)
 
-	updated, _ = m.updateReviewMode(key("x"))
+	updated, _ = m.updateDiffMode(key("x"))
 	m = updated.(Model)
 
 	if n := m.session.CountFor("src.ts"); n != 0 {
@@ -227,7 +227,7 @@ func TestCommentEditor_DeleteComment(t *testing.T) {
 
 func TestCommentEditor_DeleteWithNoCommentIsHarmless(t *testing.T) {
 	m := reviewOnAddedLine(t)
-	updated, _ := m.updateReviewMode(key("x"))
+	updated, _ := m.updateDiffMode(key("x"))
 	m = updated.(Model)
 	if m.session.CountFor("src.ts") != 0 {
 		t.Error("unexpected comment")
@@ -236,16 +236,16 @@ func TestCommentEditor_DeleteWithNoCommentIsHarmless(t *testing.T) {
 
 func TestCommentEditor_CommentsSurviveFileNavigation(t *testing.T) {
 	m := reviewOnAddedLine(t)
-	updated, _ := m.updateReviewMode(key("c"))
+	updated, _ := m.updateDiffMode(key("c"))
 	m = updated.(Model)
 	m = typeText(t, m, "stays")
-	updated, _ = m.updateReviewMode(tea.KeyMsg{Type: tea.KeyCtrlS})
+	updated, _ = m.updateDiffMode(tea.KeyMsg{Type: tea.KeyCtrlS})
 	m = updated.(Model)
 
 	// Leave review, come back.
-	updated, _ = m.updateReviewMode(tea.KeyMsg{Type: tea.KeyEsc})
+	updated, _ = m.updateDiffMode(tea.KeyMsg{Type: tea.KeyEsc})
 	m = updated.(Model)
-	updated, _ = m.Update(key("r"))
+	updated, _ = m.Update(key("enter"))
 	m = updated.(Model)
 
 	if n := m.session.CountFor("src.ts"); n != 1 {
@@ -255,7 +255,7 @@ func TestCommentEditor_CommentsSurviveFileNavigation(t *testing.T) {
 
 func TestCommentEditor_IsVisibleWhileOpen(t *testing.T) {
 	m := reviewOnAddedLine(t)
-	updated, _ := m.updateReviewMode(key("c"))
+	updated, _ := m.updateDiffMode(key("c"))
 	m = updated.(Model)
 	m = typeText(t, m, "visible text")
 

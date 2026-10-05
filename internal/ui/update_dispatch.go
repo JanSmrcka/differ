@@ -100,33 +100,7 @@ func (m Model) routeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	if m.showHelp || m.showHistory || m.showProblem {
-		switch msg.String() {
-		case "?":
-			m.showHelp, m.showHistory, m.showProblem = !m.showHelp, false, false
-			return m, nil
-		case "!":
-			m.showProblem, m.showHelp, m.showHistory = !m.showProblem, false, false
-			return m, nil
-		case "t":
-			return m.openThemePicker()
-		case agentKey:
-			mm, cmd := m.openAgentPicker()
-			return mm, cmd
-		case "H":
-			// H closes the history, but does not open one from the help
-			// overlay: unlike ?, it is not a global — it exists only in
-			// review mode, and the file list's help does not list it.
-			if m.showHistory {
-				m.showHistory = false
-				return m, nil
-			}
-		case "esc", "q":
-			m.showHelp, m.showHistory, m.showProblem = false, false, false
-			return m, nil
-		}
-		// Everything else is swallowed, so a stray j does not scroll a diff
-		// the user cannot see.
-		return m, nil
+		return m.readingOverlayKey(msg.String())
 	}
 
 	if !m.typing() {
@@ -138,6 +112,11 @@ func (m Model) routeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// Global, because a failure can come from anything — including a
 			// mode that has since been left.
 			m.showProblem = true
+			return m, nil
+		case "H":
+			// Global, because what was sent is about the whole changeset, not
+			// the file the cursor happens to be on.
+			m.showHistory = true
 			return m, nil
 		case "t":
 			return m.openThemePicker()
@@ -156,8 +135,28 @@ func (m Model) routeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.updateCommitMode(msg)
 	case modeBranchPicker:
 		return m.updateBranchMode(msg)
-	case modeReview:
-		return m.updateReviewMode(msg)
+	}
+	return m, nil
+}
+
+// readingOverlayKey answers keys while help, history or the problem is open.
+// The three switch between each other, and everything else is swallowed, so
+// a stray j does not scroll a diff the user cannot see.
+func (m Model) readingOverlayKey(key string) (tea.Model, tea.Cmd) {
+	switch key {
+	case "?":
+		m.showHelp, m.showHistory, m.showProblem = !m.showHelp, false, false
+	case "!":
+		m.showProblem, m.showHelp, m.showHistory = !m.showProblem, false, false
+	case "H":
+		m.showHistory, m.showHelp, m.showProblem = !m.showHistory, false, false
+	case "t":
+		return m.openThemePicker()
+	case agentKey:
+		mm, cmd := m.openAgentPicker()
+		return mm, cmd
+	case "esc", "q":
+		m.showHelp, m.showHistory, m.showProblem = false, false, false
 	}
 	return m, nil
 }
@@ -382,11 +381,11 @@ func (m Model) handleFilesRefreshed(msg filesRefreshedMsg) (tea.Model, tea.Cmd) 
 	if hold {
 		return m, m.reanchorCmd(true)
 	}
-	// resetScroll only outside review mode. The changeset changing is not a
-	// reason to send a reviewer back to the top of the file they are reading —
+	// resetScroll only in the file list. The changeset changing is not a
+	// reason to send a reader back to the top of the file they are reading —
 	// and with an agent working, another file changing is the common case, not
 	// the rare one.
-	return m, tea.Batch(m.loadDiffCmd(m.mode != modeReview), m.reanchorAllCmd())
+	return m, tea.Batch(m.loadDiffCmd(m.mode != modeDiff), m.reanchorAllCmd())
 }
 
 func (m Model) handleReanchor(msg reanchorMsg) (tea.Model, tea.Cmd) {
@@ -443,6 +442,8 @@ func (m Model) handleBranchesLoaded(msg branchesLoadedMsg) (tea.Model, tea.Cmd) 
 	m.mode = modeBranchPicker
 	m.branches = msg.branches
 	m.currentBranch = msg.current
+	m.branchDirty = msg.dirty
+	m.branchConfirm = ""
 	m.branchCursor = 0
 	m.branchOffset = 0
 	for i, b := range m.branches {
@@ -504,6 +505,10 @@ func (m Model) handleBranchCreated(msg branchCreatedMsg) (tea.Model, tea.Cmd) {
 // wrapped onto a second row and ate a row of the branch list.
 func (m Model) fitInputsToPanels() Model {
 	m.branchFilter.Width = max(m.listWidth()-8, 1)
+	// On the model, not in View: a width set on View's copy never reached the
+	// input, which at width 0 never scrolls — a long message ran out of the
+	// box and was clipped with the cursor in it.
+	m.commitInput.Width = m.commitInputWidth()
 	// The comment textarea is sized when the editor opens and was never
 	// resized after. lipgloss.JoinVertical pads every row of the frame to the
 	// widest one, so a textarea left at its old width made the whole frame

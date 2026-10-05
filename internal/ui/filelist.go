@@ -2,7 +2,7 @@ package ui
 
 import "strings"
 
-// filePanelPadding is the column FileItem and FileSelected reserve on the left
+// filePanelPadding is the column FileItem and Selected reserve on the left
 // (PaddingLeft(1) in styles.go). Row arithmetic has to allow for it, or a row
 // comes out a column wider than the panel and lipgloss wraps it.
 const filePanelPadding = 1

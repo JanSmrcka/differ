@@ -24,7 +24,7 @@ func TestFrame_DrawsAtEverySizeItAccepts(t *testing.T) {
 			m := liveModel(t, tr)
 			updated, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: h})
 			m = updated.(Model)
-			m.mode = modeReview
+			m.mode = modeDiff
 			m.commenting = true
 
 			func() {
@@ -248,7 +248,7 @@ func TestFrame_NarrowingWithTheCommentEditorOpenKeepsTheFrameInside(t *testing.T
 	} {
 		m := liveModel(t, tr)
 		m = settle(t, m, tea.WindowSizeMsg{Width: tc.from[0], Height: tc.from[1]})
-		m.mode = modeReview
+		m.mode = modeDiff
 		updated, _ := m.startComment()
 		m = updated.(Model)
 		m = settle(t, m, tea.WindowSizeMsg{Width: tc.to[0], Height: tc.to[1]})

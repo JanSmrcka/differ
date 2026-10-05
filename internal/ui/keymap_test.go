@@ -131,9 +131,20 @@ func isKeyString(e ast.Expr) bool {
 	return ok && sel.Sel.Name == "String"
 }
 
+// keyConstants are the named keys a handler may switch on. Without them a
+// `case agentKey:` read as no key at all, and the agent picker's way out was
+// invisible to every check here.
+var keyConstants = map[string]string{"agentKey": agentKey, "reloadKey": reloadKey}
+
 func literals(exprs []ast.Expr) []string {
 	var out []string
 	for _, e := range exprs {
+		if id, ok := e.(*ast.Ident); ok {
+			if v, known := keyConstants[id.Name]; known {
+				out = append(out, v)
+			}
+			continue
+		}
 		lit, ok := e.(*ast.BasicLit)
 		if !ok || lit.Kind != token.STRING {
 			continue
@@ -149,7 +160,6 @@ func literals(exprs []ast.Expr) []string {
 var handlerFor = map[viewMode]string{
 	modeFileList:     "updateFileListMode",
 	modeDiff:         "updateDiffMode",
-	modeReview:       "updateReviewMode",
 	modeCommit:       "updateCommitMode",
 	modeBranchPicker: "updateBranchMode",
 }
@@ -327,21 +337,24 @@ func TestKeymap_TheREADMEMatchesTheKeymap(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sections := map[viewMode]string{
-		modeFileList: "### File List",
-		modeDiff:     "### Diff View",
-		modeReview:   "### Review Mode",
+	logKeys := append(surfaceKeymap(surfaceLogList), surfaceKeymap(surfaceLogDiff)...)
+	sections := map[string][]binding{
+		"### Everywhere":    globalBindings(),
+		"### File List":     keymapFor(modeFileList),
+		"### Diff View":     keymapFor(modeDiff),
+		"### Commit Mode":   keymapFor(modeCommit),
+		"### Branch Picker": keymapFor(modeBranchPicker),
+		"### Log":           logKeys,
 	}
-	for mode, heading := range sections {
+	for heading, bindings := range sections {
 		table := sectionTable(t, string(readme), heading)
 
 		documented := map[string]bool{}
-		for _, b := range keymapFor(mode) {
+		for _, b := range bindings {
 			for _, k := range b.Keys {
 				documented[k] = true
 			}
 		}
-
 		for _, k := range table {
 			if !documented[k] {
 				t.Errorf("%s documents %q, which is not in the keymap", heading, k)
@@ -352,13 +365,11 @@ func TestKeymap_TheREADMEMatchesTheKeymap(t *testing.T) {
 		for _, k := range table {
 			inREADME[k] = true
 		}
-		for _, b := range keymapFor(mode) {
-			if len(b.Keys) == 0 {
+		for _, b := range bindings {
+			if len(b.Keys) == 0 || inREADME[b.Keys[0]] {
 				continue
 			}
-			if !inREADME[b.Keys[0]] {
-				t.Errorf("%s does not document %q (%s)", heading, b.Keys[0], b.Desc)
-			}
+			t.Errorf("%s does not document %q (%s)", heading, b.Keys[0], b.Desc)
 		}
 	}
 }
@@ -453,7 +464,7 @@ func TestKeymap_TheGlobalKeysWorkInEveryMode(t *testing.T) {
 	}{
 		{"file list", func(m Model) Model { m.mode = modeFileList; return m }},
 		{"diff", func(m Model) Model { m.mode = modeDiff; return m }},
-		{"review", func(m Model) Model { m.mode = modeReview; return m }},
+		{"review", func(m Model) Model { m.mode = modeDiff; return m }},
 		{"commit", func(m Model) Model { m.mode = modeCommit; return m }},
 		{"branch picker", func(m Model) Model { m.mode = modeBranchPicker; return m }},
 		{"branch create", func(m Model) Model {
@@ -462,12 +473,12 @@ func TestKeymap_TheGlobalKeysWorkInEveryMode(t *testing.T) {
 			return m
 		}},
 		{"comment editor", func(m Model) Model {
-			m.mode = modeReview
+			m.mode = modeDiff
 			m.commenting = true
 			return m
 		}},
 		{"help overlay", func(m Model) Model { m.showHelp = true; return m }},
-		{"history overlay", func(m Model) Model { m.mode = modeReview; m.showHistory = true; return m }},
+		{"history overlay", func(m Model) Model { m.mode = modeDiff; m.showHistory = true; return m }},
 	}
 
 	for _, s := range states {
@@ -541,9 +552,10 @@ func TestKeymap_TheREADMEParserReadsEverySection(t *testing.T) {
 	}{
 		{"### File List", "tab"},
 		{"### Diff View", "}"},
-		{"### Review Mode", "C"},
 		{"### Commit Mode", "enter"},
 		{"### Branch Picker", "ctrl+n"},
+		{"### Everywhere", "?"},
+		{"### Log", "enter"},
 	} {
 		keys := sectionTable(t, string(readme), section.heading)
 		if len(keys) == 0 {
@@ -562,43 +574,100 @@ func TestKeymap_TheREADMEParserReadsEverySection(t *testing.T) {
 	}
 }
 
-// overlayHandlers are the key handlers that own the keyboard while an overlay
-// is open. They are written as `func (m Model) xKey(key string)` rather than
-// taking a tea.KeyMsg, which is why the checks above, keyed on handlerFor,
-// never saw them.
-var overlayHandlers = []string{"agentPickerKey", "themePickerKey"}
+// surfaceHandlers are the handlers that own the keyboard on a surface: an
+// overlay, an input inside a mode, or the log browser. They were outside the
+// table entirely, so ? could not show them and nothing held them to the code.
+// The comment editor is missing on purpose — it switches on msg.Type, which
+// this scanner cannot read — and is checked by behaviour instead.
+var surfaceHandlers = map[surface]string{
+	surfaceThemes:    "themePickerKey",
+	surfaceAgents:    "agentPickerKey",
+	surfaceReading:   "readingOverlayKey",
+	surfaceNewBranch: "updateBranchCreateMode",
+	surfaceLogList:   "updateList",
+	surfaceLogDiff:   "updateDiff",
+}
 
-// An overlay owns the keyboard, so it has to say how to leave. Without this
-// the only thing standing between a picker and a trapped user was that
-// someone remembered.
-func TestKeymap_EveryOverlayOffersAnExit(t *testing.T) {
+func TestKeymap_EverySurfaceMatchesItsHandler(t *testing.T) {
 	t.Parallel()
 	handled := handledKeys(t)
 
-	for _, name := range overlayHandlers {
-		keys := handled[name]
+	for s, fn := range surfaceHandlers {
+		keys := handled[fn]
 		if len(keys) == 0 {
-			t.Errorf("%s handles no keys — the scanner no longer reads it", name)
+			t.Errorf("%s handles no keys — the scanner no longer reads it", fn)
 			continue
 		}
-		if !slices.Contains(keys, "esc") {
-			t.Errorf("%s has no esc: %v", name, keys)
+		documented := map[string]bool{}
+		for _, b := range surfaceKeymap(s) {
+			for _, k := range b.Keys {
+				documented[k] = true
+			}
+		}
+		for _, k := range keys {
+			if k != "ctrl+c" && !documented[k] {
+				t.Errorf("%s (%s) handles %q, which its keymap does not document", fn, s, k)
+			}
+		}
+		for _, b := range surfaceKeymap(s) {
+			if len(b.Keys) > 0 && !slices.Contains(keys, b.Keys[0]) {
+				t.Errorf("%s documents %q (%s) with no handler in %s", s, b.Keys[0], b.Desc, fn)
+			}
 		}
 	}
 }
 
-// And no overlay may bind one key to two things.
-func TestKeymap_NoOverlayBindsAKeyTwice(t *testing.T) {
+// A surface owns the keyboard, so it has to say how to leave. Without this
+// the only thing standing between a picker and a trapped user was that
+// someone remembered.
+func TestKeymap_EverySurfaceOffersAnExit(t *testing.T) {
 	t.Parallel()
-	handled := handledKeys(t)
-
-	for _, name := range overlayHandlers {
-		seen := map[string]bool{}
-		for _, k := range handled[name] {
-			if seen[k] {
-				t.Errorf("%s binds %q twice", name, k)
+	for _, s := range allSurfaces {
+		found := false
+		for _, b := range surfaceKeymap(s) {
+			if slices.Contains(b.Keys, "esc") || slices.Contains(b.Keys, "q") {
+				found = true
 			}
-			seen[k] = true
+		}
+		if !found {
+			t.Errorf("%s documents no esc or q", s)
+		}
+	}
+}
+
+// And no surface may bind one key to two things.
+func TestKeymap_NoSurfaceBindsAKeyTwice(t *testing.T) {
+	t.Parallel()
+	for _, s := range allSurfaces {
+		seen := map[string]string{}
+		for _, b := range surfaceKeymap(s) {
+			for _, k := range b.Keys {
+				if prev, dup := seen[k]; dup {
+					t.Errorf("%s binds %q to both %q and %q", s, k, prev, b.Desc)
+				}
+				seen[k] = b.Desc
+			}
+		}
+	}
+}
+
+// The comment editor switches on the key's type, which the scanner cannot
+// read, so its table is held to the code by pressing each key.
+func TestKeymap_TheCommentEditorDoesWhatItsKeymapSays(t *testing.T) {
+	keys := map[string]tea.KeyMsg{"esc": {Type: tea.KeyEsc}, "ctrl+s": {Type: tea.KeyCtrlS}}
+	for _, b := range surfaceKeymap(surfaceComment) {
+		msg, ok := keys[b.Keys[0]]
+		if !ok {
+			t.Errorf("the comment editor documents %q, which this test cannot press", b.Keys[0])
+			continue
+		}
+		m := reviewOnAddedLine(t)
+		u, _ := m.updateDiffMode(key("c"))
+		m = u.(Model)
+		m = typeText(t, m, "body")
+		u, _ = m.updateDiffMode(msg)
+		if u.(Model).commenting {
+			t.Errorf("%q (%s) left the editor open", b.Keys[0], b.Desc)
 		}
 	}
 }

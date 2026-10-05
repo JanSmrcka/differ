@@ -16,7 +16,7 @@ func reviewModel(t *testing.T, fixture string) Model {
 	t.Helper()
 	m := diffModel(t, fixture, 20)
 	m.mode = modeFileList
-	updated, _ := m.Update(key("r"))
+	updated, _ := m.Update(key("enter"))
 	return updated.(Model)
 }
 
@@ -171,7 +171,7 @@ func TestDiffFixtureCoverage_CommentOnEveryFixture(t *testing.T) {
 			if m.renderer.LineCount() == 0 {
 				t.Skip("no addressable lines")
 			}
-			m.mode = modeReview
+			m.mode = modeDiff
 			m.session = review.NewSession()
 			m = m.setCursor(m.renderer.Parsed().FirstCommentableLine())
 			if _, ok := m.buildLineComment(); !ok {
@@ -296,7 +296,7 @@ func TestComment_TheBuildersRecordWhereItPoints(t *testing.T) {
 	tr.Modify("f.txt", "a\nCHANGED\nc\n")
 
 	m := liveModelStaged(t, tr, false)
-	m = settle(t, m, key("r"))
+	m = settle(t, m, key("enter"))
 	if m.renderer == nil {
 		t.Fatal("no diff on screen")
 	}
@@ -373,12 +373,12 @@ func TestComment_ReanchoringAcrossEntriesRevisesTheClaim(t *testing.T) {
 
 	m := settle(t, liveModel(t, tr), tea.WindowSizeMsg{Width: 120, Height: 40})
 	m = atEntry(t, m, "f.txt", false)
-	m = settle(t, m, key("r"))
+	m = settle(t, m, key("enter"))
 
 	m = cursorOn(t, m, LineContext, "CHANGED")
-	updated, _ := m.updateReviewMode(key("c"))
+	updated, _ := m.updateDiffMode(key("c"))
 	m = typeText(t, updated.(Model), "why?")
-	updated, _ = m.updateReviewMode(key("ctrl+s"))
+	updated, _ = m.updateDiffMode(key("ctrl+s"))
 	m = updated.(Model)
 
 	before := m.session.CommentsFor("f.txt")[0]
@@ -456,7 +456,7 @@ func TestComment_StagedAndIdenticalStillNamesTheLine(t *testing.T) {
 	tr.Stage("src.ts")
 
 	m := settle(t, liveModelStaged(t, tr, true), tea.WindowSizeMsg{Width: 120, Height: 40})
-	m = settle(t, m, key("r"))
+	m = settle(t, m, key("enter"))
 
 	if got := m.locateFor(review.SideNew); got != review.LocateLine {
 		t.Errorf("locate = %v, want LocateLine — the worktree is the index", got)
@@ -483,7 +483,7 @@ func TestComment_RefusesWhileTheRendererIsAnotherFile(t *testing.T) {
 	tr.Modify("b.txt", "b1\nBBB\nb3\n")
 
 	m := settle(t, liveModel(t, tr), tea.WindowSizeMsg{Width: 120, Height: 40})
-	m = settle(t, m, key("r"))
+	m = settle(t, m, key("enter"))
 	if m.rendererPath != m.currentFilePath() {
 		t.Fatalf("the fixture did not settle: renderer=%q cursor=%q",
 			m.rendererPath, m.currentFilePath())
@@ -491,7 +491,7 @@ func TestComment_RefusesWhileTheRendererIsAnotherFile(t *testing.T) {
 
 	// Move the cursor without letting the reload land, which is what happens
 	// while git diff runs.
-	moved, _ := m.updateReviewMode(key("n"))
+	moved, _ := m.updateDiffMode(key("J"))
 	m = moved.(Model)
 	if m.rendererPath == m.currentFilePath() {
 		t.Skip("the diff loaded synchronously; there is no window to test")

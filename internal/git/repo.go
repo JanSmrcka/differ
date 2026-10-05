@@ -158,6 +158,19 @@ func (r *Repo) CheckoutBranch(name string) error {
 	return err
 }
 
+// HasTrackedChanges reports whether any tracked file differs from HEAD, in
+// the index or the working tree. `git switch` carries such changes to the new
+// branch without a word when they do not conflict, so a caller about to
+// switch asks first. Untracked files are left out: they stay put whichever
+// branch is checked out.
+func (r *Repo) HasTrackedChanges() (bool, error) {
+	out, err := r.run("--no-optional-locks", "status", "--porcelain", "--untracked-files=no")
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(out) != "", nil
+}
+
 // UpstreamStatus returns ahead/behind counts relative to the upstream branch.
 // Returns zero-value UpstreamInfo if no upstream is configured.
 func (r *Repo) UpstreamStatus() UpstreamInfo {

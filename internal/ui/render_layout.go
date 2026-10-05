@@ -70,7 +70,7 @@ func (m Model) renderFileItem(f fileItem, selected bool, short map[string]string
 	name := padTo(truncatePath(m.displayName(f, short), nameW), nameW)
 
 	if selected {
-		return m.styles.FileSelected.Width(m.listWidth()).Render(fmt.Sprintf("%s%s%s %s %s", cursorMarker, stagedRaw, status, name, right.text))
+		return m.styles.Selected.Width(m.listWidth()).Render(fmt.Sprintf("%s%s%s %s %s", cursorMarker, stagedRaw, status, name, right.text))
 	}
 
 	staged := stagedRaw
@@ -128,7 +128,7 @@ func (m Model) rightColumn(f fileItem) rightColumn {
 		added:   f.change.AddedLines,
 		deleted: f.change.DeletedLines,
 	}
-	// While reviewing, how far the user has got with the file takes the place
+	// Once a file has been read, how far the user has got with it takes the place
 	// of the line counts: it is what they are navigating by, and 35 columns
 	// does not hold both.
 	if badge := m.reviewBadge(f.change.Path); badge != "" {
@@ -159,10 +159,10 @@ func (c rightColumn) render(styles Styles) string {
 }
 
 // reviewBadge is the one-word review state of a file, or "" when there is
-// nothing worth saying — outside review mode, or for a file nobody has looked
-// at yet, which is the normal state and needs no badge.
+// nothing worth saying — for a file nobody has looked at yet, which is the
+// normal state and needs no badge.
 func (m Model) reviewBadge(path string) string {
-	if m.mode != modeReview || m.session == nil {
+	if m.session == nil {
 		return ""
 	}
 	switch m.session.FileStateOf(path) {
@@ -265,10 +265,6 @@ func (m Model) renderBar(style lipgloss.Style, content string) string {
 	return style.Width(m.width).MaxHeight(1).Render(content)
 }
 
-func (m Model) renderCommitBar() string {
-	return lipgloss.NewStyle().Width(m.width).Render(m.commitBarContent())
-}
-
 // renderCommentEditor shows the textarea plus what the two closing keys do,
 // inside budget rows.
 // commentClosing is the two keys that close the editor. The one place they are
@@ -299,12 +295,31 @@ func (m Model) commentRows(room int) []string {
 	return strings.Split(m.commentInput.View(), "\n")
 }
 
-func (m Model) commitBarContent() string {
-	prompt := m.styles.HelpKey.Render(" commit: ")
+// commitRows is the commit message input, in the box the other questions
+// use. It was a footer bar: a fourth shape for the same kind of question.
+func (m Model) commitRows() []string {
+	prompt := " " + m.styles.HelpKey.Render(commitPrompt)
 	if m.generatingMsg {
-		return prompt + m.styles.HelpDesc.Render("generating...  esc cancel")
+		return []string{"", prompt + m.styles.HelpDesc.Render("generating…")}
 	}
-	return prompt + m.commitInput.View() + "  " + m.styles.HelpDesc.Render("esc cancel · enter commit")
+	return []string{"", prompt + m.commitInput.View()}
+}
+
+const commitPrompt = "message: "
+
+// commitInputWidth is the room the message has in its box: the body less our
+// prompt and its leading space, the input's own prompt, and the column the
+// cursor sits in at the end.
+func (m Model) commitInputWidth() int {
+	used := lipgloss.Width(" "+commitPrompt) + lipgloss.Width(m.commitInput.Prompt) + 1
+	return max(m.modalInnerWidth()-used, 1)
+}
+
+func (m Model) commitClosing() string {
+	if m.generatingMsg {
+		return "esc cancels"
+	}
+	return "enter commits · esc cancels"
 }
 
 // renderCommentBar is the comment editor in the footer, for terminals too

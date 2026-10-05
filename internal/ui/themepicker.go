@@ -48,10 +48,10 @@ func (m Model) applyTheme(t theme.Theme) (Model, tea.Cmd) {
 	// Every in-flight diff was built with the old palette. The counter lets
 	// their results be dropped rather than installed after this one.
 	m.themeGen++
-	// Same as a resize, guard included: outside review mode diffStale() is
-	// briefly true between a refresh installing new keys and the load it
-	// batched landing, and re-rendering there would keep old content in a mode
-	// where R is unbound.
+	// Same as a resize, guard included: on a diff that is not held
+	// diffStale() is briefly true between a refresh installing new keys and
+	// the load it batched landing, and re-rendering there would keep old
+	// content nobody asked to keep.
 	if m.holdsTheDiff() && m.diffStale() {
 		return m, m.rerenderCmd()
 	}
@@ -99,7 +99,7 @@ func (m Model) renderThemeOverlay(width, height int) string {
 	for i, name := range names {
 		label := "  " + name
 		if i == m.themeCursor {
-			label = m.styles.Accent.Render(focusBar) + m.styles.PanelLabelFocus.Render(" "+name)
+			label = m.styles.Selected.Render(cursorMarker + " " + name)
 		}
 		// By palette, not by name: the config can say "dark", which is an
 		// alias and not in ThemeNames, and --theme overrides the config

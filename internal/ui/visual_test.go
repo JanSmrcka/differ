@@ -54,7 +54,7 @@ func TestVisual_NoScreenDrawsBoxes(t *testing.T) {
 	tr := testutil.NewRepo(t)
 	tr.ApplyFixture(testutil.Fixture(t, "multi_hunk"))
 	main := liveModel(t, tr)
-	for _, mode := range []viewMode{modeFileList, modeDiff, modeReview} {
+	for _, mode := range []viewMode{modeFileList, modeDiff} {
 		main.mode = mode
 		for _, c := range corners {
 			if strings.Contains(main.View(), c) {
@@ -200,7 +200,7 @@ func TestStartInReviewMode_SaysSoWhenThereIsNothingToReview(t *testing.T) {
 	}
 
 	m.StartInReviewMode()
-	if m.mode != modeReview {
+	if m.mode != modeDiff {
 		t.Error("differ review did not open review mode")
 	}
 	got := stripANSI(m.renderFileList())

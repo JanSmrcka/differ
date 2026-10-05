@@ -50,9 +50,9 @@ var rootCmd = &cobra.Command{
 	Long: `differ shows what changed and lets you review it.
 
 Run it with no arguments to see the working tree; add -s for the index, or
--r <ref> to compare against a branch, tag or commit. "differ review" opens
-the same changes straight into review mode, where you can comment line by
-line and send the result to a coding agent.`,
+-r <ref> to compare against a branch, tag or commit. In the diff you can
+comment line by line and send the result to a coding agent; "differ review"
+opens the same changes straight into the first diff.`,
 	Example: `  differ                 # everything that changed
   differ -s              # staged changes only
   differ -r main         # compare against main
@@ -71,7 +71,7 @@ line and send the result to a coding agent.`,
 var reviewCmd = &cobra.Command{
 	Use:   "review",
 	Short: "Review changes and comment on them line by line",
-	Long: `review opens the same changes as differ itself, but starts in review mode.
+	Long: `review opens the same changes as differ itself, but starts in the first diff.
 
 Comment on a line with c, or on a whole hunk with C, then send one comment
 with s or all of them with S. Where the feedback goes is set by

@@ -31,7 +31,7 @@ differ              # all changes (staged + unstaged + untracked)
 differ -s           # staged only
 differ -r main      # compare against a branch, tag or commit
 differ -c           # open straight into the commit message
-differ review       # the same changes, straight into review mode
+differ review       # the same changes, straight into the first diff
 differ log          # browse recent commits
 differ commit       # review what is staged, then commit
 ```
@@ -45,10 +45,10 @@ ref), **2** a bad command line.
 ## The review loop
 
 ```
-differ review        # the agent's changes, in review mode
+differ review        # the agent's changes, opened on the first diff
 j / k                # move down the diff
 c                    # comment on this line — type, then ctrl+s
-n                    # next file; the one you left is marked read
+J                    # next file; the one you left is marked read
 S                    # send every pending comment to the agent
 ```
 
@@ -59,8 +59,9 @@ What that gives you over `git diff`:
   `3/7 reviewed  2 comments  1 pending  1 changed`.
 - **Comments attach to lines.** They show inline under the line they are about
   and stay `pending` until you send them.
-- **The diff does not move under you.** If the agent rewrites the file while
-  you are reading it, your place is kept and the bar says `diff moved (2 more
+- **The diff does not move under your comments.** A diff with nothing written
+  against it follows the agent live. Once you have commented on a file, an
+  agent rewrite keeps your place and the bar says `diff moved (2 more
   added) — R to reload`. Comments follow their line either way; one whose line
   is gone goes `stale` rather than pointing at whatever took its place.
 - **They survive `q`.** The review is written to `.git/differ/review.json` on
@@ -85,7 +86,7 @@ clipboard or stdout.
 
  filter…                                                                     4/4
 
-▍ differ:2  claude  /Users/you/git/private/differ
+▌ differ:2  claude  /Users/you/git/private/differ
   ELI-panda:2  claude  /Users/you/git/work/ELI-panda
   personal-web:2 %5  opencode  /Users/you/git/private/personal-web
   personal-web:2 %6  claude  /Users/you/git/private/personal-web
@@ -167,8 +168,22 @@ misconfigured target cannot execute anything.
 ## Keyboard shortcuts
 
 `?` lists the current view's keys. The bar along the bottom shows the common
-ones and hides what would do nothing. The tables below are checked against the
-code — a test fails if a key here has no handler, or a handler is missing here.
+ones and hides what would do nothing; a picker or input shows its own. The
+tables below are checked against the code — a test fails if a key here has no
+handler, or a handler is missing here.
+
+### Everywhere
+
+Except while typing.
+
+| Key      | Action                                       |
+| -------- | -------------------------------------------- |
+| `?`      | every key for this view                      |
+| `H`      | what has been sent, and whether it got there |
+| `!`      | the last failure, in full                    |
+| `t`      | theme picker                                 |
+| `A`      | choose the agent reviews go to               |
+| `ctrl+c` | quit immediately                             |
 
 ### File List
 
@@ -179,8 +194,8 @@ code — a test fails if a key here has no handler, or a handler is missing here
    ? NOTES.md                 +3 -0
 ```
 
-`●` is staged. While reviewing, the right-hand column shows review state
-instead — `read`, `2 comments`, `sent`, `changed`.
+`●` is staged. Once a file has been read, the right-hand column shows review
+state instead — `read`, `2 comments`, `sent`, `changed`.
 
 | Key           | Action                                     |
 | ------------- | ------------------------------------------ |
@@ -188,8 +203,7 @@ instead — `read`, `2 comments`, `sent`, `changed`.
 | `enter` / `l` | view diff                                  |
 | `tab`         | stage/unstage file                         |
 | `a`           | stage all                                  |
-| `r`           | enter review mode                          |
-| `c`           | commit (AI-generated message via `claude`) |
+| `C`           | commit (AI-generated message via `claude`) |
 | `b`           | open branch picker                         |
 | `v`           | toggle split (side-by-side) diff           |
 | `e`           | open in editor — differ keeps running      |
@@ -200,18 +214,26 @@ instead — `read`, `2 comments`, `sent`, `changed`.
 
 ### Diff View
 
+Reading and reviewing are one view: comment on the line you are reading.
+Nothing here changes git state except `tab`.
+
 | Key         | Action                              |
 | ----------- | ----------------------------------- |
 | `j/k`       | move line cursor                    |
 | `}` / `{`   | next/prev hunk                      |
 | `d/u`       | half page down/up                   |
 | `g/G`       | first/last line                     |
-| `n/p`       | next/prev file                      |
+| `J/K`       | next/prev file                      |
+| `c`         | comment on line (edit existing)     |
+| `C`         | comment on whole hunk               |
+| `x`         | delete comment under cursor         |
+| `s`         | send comment under cursor           |
+| `S`         | send all pending comments           |
+| `R`         | reload after the file changed       |
 | `tab`       | stage/unstage                       |
 | `b`         | open branch picker                  |
 | `v`         | toggle split diff                   |
 | `e`         | open in editor at the cursor's line |
-| `r`         | enter review mode                   |
 | `esc` / `h` | back to file list                   |
 | `q`         | quit                                |
 
@@ -222,39 +244,6 @@ was cut to fit, `·` trailing whitespace.
 Split view shades the part of a line that actually differs, so a
 one-character change does not read as a rewrite. It falls back to unified when
 the panel is too narrow for two columns.
-
-### Review Mode
-
-The diff view with review state on top. It never changes git state.
-
-| Key       | Action                              |
-| --------- | ----------------------------------- |
-| `j/k`     | move line cursor                    |
-| `}` / `{` | next/prev hunk                      |
-| `d/u`     | half page down/up                   |
-| `n/p`     | next/prev file                      |
-| `g/G`     | first/last line                     |
-| `c`       | comment on line (edit existing)     |
-| `C`       | comment on whole hunk               |
-| `x`       | delete comment under cursor         |
-| `s`       | send comment under cursor           |
-| `S`       | send all pending comments           |
-| `H`       | what has already been sent          |
-| `R`       | reload after the file changed       |
-| `r`       | toggle review mode                  |
-| `e`       | open in editor at the cursor's line |
-| `tab`     | stage/unstage                       |
-| `v`       | toggle split diff                   |
-| `b`       | open branch picker                  |
-| `esc`     | back to file list                   |
-| `q`       | quit                                |
-
-The comment editor is a box over the diff, so you can see the line you are
-writing about. `ctrl+s` saves, `esc` cancels; comments are multiline.
-
-A `stale` comment takes a second, explicit press to send — feedback about code
-that no longer exists is never sent by accident. A comment already sent is
-never sent twice.
 
 ### Commit Mode
 
@@ -271,7 +260,7 @@ never sent twice.
 │                                                       │
 │  > feat/                                        12/34 │
 │                                                       │
-│ ▍*  feat/roadmap-59                                   │
+│ ▌*  feat/roadmap-59                                   │
 │     feat/payload-90                                   │
 │     feat/agent-picker-84                              │
 │                                                       │
@@ -279,13 +268,27 @@ never sent twice.
 ╰───────────────────────────────────────────────────────╯
 ```
 
-| Key             | Action               |
-| --------------- | -------------------- |
-| type            | filter branches      |
-| `↑/↓` / `^j/^k` | navigate             |
-| `enter`         | switch branch        |
-| `ctrl+n`        | create new branch    |
-| `esc`           | clear filter / close |
+| Key             | Action                                                       |
+| --------------- | ------------------------------------------------------------ |
+| type            | filter branches                                              |
+| `up/down`       | navigate                                                     |
+| `ctrl+k/ctrl+j` | navigate                                                     |
+| `enter`         | switch branch (asks again if uncommitted changes would move) |
+| `ctrl+n`        | create new branch                                            |
+| `esc`           | clear filter / close                                         |
+
+### Log
+
+`differ log` browses recent commits; `enter` shows one through the same diff
+renderer.
+
+| Key     | Action                        |
+| ------- | ----------------------------- |
+| `j/k`   | move through commits          |
+| `g/G`   | newest/oldest                 |
+| `enter` | view the commit's diff        |
+| `esc`   | back to the list, from a diff |
+| `q`     | quit                          |
 
 ## Themes
 
@@ -332,7 +335,7 @@ agent's session id (`herdr_target`) and the pane it was in (`herdr_pane`). The c
 `wl-copy`/`xclip`/`xsel`, so it does the right thing over SSH.
 
 `commit_msg_cmd` generates a commit message from the staged diff when you
-press `c`; it is pre-filled for you to edit. Any command that reads a diff on
+press `C`; it is pre-filled for you to edit. Any command that reads a diff on
 stdin works, and differ carries on without one.
 
 ## Editor

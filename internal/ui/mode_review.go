@@ -7,27 +7,20 @@ import (
 	"github.com/jansmrcka/differ/internal/review"
 )
 
-// Review mode: the diff view with review affordances on top.
-//
-// It shares navigation with diff mode rather than duplicating it, so a cursor
-// position means the same thing in both. Nothing here touches git — review
-// state lives entirely in the session.
+// Review state as the diff shows it: progress, the reload after the file
+// moved, and opening a file to read it. The keys are in mode_diff.go.
 
-// enterReviewMode switches into review, creating the session on first use.
-func (m Model) enterReviewMode() (tea.Model, tea.Cmd) {
+// openDiff moves from the file list into the file's diff, recording the visit.
+func (m Model) openDiff() (tea.Model, tea.Cmd) {
 	if m.session == nil {
-		// Before the early return below: a changeset can arrive later, and a
-		// review mode with no session is dead — no progress, no badges, and
-		// the only way out is to leave and come back.
 		m.session = review.NewSession()
 	}
+	m.mode = modeDiff
 	if len(m.files) == 0 {
-		// Nothing to review, but the panel says that better than the status
+		// Nothing to read, but the panel says that better than the status
 		// bar can — and it says it in the same place the file list would.
-		m.mode = modeReview
 		return m, nil
 	}
-	m.mode = modeReview
 	m.session.MarkViewed(m.currentFilePath())
 
 	// Coming from the file list there may be no diff loaded for this file yet.
@@ -35,49 +28,6 @@ func (m Model) enterReviewMode() (tea.Model, tea.Cmd) {
 		return m, m.loadDiffCmd(true)
 	}
 	return m, nil
-}
-
-func (m Model) updateReviewMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if m.commenting {
-		return m.updateCommentEditor(msg)
-	}
-
-	// Both confirmations are per action, not per session: anything other than
-	// repeating the action disarms them.
-	if k := msg.String(); k != "q" {
-		m.quitConfirm = false
-	}
-	if k := msg.String(); k != "s" && k != "S" {
-		m.staleConfirm = false
-	}
-
-	switch msg.String() {
-	case "c":
-		return m.startComment()
-	case "C":
-		return m.startHunkComment()
-	case "x":
-		return m.deleteCommentAtCursor()
-	case "H":
-		m.showHistory = !m.showHistory
-		return m, nil
-	case "s":
-		return m.sendCommentAtCursor()
-	case "S":
-		return m.sendAllPending()
-	case "esc":
-		m.mode = modeFileList
-		return m, nil
-	case "R":
-		return m.reloadDiff()
-	case "r":
-		// Toggle back to the plain diff view.
-		m.mode = modeDiff
-		return m, nil
-	case "q":
-		return m.confirmQuit()
-	}
-	return m.diffNavigation(msg)
 }
 
 // currentFilePath is the file the cursor is on, or "" when there is none.
@@ -102,8 +52,8 @@ func (m Model) reviewProgress() review.Progress {
 
 // reloadKey re-reads the file on screen after it moved underneath.
 //
-// Not "r": that leaves review mode, and the two would be a keystroke apart
-// with opposite effects on a half-written comment.
+// Capital, because a reload is the one key here that replaces what is on
+// screen.
 const reloadKey = "R"
 
 // reviewSummary is the one-line progress readout shown while reviewing.

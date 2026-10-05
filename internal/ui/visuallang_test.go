@@ -124,8 +124,8 @@ func TestLanguage_PanelHeaderMetaEndsWhereTheRowsDo(t *testing.T) {
 		return lipgloss.Width(strings.TrimRight(left, " "))
 	}
 
-	header := edge(lines[2])          // Files … 4 · 1 staged
-	firstRow := edge(lines[3])        // ● M client.ts … +1 -1
+	header := edge(lines[2])   // Files … 4 · 1 staged
+	firstRow := edge(lines[3]) // ● M client.ts … +1 -1
 	if header != firstRow {
 		t.Errorf("panel header's right column ends at %d, the rows' at %d:\n%q\n%q",
 			header, firstRow, lines[2], lines[3])
@@ -136,7 +136,7 @@ func TestLanguage_PanelHeaderMetaEndsWhereTheRowsDo(t *testing.T) {
 // place and a middle dot in another, on the same line.
 func TestLanguage_HeadersUseOneSeparator(t *testing.T) {
 	m := chromeModel(t, 120, 30)
-	m.mode = modeReview
+	m.mode = modeDiff
 	header := strings.TrimRight(strings.Split(stripANSI(m.View()), "\n")[0], " ")
 	if strings.Contains(header, "  ") {
 		t.Errorf("main header still pads with runs of spaces: %q", header)

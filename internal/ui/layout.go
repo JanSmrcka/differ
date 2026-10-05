@@ -20,8 +20,10 @@ const (
 
 	verticalDivider = "│"
 	horizontalRule  = "─"
-	focusBar        = "▍"
-	panelGap        = 1 // one space either side of the divider
+	// focusBar marks the focused panel and nothing else; a selected row in
+	// any list carries cursorMarker.
+	focusBar = "▍"
+	panelGap = 1 // one space either side of the divider
 
 	verticalDividerWidth = 1
 )
@@ -40,18 +42,10 @@ func (m Model) View() string {
 
 	contentH := m.contentHeight()
 
-	// The help overlay takes the panel area rather than sitting under it, so
-	// the layout's height does not change while it is open and the diff
-	// viewport is exactly where it was when it closes.
+	// Help, history and the problem are modals now (see Model.modal), drawn
+	// over this like the pickers, so the view is still there around them.
 	var body string
 	switch {
-	case m.showHelp:
-		body = m.renderHelpOverlay(m.width, contentH)
-	case m.showHistory:
-		body = m.renderHistoryOverlay(m.width, contentH)
-	case m.showProblem:
-		body = m.renderProblemOverlay(m.width, contentH)
-
 	case m.onePanel():
 		// One panel takes the terminal. A pair squeezed into sixty columns is
 		// two unusable panels rather than one usable one, and the diff is what
@@ -162,7 +156,7 @@ func (m Model) focusOn(p pane) bool {
 	switch m.mode {
 	case modeFileList, modeBranchPicker:
 		return p == paneFiles
-	case modeDiff, modeReview:
+	case modeDiff:
 		return p == paneDiff
 	default:
 		return false
@@ -183,7 +177,7 @@ func (m Model) diffLabel() (label, meta string) {
 	if f.change.Staged {
 		parts = append(parts, "staged")
 	}
-	if m.mode == modeReview && m.session != nil {
+	if m.session != nil {
 		if n := m.session.CountFor(f.change.Path); n > 0 {
 			parts = append(parts, plural(n, "comment"))
 		}
@@ -219,9 +213,6 @@ func (m Model) headerContext() string {
 		ctx += " ← " + m.ref
 	case m.stagedOnly:
 		ctx += " staged"
-	}
-	if m.mode == modeReview {
-		ctx += " · review"
 	}
 	return ctx
 }
@@ -265,10 +256,8 @@ func (m Model) rule() string {
 // renderFooter is the bar below the content: hints, or an input when one is
 // open.
 func (m Model) renderFooter() string {
-	// No budget arithmetic left here. The comment editor was the only footer
-	// that wanted more than one row, and it is a modal now — the commit bar
-	// and the branch-name bar are one line each, so the footer is at most two
-	// with the status row.
+	// No budget arithmetic left here. Every input is a modal now; the comment
+	// editor is the one exception, in a terminal too short for its box.
 	var input string
 	switch {
 	case m.commenting && m.height < commentModalMinHeight:
@@ -276,8 +265,6 @@ func (m Model) renderFooter() string {
 		// this replaced, so it is still here for terminals the modal cannot
 		// serve.
 		input = m.renderCommentBar()
-	case m.mode == modeCommit:
-		input = m.renderCommitBar()
 	default:
 		return m.renderHintBar() // already carries the status row, and asks
 		// for it itself — computing it above ran the whole thing twice on
@@ -332,7 +319,7 @@ func (m Model) statusSegment() string {
 	var parts []string
 	// First, above even what just happened: it says the screen is not showing
 	// the repository, and every other word in this row describes that screen.
-	// Only where the key that clears it works. Outside review mode the bar was
+	// Only where the key that clears it works. Outside the diff the bar was
 	// still telling people to press R, which is unbound there.
 	// A failure comes before everything, the notice included. An earlier
 	// version put the notice first, reasoning that it describes the screen
@@ -344,7 +331,9 @@ func (m Model) statusSegment() string {
 	if failed {
 		parts = append(parts, m.statusMsg)
 	}
-	if m.mode == modeReview && m.diffStale() {
+	// Held, not merely stale: a refresh installs the new keys before its own
+	// reload lands, and on a live diff the notice flashed for that long.
+	if m.holdsTheDiff() && m.diffStale() {
 		notice := "diff moved"
 		// The summary is the first thing dropped when the row is tight: what
 		// moved is available by reloading, and the half that says what to
@@ -357,7 +346,7 @@ func (m Model) statusSegment() string {
 	if !failed && m.statusMsg != "" {
 		parts = append(parts, m.statusMsg)
 	}
-	if m.mode == modeReview {
+	if m.mode == modeDiff {
 		parts = append(parts, m.reviewSummary())
 	}
 	if m.splitDiff {

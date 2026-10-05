@@ -5,25 +5,49 @@ import tea "github.com/charmbracelet/bubbletea"
 // Diff mode key handling. Navigation moves a line cursor rather than scrolling
 // the viewport directly: the cursor is what review comments anchor to, so it
 // has to be the thing the user drives.
+//
+// Review is not a separate mode. It was, and it put a keypress between
+// reading a line and commenting on it, and gave `r` three meanings. The diff
+// is where you read, so it is where you comment; nothing here touches git —
+// review state lives entirely in the session.
 
 func (m Model) updateDiffMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if msg.String() != "q" {
+	if m.commenting {
+		return m.updateCommentEditor(msg)
+	}
+
+	// Both confirmations are per action, not per session: anything other than
+	// repeating the action disarms them.
+	if k := msg.String(); k != "q" {
 		m.quitConfirm = false
 	}
+	if k := msg.String(); k != "s" && k != "S" {
+		m.staleConfirm = false
+	}
+
 	switch msg.String() {
 	case "q":
 		return m.confirmQuit()
 	case "esc", "h", "left":
 		m.mode = modeFileList
 		return m, nil
-	case "r":
-		return m.enterReviewMode()
+	case "c":
+		return m.startComment()
+	case "C":
+		return m.startHunkComment()
+	case "x":
+		return m.deleteCommentAtCursor()
+	case "s":
+		return m.sendCommentAtCursor()
+	case "S":
+		return m.sendAllPending()
+	case "R":
+		return m.reloadDiff()
 	}
 	return m.diffNavigation(msg)
 }
 
-// diffNavigation handles movement and the actions shared by diff and review
-// mode, so the two never drift apart.
+// diffNavigation handles movement and the shared actions.
 func (m Model) diffNavigation(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "j", "down":
@@ -42,9 +66,9 @@ func (m Model) diffNavigation(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.nextHunk(), nil
 	case "{", "[":
 		return m.prevHunk(), nil
-	case "n":
+	case "J":
 		return m.nextFile()
-	case "p":
+	case "K":
 		return m.prevFile()
 	case "e":
 		return m.openFileInEditor()

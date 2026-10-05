@@ -321,7 +321,7 @@ func (m Model) agentRow(a feedback.Agent, selected, inUse bool) string {
 	}
 	label := "  " + name
 	if selected {
-		label = m.styles.Accent.Render(focusBar) + m.styles.PanelLabelFocus.Render(" "+name)
+		label = m.styles.Selected.Render(cursorMarker + " " + name)
 	}
 	if inUse {
 		label += m.styles.HelpDesc.Render("  ·  in use")

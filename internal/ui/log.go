@@ -298,9 +298,9 @@ func (m LogModel) renderCommitLine(c git.Commit, selected bool) string {
 		// The same marker the changed-file list and the diff use. Bold and a
 		// foreground were the only difference before, so stripped of colour
 		// the selected row was byte-identical to the others — and the one
-		// column of padding on FileSelected made the list jitter as the cursor
+		// column of padding on Selected made the list jitter as the cursor
 		// moved, because the unselected rows had none.
-		return m.styles.FileSelected.Width(m.width).Render(cursorMarker + line)
+		return m.styles.Selected.Width(m.width).Render(cursorMarker + line)
 	}
 	return lipgloss.NewStyle().Width(m.width).Render(" " + line)
 }
@@ -312,21 +312,15 @@ func (m LogModel) viewDiff() string {
 // renderLogBar is the log browser's command bar, built the same way as the
 // main view's so the two read alike.
 func (m LogModel) renderLogBar() string {
-	items := []binding{
-		{Keys: []string{"j", "down"}, Label: "j/k", Desc: "navigate"},
-		{Keys: []string{"enter"}, Desc: "view diff"},
-	}
+	s := surfaceLogList
 	if m.mode == logModeDiff {
-		items = []binding{
-			{Keys: []string{"j", "down"}, Label: "j/k", Desc: "scroll"},
-			{Keys: []string{"d"}, Label: "d/u", Desc: "½ page"},
-			{Keys: []string{"esc"}, Desc: "back"},
-		}
+		s = surfaceLogDiff
 	}
-	items = append(items, binding{Keys: []string{"q"}, Desc: "quit"})
-
 	var parts []string
-	for _, b := range items {
+	for _, b := range surfaceKeymap(s) {
+		if !b.Bar {
+			continue
+		}
 		parts = append(parts, m.styles.HelpKey.Render(b.label())+" "+m.styles.HelpDesc.Render(b.Desc))
 	}
 	return lipgloss.NewStyle().Width(m.width).MaxHeight(1).

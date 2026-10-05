@@ -60,7 +60,7 @@ func TestEditor_PressingEDoesNotQuitDiffer(t *testing.T) {
 // to earn a place in the command bar, so the keymap is where it has to appear.
 func TestEditor_TheDiffAndReviewKeymapsDocumentE(t *testing.T) {
 	t.Parallel()
-	for _, mode := range []viewMode{modeFileList, modeDiff, modeReview} {
+	for _, mode := range []viewMode{modeFileList, modeDiff} {
 		found := false
 		for _, b := range keymapFor(mode) {
 			for _, k := range b.Keys {
@@ -208,7 +208,7 @@ func TestEditor_NoLineIsClaimedWhileTheRendererBelongsToAnotherFile(t *testing.T
 
 	// n moves to the next file; its diff has not arrived yet, so the renderer
 	// still describes the old one.
-	u, _ = m.updateDiffMode(key("n"))
+	u, _ = m.updateDiffMode(key("J"))
 	m = u.(Model)
 
 	if got := m.editorLine(); got != 0 {

@@ -203,10 +203,19 @@ func (m Model) fail(action string, err error) Model {
 // renderProblemOverlay shows the failure in full, including what the tool
 // actually said.
 func (m Model) renderProblemOverlay(width, height int) string {
+	return m.fitOverlay(problemTitle, m.problemRows(), problemClosing, width, height)
+}
+
+const (
+	problemTitle   = " last problem"
+	problemClosing = "! or esc to close"
+)
+
+// problemRows is the failure: what went wrong, what to do, and what the tool
+// said.
+func (m Model) problemRows() []string {
 	if m.problem == nil {
-		return m.fitOverlay(" last problem", []string{
-			m.styles.HelpDesc.Render(" nothing has gone wrong yet"),
-		}, "! or esc to close", width, height)
+		return []string{m.styles.HelpDesc.Render(" nothing has gone wrong yet")}
 	}
 
 	rows := []string{m.styles.CommentStale.Render(" " + m.problem.summary)}
@@ -219,7 +228,7 @@ func (m Model) renderProblemOverlay(width, height int) string {
 			rows = append(rows, " "+m.styles.HelpDesc.Render(strings.TrimRight(line, " ")))
 		}
 	}
-	return m.fitOverlay(" last problem", rows, "! or esc to close", width, height)
+	return rows
 }
 
 // emptyState is what a panel says when there is nothing in it.
@@ -234,10 +243,10 @@ func (m Model) emptyState() []string {
 		return []string{"No differences", fmt.Sprintf("Nothing differs from %s.", m.ref)}
 	case m.stagedOnly:
 		return []string{"Nothing staged", "Stage a file, or drop -s."}
-	case m.mode == modeReview:
-		// Reached two ways: opening `differ review` on a clean tree, and the
-		// changeset emptying while a review is open. "yet" would be wrong for
-		// the second — everything was just committed.
+	case m.reviewAsked:
+		// Reached two ways after `differ review`: a clean tree at the start,
+		// and the changeset emptying later. "yet" would be wrong for the
+		// second — everything was just committed.
 		return []string{"Nothing to review", "No changes to review."}
 	default:
 		return []string{"No changes", "Your working tree is clean."}

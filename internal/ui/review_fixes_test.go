@@ -138,15 +138,15 @@ func TestComment_HunkCommentDoesNotBlockLineComments(t *testing.T) {
 	m := reviewOnAddedLine(t)
 
 	// Comment the whole hunk first.
-	updated, _ := m.updateReviewMode(key("C"))
+	updated, _ := m.updateDiffMode(key("C"))
 	m = updated.(Model)
 	m = typeText(t, m, "hunk note")
-	updated, _ = m.updateReviewMode(tea.KeyMsg{Type: tea.KeyCtrlS})
+	updated, _ = m.updateDiffMode(tea.KeyMsg{Type: tea.KeyCtrlS})
 	m = updated.(Model)
 
 	// c on a line inside that hunk must start a new line comment, not reopen
 	// the hunk comment.
-	updated, _ = m.updateReviewMode(key("c"))
+	updated, _ = m.updateDiffMode(key("c"))
 	m = updated.(Model)
 	if !m.commenting {
 		t.Fatal("c did not open an editor")
@@ -159,7 +159,7 @@ func TestComment_HunkCommentDoesNotBlockLineComments(t *testing.T) {
 	}
 
 	m = typeText(t, m, "line note")
-	updated, _ = m.updateReviewMode(tea.KeyMsg{Type: tea.KeyCtrlS})
+	updated, _ = m.updateDiffMode(tea.KeyMsg{Type: tea.KeyCtrlS})
 	m = updated.(Model)
 
 	if got := m.session.CountFor("src.ts"); got != 2 {
@@ -170,29 +170,29 @@ func TestComment_HunkCommentDoesNotBlockLineComments(t *testing.T) {
 func TestComment_LineCommentIsPreferredForEditAndDelete(t *testing.T) {
 	m := reviewOnAddedLine(t)
 
-	updated, _ := m.updateReviewMode(key("C"))
+	updated, _ := m.updateDiffMode(key("C"))
 	m = updated.(Model)
 	m = typeText(t, m, "hunk note")
-	updated, _ = m.updateReviewMode(tea.KeyMsg{Type: tea.KeyCtrlS})
+	updated, _ = m.updateDiffMode(tea.KeyMsg{Type: tea.KeyCtrlS})
 	m = updated.(Model)
 
-	updated, _ = m.updateReviewMode(key("c"))
+	updated, _ = m.updateDiffMode(key("c"))
 	m = updated.(Model)
 	m = typeText(t, m, "line note")
-	updated, _ = m.updateReviewMode(tea.KeyMsg{Type: tea.KeyCtrlS})
+	updated, _ = m.updateDiffMode(tea.KeyMsg{Type: tea.KeyCtrlS})
 	m = updated.(Model)
 
 	// c on that line now edits the line comment, not the hunk comment.
-	updated, _ = m.updateReviewMode(key("c"))
+	updated, _ = m.updateDiffMode(key("c"))
 	m = updated.(Model)
 	if m.commentInput.Value() != "line note" {
 		t.Errorf("c should edit the line comment, editor holds %q", m.commentInput.Value())
 	}
-	updated, _ = m.updateReviewMode(tea.KeyMsg{Type: tea.KeyEsc})
+	updated, _ = m.updateDiffMode(tea.KeyMsg{Type: tea.KeyEsc})
 	m = updated.(Model)
 
 	// x removes the line comment and leaves the hunk comment alone.
-	updated, _ = m.updateReviewMode(key("x"))
+	updated, _ = m.updateDiffMode(key("x"))
 	m = updated.(Model)
 
 	left := m.session.CommentsFor("src.ts")
@@ -208,15 +208,15 @@ func TestComment_LineCommentIsPreferredForEditAndDelete(t *testing.T) {
 // the cursor could mean.
 func TestComment_HunkCommentIsStillEditableWhenItIsTheOnlyOne(t *testing.T) {
 	m := reviewOnAddedLine(t)
-	updated, _ := m.updateReviewMode(key("C"))
+	updated, _ := m.updateDiffMode(key("C"))
 	m = updated.(Model)
 	m = typeText(t, m, "hunk note")
-	updated, _ = m.updateReviewMode(tea.KeyMsg{Type: tea.KeyCtrlS})
+	updated, _ = m.updateDiffMode(tea.KeyMsg{Type: tea.KeyCtrlS})
 	m = updated.(Model)
 
 	// Move to a line with no comment of its own but inside the hunk, then
 	// delete: the hunk comment is the only candidate.
-	updated, _ = m.updateReviewMode(key("x"))
+	updated, _ = m.updateDiffMode(key("x"))
 	m = updated.(Model)
 	if got := m.session.CountFor("src.ts"); got != 0 {
 		t.Errorf("hunk comment should still be reachable, %d remain", got)

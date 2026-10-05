@@ -209,7 +209,7 @@ func TestResponsive_ReviewStateIsWordsNotColours(t *testing.T) {
 	})
 	plain := theme.NoColorTheme()
 	m.theme, m.styles = plain, NewStyles(plain)
-	m.mode = modeReview
+	m.mode = modeDiff
 	m.session = review.NewSession()
 	m.session.MarkViewed("a.ts")
 

@@ -18,8 +18,21 @@ import (
 // exactly what stops the same review going out twice, so it is written to disk
 // and restored unconditionally, whatever has happened to the files since.
 
-// renderHistoryOverlay lists the session's deliveries, most recent first.
+// renderHistoryOverlay lists the session's deliveries, most recent first,
+// fitted into width by height. On screen it is a modal (see Model.modal).
 func (m Model) renderHistoryOverlay(width, height int) string {
+	// Not "sent this session" any more: the list outlives the session, and a
+	// title claiming otherwise would undersell the one thing it is for.
+	return m.fitOverlay(historyTitle, m.historyRows(width), historyClosing, width, height)
+}
+
+const (
+	historyTitle   = " already sent"
+	historyClosing = "H or esc to close"
+)
+
+// historyRows is every delivery, laid out for width columns.
+func (m Model) historyRows(width int) []string {
 	var rows []string
 	if m.session == nil || len(m.session.History()) == 0 {
 		rows = append(rows, m.styles.HelpDesc.Render(" nothing sent yet"))
@@ -28,9 +41,7 @@ func (m Model) renderHistoryOverlay(width, height int) string {
 			rows = append(rows, m.renderDelivery(d, width)...)
 		}
 	}
-	// Not "sent this session" any more: the list outlives the session, and a
-	// title claiming otherwise would undersell the one thing it is for.
-	return m.fitOverlay(" already sent", rows, "H or esc to close", width, height)
+	return rows
 }
 
 // renderDelivery is one entry: when, how many comments, where to and what came

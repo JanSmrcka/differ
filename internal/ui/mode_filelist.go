@@ -76,17 +76,14 @@ func (m Model) updateFileListMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.cursor = max(0, len(m.files)-1)
 		m = m.clampFileScroll()
 	case "enter", "l", "right":
-		m.mode = modeDiff
-		return m, nil
+		return m.openDiff()
 	case "e":
 		return m.openFileInEditor()
 	case "tab":
 		return m.toggleStage()
 	case "a":
 		return m.stageAll()
-	case "r":
-		return m.enterReviewMode()
-	case "c":
+	case "C":
 		return m.enterCommitMode()
 	case "b":
 		return m.enterBranchMode()
@@ -96,13 +93,6 @@ func (m Model) updateFileListMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.prevCurs = -1
 		m.lastDiffContent = ""
 		return m, tea.Batch(m.loadDiffCmd(true), m.saveSplitPrefCmd())
-	case "F":
-		if m.upstream.Upstream == "" {
-			m.statusMsg = "no upstream configured"
-			return m, nil
-		}
-		m.statusMsg = "pulling..."
-		return m, m.pullCmd()
 	}
 	if m.cursor != m.prevCurs {
 		m.prevCurs = m.cursor
@@ -150,10 +140,10 @@ func (m Model) clampFileScroll() Model {
 	return m
 }
 
-// onFileFocused records that a file has been looked at, but only while
-// reviewing — browsing the file list is not reviewing.
+// onFileFocused records that a file has been looked at, but only in the diff —
+// browsing the file list is not reading.
 func (m Model) onFileFocused() Model {
-	if m.mode == modeReview && m.session != nil {
+	if m.mode == modeDiff && m.session != nil {
 		m.session.MarkViewed(m.currentFilePath())
 	}
 	return m

@@ -16,7 +16,7 @@ func reviewOnRepo(t *testing.T) (Model, *testutil.Repo) {
 	tr := testutil.NewRepo(t)
 	tr.ApplyFixture(testutil.Fixture(t, "multi_hunk"))
 	m := liveModel(t, tr)
-	u, _ := m.updateFileListMode(key("r"))
+	u, _ := m.updateFileListMode(key("enter"))
 	m = u.(Model)
 	m = commentAt(t, m, LineAdded, "  const user = await getUser(id)", "keep this awaited")
 	return m, tr
@@ -139,7 +139,7 @@ func TestStale_SendingRequiresConfirmation(t *testing.T) {
 	tr.ExternalEdit("src.ts", strings.Replace(content, "await getUser(id)", "await getUser(id, o)", 1))
 	m = reload(t, m)
 
-	u, cmd := m.updateReviewMode(key("S"))
+	u, cmd := m.updateDiffMode(key("S"))
 	m = u.(Model)
 	if cmd != nil {
 		t.Error("sending stale comments should not go through on the first press")
@@ -151,7 +151,7 @@ func TestStale_SendingRequiresConfirmation(t *testing.T) {
 		t.Error("nothing should have been sent yet")
 	}
 
-	u, cmd = m.updateReviewMode(key("S"))
+	u, cmd = m.updateDiffMode(key("S"))
 	m = runCmd(t, u.(Model), cmd)
 	if len(fake.Sent()) != 1 {
 		t.Errorf("a second S should send, got %d payloads", len(fake.Sent()))
@@ -164,7 +164,7 @@ func TestStale_HealthyCommentsSendImmediately(t *testing.T) {
 	fake := feedback.NewFake()
 	m.target = fake
 
-	u, cmd := m.updateReviewMode(key("S"))
+	u, cmd := m.updateDiffMode(key("S"))
 	m = runCmd(t, u.(Model), cmd)
 
 	if len(fake.Sent()) != 1 {

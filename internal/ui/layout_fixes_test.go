@@ -31,12 +31,12 @@ func TestView_FitsTerminalHeightInEveryMode(t *testing.T) {
 		"file list": func(m Model) Model { m.mode = modeFileList; return m },
 		"diff":      func(m Model) Model { m.mode = modeDiff; return m },
 		"review": func(m Model) Model {
-			u, _ := m.updateFileListMode(key("r"))
+			u, _ := m.updateFileListMode(key("enter"))
 			return u.(Model)
 		},
 		"comment editor": func(m Model) Model {
-			u, _ := m.updateFileListMode(key("r"))
-			u2, _ := u.(Model).updateReviewMode(key("c"))
+			u, _ := m.updateFileListMode(key("enter"))
+			u2, _ := u.(Model).updateDiffMode(key("c"))
 			return u2.(Model)
 		},
 		"commit": func(m Model) Model {
@@ -67,11 +67,11 @@ func TestCommentEditor_DoesNotTakeRowsFromTheDiff(t *testing.T) {
 	m := liveModel(t, tr)
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
 	m = updated.(Model)
-	updated, _ = m.Update(key("r"))
+	updated, _ = m.Update(key("enter"))
 	m = updated.(Model)
 	before := m.viewport.Height
 
-	updated, _ = m.updateReviewMode(key("c"))
+	updated, _ = m.updateDiffMode(key("c"))
 	m = updated.(Model)
 	if !m.commenting {
 		t.Fatal("the editor did not open")
@@ -91,7 +91,7 @@ func TestCommentEditor_DoesNotTakeRowsFromTheDiff(t *testing.T) {
 // assume a session exists.
 func TestDiffCardTitle_SingularCommentCount(t *testing.T) {
 	m := newTestModel(t, []fileItem{{change: git.FileChange{Path: "a.ts", Status: git.StatusModified}}})
-	m.mode = modeReview
+	m.mode = modeDiff
 	m.session = review.NewSession()
 	m.session.Add(review.Comment{File: "a.ts", Side: review.SideNew, StartLine: 1, EndLine: 1, Body: "x"})
 
@@ -111,7 +111,7 @@ func TestDiffCardTitle_SingularCommentCount(t *testing.T) {
 
 func TestDiffCardTitle_SurvivesAMissingSession(t *testing.T) {
 	m := newTestModel(t, []fileItem{{change: git.FileChange{Path: "a.ts", Status: git.StatusModified}}})
-	m.mode = modeReview
+	m.mode = modeDiff
 	m.session = nil
 
 	defer func() {
@@ -293,14 +293,14 @@ func TestParseNewFile_TruncatedHunkCommentExcludesTheMarker(t *testing.T) {
 // #6: quitting with unsent comments must not silently discard them.
 func TestQuit_WarnsAboutPendingComments(t *testing.T) {
 	m := reviewOnAddedLine(t)
-	u, _ := m.updateReviewMode(key("c"))
+	u, _ := m.updateDiffMode(key("c"))
 	m = u.(Model)
 	m = typeText(t, m, "unsent note")
-	u, _ = m.updateReviewMode(tea.KeyMsg{Type: tea.KeyCtrlS})
+	u, _ = m.updateDiffMode(tea.KeyMsg{Type: tea.KeyCtrlS})
 	m = u.(Model)
 
 	// First q warns instead of quitting.
-	u, cmd := m.updateReviewMode(key("q"))
+	u, cmd := m.updateDiffMode(key("q"))
 	m = u.(Model)
 	if cmd != nil {
 		t.Error("q with pending comments should not quit immediately")
@@ -310,7 +310,7 @@ func TestQuit_WarnsAboutPendingComments(t *testing.T) {
 	}
 
 	// Second q goes through.
-	_, cmd = m.updateReviewMode(key("q"))
+	_, cmd = m.updateDiffMode(key("q"))
 	if cmd == nil {
 		t.Error("q again should quit")
 	}
@@ -318,21 +318,21 @@ func TestQuit_WarnsAboutPendingComments(t *testing.T) {
 
 func TestQuit_ImmediateWhenNothingIsPending(t *testing.T) {
 	m := reviewOnAddedLine(t)
-	if _, cmd := m.updateReviewMode(key("q")); cmd == nil {
+	if _, cmd := m.updateDiffMode(key("q")); cmd == nil {
 		t.Error("q with no comments should quit immediately")
 	}
 }
 
 func TestQuit_FileListAlsoWarns(t *testing.T) {
 	m := reviewOnAddedLine(t)
-	u, _ := m.updateReviewMode(key("c"))
+	u, _ := m.updateDiffMode(key("c"))
 	m = u.(Model)
 	m = typeText(t, m, "unsent note")
-	u, _ = m.updateReviewMode(tea.KeyMsg{Type: tea.KeyCtrlS})
+	u, _ = m.updateDiffMode(tea.KeyMsg{Type: tea.KeyCtrlS})
 	m = u.(Model)
 
 	// esc back to the file list, then q.
-	u, _ = m.updateReviewMode(tea.KeyMsg{Type: tea.KeyEsc})
+	u, _ = m.updateDiffMode(tea.KeyMsg{Type: tea.KeyEsc})
 	m = u.(Model)
 	u, cmd := m.updateFileListMode(key("q"))
 	m = u.(Model)
@@ -346,10 +346,10 @@ func TestQuit_FileListAlsoWarns(t *testing.T) {
 
 func TestQuit_SentCommentsDoNotWarn(t *testing.T) {
 	m, _ := sendModel(t)
-	u, cmd := m.updateReviewMode(key("S"))
+	u, cmd := m.updateDiffMode(key("S"))
 	m = runCmd(t, u.(Model), cmd)
 
-	if _, cmd := m.updateReviewMode(key("q")); cmd == nil {
+	if _, cmd := m.updateDiffMode(key("q")); cmd == nil {
 		t.Error("q after sending everything should quit immediately")
 	}
 }
@@ -363,7 +363,7 @@ func TestQuit_SentCommentsDoNotWarn(t *testing.T) {
 // be worse: it made the footer two rows tall and pushed the top of the layout
 // off screen. The bar now truncates, and keeps the keys that get the user out.
 func TestCommandBar_TruncatesRatherThanWrapping(t *testing.T) {
-	for _, mode := range []viewMode{modeFileList, modeDiff, modeReview, modeBranchPicker} {
+	for _, mode := range []viewMode{modeFileList, modeDiff, modeBranchPicker} {
 		m := newTestModel(t, []fileItem{{change: git.FileChange{Path: "a.go", Status: git.StatusModified}}})
 		m.mode = mode
 		for _, width := range []int{60, 80, 100, 120} {
@@ -394,9 +394,9 @@ func TestView_FitsNarrowTerminal(t *testing.T) {
 		u, _ := base.Update(tea.WindowSizeMsg{Width: size.w, Height: size.h})
 		m := u.(Model)
 
-		u, _ = m.updateFileListMode(key("r"))
+		u, _ = m.updateFileListMode(key("enter"))
 		review := u.(Model)
-		u2, _ := review.updateReviewMode(key("c"))
+		u2, _ := review.updateDiffMode(key("c"))
 		editing := u2.(Model)
 
 		for name, got := range map[string]Model{"file list": m, "review": review, "editor": editing} {

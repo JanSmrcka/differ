@@ -50,6 +50,12 @@ func (m Model) modalWidth() int {
 // border columns it adds itself.
 func (m Model) modalBoxWidth() int { return max(m.modalWidth()-2, 1) }
 
+// modalInnerWidth is the columns a modal's body has, inside border and
+// padding.
+func (m Model) modalInnerWidth() int {
+	return max(m.modalBoxWidth()-2*modalPadding, 1)
+}
+
 // renderModal draws a titled box over height rows, away from avoid.
 //
 // The content is fitted by fitOverlay, which already knows how to drop rows and
@@ -61,10 +67,7 @@ func (m Model) modalBoxWidth() int { return max(m.modalWidth()-2, 1) }
 // Negative means nothing to avoid.
 func (m Model) renderModal(title string, body []string, closing string, height, avoid int) string {
 	// The border and the padding are not content.
-	inner := m.modalBoxWidth() - 2*modalPadding
-	if inner < 1 {
-		inner = 1
-	}
+	inner := m.modalInnerWidth()
 	// At least one row of body, always. Without a floor the box below 13 rows
 	// was all chrome: you typed into a comment and nothing appeared, and at 8
 	// and 9 the closing line went too, so nothing said how to get out. The
@@ -330,6 +333,16 @@ func (m Model) modal(height int) string {
 		return ""
 	}
 	switch {
+	// Reading overlays first: they open over anything, a picker included,
+	// and are what the user asked for last.
+	case m.showHelp:
+		return m.renderModal(m.helpTitle(), m.helpRows(), helpClosing, height, -1)
+	case m.showHistory:
+		return m.renderModal(historyTitle, m.historyRows(m.modalInnerWidth()), historyClosing, height, -1)
+	case m.showProblem:
+		return m.renderModal(problemTitle, m.problemRows(), problemClosing, height, -1)
+	case m.mode == modeCommit:
+		return m.renderModal(" commit", m.commitRows(), m.commitClosing(), height, -1)
 	case m.mode == modeBranchPicker:
 		// Nothing to avoid: which branch to check out is not a question about
 		// a particular line. The list is scrolled by branchRows, so it is

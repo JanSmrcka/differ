@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/jansmrcka/differ/internal/config"
 	"github.com/jansmrcka/differ/internal/git"
+	"github.com/jansmrcka/differ/internal/review"
 	"github.com/jansmrcka/differ/internal/theme"
 )
 
@@ -163,6 +164,7 @@ func newTestModel(t *testing.T, files []fileItem) Model {
 		commitInput:  textinput.New(),
 		branchFilter: bf,
 		branchInput:  bi,
+		session:      review.NewSession(),
 	}
 }
 
@@ -228,7 +230,7 @@ func TestRenderHelpBar_DiffMode(t *testing.T) {
 	m := newTestModel(t, nil)
 	m.mode = modeDiff
 	bar := m.renderHintBar()
-	for _, key := range []string{"j/k", "esc", "n/p", "q"} {
+	for _, key := range []string{"j/k", "esc", "J/K", "q"} {
 		if !strings.Contains(bar, key) {
 			t.Errorf("diff help should contain %q", key)
 		}
