@@ -12,7 +12,7 @@ It is also an ordinary diff viewer: syntax highlighting, split view, staging,
 committing, branch switching, commit log.
 
 <p align="center">
-  <img src="./assets/preview.png" alt="differ preview" width="800" />
+  <img src="./assets/demo.gif" alt="differ: reading an agent's changes, commenting on a line and sending it to the agent's pane" width="900" />
 </p>
 
 ## Install
@@ -51,6 +51,11 @@ c                    # comment on this line — type, then ctrl+s
 J                    # next file; the one you left is marked read
 S                    # send every pending comment to the agent
 ```
+
+<p align="center">
+  <img src="./assets/comment.png" alt="writing a comment on the line under the cursor" width="440" />
+  <img src="./assets/history.png" alt="the history of what was sent, and where" width="440" />
+</p>
 
 What that gives you over `git diff`:
 
@@ -171,6 +176,10 @@ misconfigured target cannot execute anything.
 ones and hides what would do nothing; a picker or input shows its own. The
 tables below are checked against the code — a test fails if a key here has no
 handler, or a handler is missing here.
+
+<p align="center">
+  <img src="./assets/keys.png" alt="the ? overlay listing every key for the diff view" width="700" />
+</p>
 
 ### Everywhere
 

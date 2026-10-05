@@ -13,6 +13,14 @@ set -euo pipefail
 DIR=${1:-/tmp/differ-demo}
 SESSION=${2:-differ-demo}
 
+# The panes run the checkout's own build (`make build`), not whatever differ is
+# on PATH: an installed release would record the previous version's screens.
+BIN_DIR=${DIFFER_BIN_DIR:-$(cd "$(dirname "$0")/.." && pwd)/bin}
+if [[ ! -x "$BIN_DIR/differ" ]]; then
+  echo "no differ in $BIN_DIR — run make build first" >&2
+  exit 1
+fi
+
 # The repository is a subdirectory, so the fixture's own files — the agent
 # script and the isolated config — cannot show up in the changeset being
 # reviewed. They did: the demo opened on five changed files instead of three.
@@ -109,16 +117,38 @@ EOF
 # what makes the send visible in the recording.
 cat > "$DIR/agent.sh" <<'EOF'
 #!/usr/bin/env bash
+# No echo: the terminal would print each delivery once as typed and the loop
+# again as read, and the recording showed every review twice.
+stty -echo
 printf '\033[1magent\033[0m — waiting for review feedback\n\n'
 while IFS= read -r line; do printf '%s\n' "$line"; done
 EOF
 chmod +x "$DIR/agent.sh"
 
+# PATH has to be set again inside the pane's shell: macOS's path_helper
+# reorders it in every login shell, putting /opt/homebrew/bin — and any
+# installed differ — back in front. HOME is the fixture's own, so these rc
+# files are read after path_helper and touch nothing of the recorder's.
+#
+# And any herdr the recorder is inside is unset: differ looks for herdr before
+# tmux, and HERDR_PANE_ID would be the *recorder's* pane — the review would be
+# sent there instead of to the demo agent on the left.
+for rc in .zshrc .bashrc; do
+  {
+    printf 'export PATH="%s:$PATH"\n' "$BIN_DIR"
+    printf 'unset HERDR_ENV HERDR_PANE_ID HERDR_SOCKET_PATH HERDR_WORKSPACE_ID HERDR_TAB_ID HERDR_BIN_PATH\n'
+    printf 'PS1="$ "\nPROMPT="$ "\n'
+  } > "$DIR/home/$rc"
+done
+
 tmux kill-session -t "$SESSION" 2>/dev/null || true
 tmux new-session -d -s "$SESSION" -x 200 -y 44 -c "$REPO" \
-  -e "HOME=$DIR/home" "$DIR/agent.sh"
+  -e "HOME=$DIR/home" -e "PATH=$BIN_DIR:$PATH" "$DIR/agent.sh"
 AGENT_PANE=$(tmux list-panes -t "$SESSION" -F '#{pane_id}')
-tmux split-window -h -t "$SESSION" -c "$REPO" -e "HOME=$DIR/home"
+# differ gets most of the width: at half it truncated paths in the file list.
+tmux split-window -h -l 64% -t "$SESSION" -c "$REPO" -e "HOME=$DIR/home" -e "PATH=$BIN_DIR:$PATH"
+# The recorder's own status bar is not part of the demo.
+tmux set-option -t "$SESSION" status off
 
 # feedback_target: tmux, aimed at the agent pane by id. Written into the
 # session's own HOME, so the recorder's config is neither read nor touched.
@@ -135,3 +165,4 @@ echo "fixture ready:"
 echo "  repo    $REPO"
 echo "  session $SESSION (agent pane $AGENT_PANE)"
 echo "  config  $DIR/home/.config/differ/config.json"
+echo "  differ  $BIN_DIR/differ ($("$BIN_DIR/differ" --version))"
