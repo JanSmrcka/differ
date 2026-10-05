@@ -160,10 +160,14 @@ the pickers used it for their selection, which made one glyph mean two things.
 the diff; there was a `modeReview`, which put a keypress between reading a
 line and commenting on it and made `r` mean three things. The session exists
 from startup. What the old mode gated — holding the diff when the agent
-rewrites it — is now `holdsTheDiff`: held while the file on screen has a
-comment against it or one is being written, live otherwise. Holding every
-open diff would freeze the pane differ is left running in; holding none
-would swap code out from under a comment.
+rewrites it — is now `holdsTheDiff`: held while the file on screen has an
+*unsent* comment against it or one is being written, live otherwise. A sent
+comment is the agent's to act on, and holding for it froze the view as the
+fix arrived. Holding every open diff would freeze the pane differ is left
+running in; holding none would swap code out from under a comment. The "diff
+moved" notice shows only while held, so whatever releases a moved diff —
+sending or deleting the last unsent comment, closing the editor — calls
+`catchUp`, or it would sit stale with nothing saying so.
 
 **A covered row is composited, not cut.** `overlayRow` keeps what is left and
 right of the box, and the cut is made by `dropColumns`, which walks the row's

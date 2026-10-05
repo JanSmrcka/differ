@@ -503,6 +503,10 @@ func (m Model) handleBranchCreated(msg branchCreatedMsg) (tea.Model, tea.Cmd) {
 // wrapped onto a second row and ate a row of the branch list.
 func (m Model) fitInputsToPanels() Model {
 	m.branchFilter.Width = max(m.listWidth()-8, 1)
+	// On the model, not in View: a width set on View's copy never reached the
+	// input, which at width 0 never scrolls — a long message ran out of the
+	// box and was clipped with the cursor in it.
+	m.commitInput.Width = m.commitInputWidth()
 	// The comment textarea is sized when the editor opens and was never
 	// resized after. lipgloss.JoinVertical pads every row of the frame to the
 	// widest one, so a textarea left at its old width made the whole frame

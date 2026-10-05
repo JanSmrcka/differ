@@ -331,7 +331,9 @@ func (m Model) statusSegment() string {
 	if failed {
 		parts = append(parts, m.statusMsg)
 	}
-	if m.mode == modeDiff && m.diffStale() {
+	// Held, not merely stale: a refresh installs the new keys before its own
+	// reload lands, and on a live diff the notice flashed for that long.
+	if m.holdsTheDiff() && m.diffStale() {
 		notice := "diff moved"
 		// The summary is the first thing dropped when the row is tight: what
 		// moved is available by reloading, and the half that says what to

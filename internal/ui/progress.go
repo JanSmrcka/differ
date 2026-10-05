@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/jansmrcka/differ/internal/git"
 )
 
@@ -196,7 +197,7 @@ func (m Model) holdsTheDiff() bool {
 	if m.mode != modeDiff || m.renderer == nil {
 		return false
 	}
-	if !m.commenting && (m.session == nil || m.session.CountFor(m.rendererPath) == 0) {
+	if !m.commenting && m.unsentOn(m.rendererPath) == 0 {
 		return false
 	}
 	// The renderer has to be the cursor's file, not just any file: diffs load
@@ -209,6 +210,33 @@ func (m Model) holdsTheDiff() bool {
 	// which supersedes the reload this would have skipped. It stays because
 	// the function's name is a claim about the diff on screen.
 	return m.rendererPath == m.currentFilePath()
+}
+
+// unsentOn counts the comments on path that have not been delivered. A sent
+// comment is the agent's to act on now, and holding the diff for it froze the
+// view exactly when the fix was arriving.
+func (m Model) unsentOn(path string) int {
+	if m.session == nil {
+		return 0
+	}
+	n := 0
+	for _, c := range m.session.CommentsFor(path) {
+		if !c.WasSent() {
+			n++
+		}
+	}
+	return n
+}
+
+// catchUp reloads a diff that has moved but is no longer held — its last
+// unsent comment was just sent or deleted, or the editor closed empty. The
+// notice is shown only while the diff is held, so without this it would sit
+// out of date with nothing saying so until the file moved again.
+func (m Model) catchUp() tea.Cmd {
+	if m.mode != modeDiff || m.holdsTheDiff() || !m.diffStale() {
+		return nil
+	}
+	return m.loadDiffCmd(false)
 }
 
 // noteRenderedDiff records what the diff on screen was built from.

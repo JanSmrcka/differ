@@ -168,8 +168,8 @@ func (m Model) handleFeedbackSent(msg feedbackSentMsg) (tea.Model, tea.Cmd) {
 	// After the status message, not before: if the write fails, what it has
 	// to say is more important than the send having worked, and fail() would
 	// otherwise be painted over by the line above.
-	m = m.persistReview()
-	return m.refreshCommentMarks(), nil
+	m = m.persistReview().refreshCommentMarks()
+	return m, m.catchUp()
 }
 
 // targetProblem explains why there is nowhere to send to.

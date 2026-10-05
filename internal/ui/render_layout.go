@@ -298,12 +298,21 @@ func (m Model) commentRows(room int) []string {
 // commitRows is the commit message input, in the box the other questions
 // use. It was a footer bar: a fourth shape for the same kind of question.
 func (m Model) commitRows() []string {
-	prompt := " " + m.styles.HelpKey.Render("message: ")
+	prompt := " " + m.styles.HelpKey.Render(commitPrompt)
 	if m.generatingMsg {
 		return []string{"", prompt + m.styles.HelpDesc.Render("generating…")}
 	}
-	m.commitInput.Width = max(m.modalInnerWidth()-lipgloss.Width(prompt)-1, 1)
 	return []string{"", prompt + m.commitInput.View()}
+}
+
+const commitPrompt = "message: "
+
+// commitInputWidth is the room the message has in its box: the body less our
+// prompt and its leading space, the input's own prompt, and the column the
+// cursor sits in at the end.
+func (m Model) commitInputWidth() int {
+	used := lipgloss.Width(" "+commitPrompt) + lipgloss.Width(m.commitInput.Prompt) + 1
+	return max(m.modalInnerWidth()-used, 1)
 }
 
 func (m Model) commitClosing() string {

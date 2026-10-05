@@ -88,7 +88,8 @@ func newCommentArea(width int, body string) textarea.Model {
 func (m Model) updateCommentEditor(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEsc:
-		return m.closeEditor(), nil
+		m = m.closeEditor()
+		return m, m.catchUp()
 	case tea.KeyCtrlS:
 		return m.saveComment()
 	case tea.KeyCtrlC:
@@ -140,8 +141,8 @@ func (m Model) deleteCommentAtCursor() (tea.Model, tea.Cmd) {
 	}
 	m.session.Remove(c.ID)
 	m.statusMsg = "comment deleted"
-	m = m.persistReview()
-	return m.refreshCommentMarks(), nil
+	m = m.persistReview().refreshCommentMarks()
+	return m, m.catchUp()
 }
 
 // commentAtCursor finds the comment the cursor points at, preferring one on
