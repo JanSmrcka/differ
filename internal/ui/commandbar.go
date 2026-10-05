@@ -79,7 +79,7 @@ func (m Model) renderCommandBar() string {
 	// was still offering "c comment  C hunk comment  r exit review", every
 	// one of which inserts a letter; with the picker open it offered the
 	// file-list keys, all of which it swallows.
-	if m.showAgents || m.showThemes || m.commenting {
+	if m.showAgents || m.showThemes || m.commenting || m.showHelp || m.showHistory || m.showProblem {
 		return m.renderBar(m.styles.HelpDesc, " "+m.modalKeys())
 	}
 	items := m.barBindings()
@@ -144,12 +144,18 @@ func fitBarItems(head, tail []string, width int) string {
 	return fixed
 }
 
-// renderHelpOverlay lists every command in the current mode.
-//
-// It is drawn over the panel area rather than added below it, so opening it
-// does not change the layout's height — the diff viewport must not resize and
-// fail to come back.
+// renderHelpOverlay lists every command in the current mode, fitted into
+// width by height. On screen it is a modal (see Model.modal).
 func (m Model) renderHelpOverlay(width, height int) string {
+	return m.fitOverlay(m.helpTitle(), m.helpRows(), helpClosing, width, height)
+}
+
+const helpClosing = "? or esc to close"
+
+func (m Model) helpTitle() string { return " keys · " + modeName(m.mode) }
+
+// helpRows is one row per command this view offers.
+func (m Model) helpRows() []string {
 	var rows []string
 	for _, b := range append(keymapFor(m.mode), globalBindings()...) {
 		if b.Desc == "" && b.Help == "" {
@@ -168,7 +174,7 @@ func (m Model) renderHelpOverlay(width, height int) string {
 		}
 		rows = append(rows, key+m.styles.HelpDesc.Render(text))
 	}
-	return m.fitOverlay(" keys · "+modeName(m.mode), rows, "? or esc to close", width, height)
+	return rows
 }
 
 // fitOverlay lays a title, a body and a closing line into exactly the panel
@@ -253,6 +259,12 @@ func (m Model) modalKeys() string {
 		return m.agentClosing()
 	case m.showThemes:
 		return "j/k · enter keeps · esc cancels"
+	case m.showHelp:
+		return helpClosing
+	case m.showHistory:
+		return historyClosing
+	case m.showProblem:
+		return problemClosing
 	}
 	return ""
 }

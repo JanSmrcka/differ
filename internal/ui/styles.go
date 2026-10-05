@@ -75,7 +75,6 @@ type Styles struct {
 	CommentStale lipgloss.Style
 
 	// Commit input
-	CommitInput lipgloss.Style
 
 	// Accent
 	Accent lipgloss.Style
@@ -196,9 +195,6 @@ func NewStyles(t theme.Theme) Styles {
 		CommentStale: lipgloss.NewStyle().
 			Foreground(lipgloss.Color(t.StaleFg)).
 			Bold(true),
-
-		CommitInput: lipgloss.NewStyle().
-			Foreground(lipgloss.Color(t.Fg)),
 
 		Accent: lipgloss.NewStyle().
 			Foreground(lipgloss.Color(t.AccentFg)),

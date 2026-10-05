@@ -265,10 +265,6 @@ func (m Model) renderBar(style lipgloss.Style, content string) string {
 	return style.Width(m.width).MaxHeight(1).Render(content)
 }
 
-func (m Model) renderCommitBar() string {
-	return lipgloss.NewStyle().Width(m.width).Render(m.commitBarContent())
-}
-
 // renderCommentEditor shows the textarea plus what the two closing keys do,
 // inside budget rows.
 // commentClosing is the two keys that close the editor. The one place they are
@@ -299,12 +295,22 @@ func (m Model) commentRows(room int) []string {
 	return strings.Split(m.commentInput.View(), "\n")
 }
 
-func (m Model) commitBarContent() string {
-	prompt := m.styles.HelpKey.Render(" commit: ")
+// commitRows is the commit message input, in the box the other questions
+// use. It was a footer bar: a fourth shape for the same kind of question.
+func (m Model) commitRows() []string {
+	prompt := " " + m.styles.HelpKey.Render("message: ")
 	if m.generatingMsg {
-		return prompt + m.styles.HelpDesc.Render("generating...  esc cancel")
+		return []string{"", prompt + m.styles.HelpDesc.Render("generating…")}
 	}
-	return prompt + m.commitInput.View() + "  " + m.styles.HelpDesc.Render("esc cancel · enter commit")
+	m.commitInput.Width = max(m.modalInnerWidth()-lipgloss.Width(prompt)-1, 1)
+	return []string{"", prompt + m.commitInput.View()}
+}
+
+func (m Model) commitClosing() string {
+	if m.generatingMsg {
+		return "esc cancels"
+	}
+	return "enter commits · esc cancels"
 }
 
 // renderCommentBar is the comment editor in the footer, for terminals too

@@ -201,10 +201,19 @@ func (m Model) fail(action string, err error) Model {
 // renderProblemOverlay shows the failure in full, including what the tool
 // actually said.
 func (m Model) renderProblemOverlay(width, height int) string {
+	return m.fitOverlay(problemTitle, m.problemRows(), problemClosing, width, height)
+}
+
+const (
+	problemTitle   = " last problem"
+	problemClosing = "! or esc to close"
+)
+
+// problemRows is the failure: what went wrong, what to do, and what the tool
+// said.
+func (m Model) problemRows() []string {
 	if m.problem == nil {
-		return m.fitOverlay(" last problem", []string{
-			m.styles.HelpDesc.Render(" nothing has gone wrong yet"),
-		}, "! or esc to close", width, height)
+		return []string{m.styles.HelpDesc.Render(" nothing has gone wrong yet")}
 	}
 
 	rows := []string{m.styles.CommentStale.Render(" " + m.problem.summary)}
@@ -217,7 +226,7 @@ func (m Model) renderProblemOverlay(width, height int) string {
 			rows = append(rows, " "+m.styles.HelpDesc.Render(strings.TrimRight(line, " ")))
 		}
 	}
-	return m.fitOverlay(" last problem", rows, "! or esc to close", width, height)
+	return rows
 }
 
 // emptyState is what a panel says when there is nothing in it.

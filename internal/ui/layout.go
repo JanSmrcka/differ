@@ -40,18 +40,10 @@ func (m Model) View() string {
 
 	contentH := m.contentHeight()
 
-	// The help overlay takes the panel area rather than sitting under it, so
-	// the layout's height does not change while it is open and the diff
-	// viewport is exactly where it was when it closes.
+	// Help, history and the problem are modals now (see Model.modal), drawn
+	// over this like the pickers, so the view is still there around them.
 	var body string
 	switch {
-	case m.showHelp:
-		body = m.renderHelpOverlay(m.width, contentH)
-	case m.showHistory:
-		body = m.renderHistoryOverlay(m.width, contentH)
-	case m.showProblem:
-		body = m.renderProblemOverlay(m.width, contentH)
-
 	case m.onePanel():
 		// One panel takes the terminal. A pair squeezed into sixty columns is
 		// two unusable panels rather than one usable one, and the diff is what
@@ -262,10 +254,8 @@ func (m Model) rule() string {
 // renderFooter is the bar below the content: hints, or an input when one is
 // open.
 func (m Model) renderFooter() string {
-	// No budget arithmetic left here. The comment editor was the only footer
-	// that wanted more than one row, and it is a modal now — the commit bar
-	// and the branch-name bar are one line each, so the footer is at most two
-	// with the status row.
+	// No budget arithmetic left here. Every input is a modal now; the comment
+	// editor is the one exception, in a terminal too short for its box.
 	var input string
 	switch {
 	case m.commenting && m.height < commentModalMinHeight:
@@ -273,8 +263,6 @@ func (m Model) renderFooter() string {
 		// this replaced, so it is still here for terminals the modal cannot
 		// serve.
 		input = m.renderCommentBar()
-	case m.mode == modeCommit:
-		input = m.renderCommitBar()
 	default:
 		return m.renderHintBar() // already carries the status row, and asks
 		// for it itself — computing it above ran the whole thing twice on
