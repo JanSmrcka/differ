@@ -298,7 +298,7 @@ func (m Model) commentRows(room int) []string {
 // commitRows is the commit message input, in the box the other questions
 // use. It was a footer bar: a fourth shape for the same kind of question.
 func (m Model) commitRows() []string {
-	prompt := " " + m.styles.HelpKey.Render(commitPrompt)
+	prompt := " " + m.keyLabel(commitPrompt)
 	if m.generatingMsg {
 		return []string{"", prompt + m.styles.HelpDesc.Render("generating…")}
 	}
@@ -329,7 +329,7 @@ func (m Model) commitClosing() string {
 // you are typing and how to get out.
 func (m Model) renderCommentBar() string {
 	head := m.renderBar(lipgloss.NewStyle(),
-		m.styles.HelpKey.Render(m.commentTitle()+" ")+m.styles.HelpDesc.Render("· "+commentClosing))
+		m.keyLabel(m.commentTitle()+" ")+m.styles.HelpDesc.Render("· "+commentClosing))
 	m.commentInput.SetHeight(1)
 	// commentEditorWidth, not m.width-2: this function set its own width and
 	// the model kept another, so the textarea's viewport was scrolled to a

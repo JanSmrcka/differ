@@ -27,7 +27,7 @@ func (m Model) branchRows(room int) []string {
 		// The same box, asking the other question. The footer bar this
 		// replaced put it at the bottom of the screen, away from the list it
 		// was about.
-		prompt := " " + m.styles.HelpKey.Render("new branch: ") + m.branchInput.View()
+		prompt := " " + m.keyLabel("new branch: ") + m.branchInput.View()
 		if room <= 1 {
 			return []string{prompt}
 		}

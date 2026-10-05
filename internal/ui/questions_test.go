@@ -4,7 +4,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/lipgloss"
+
 	"github.com/jansmrcka/differ/internal/feedback"
+	"github.com/jansmrcka/differ/internal/git"
 	"github.com/jansmrcka/differ/internal/theme"
 )
 
@@ -101,5 +104,27 @@ func TestVisual_EveryListSelectsTheSameWay(t *testing.T) {
 	}
 	if len(rows) != 3 {
 		t.Errorf("found selected rows for %d lists, want 3: %v", len(rows), rows)
+	}
+}
+
+// The key style is underlined, and it was applied to the label *after* padding
+// it to a column: the underline ran across the gap (`j/k________`), and every
+// modal title underlined its leading space. Not parallel — the colour profile
+// is global (see CLAUDE.md).
+func TestVisual_UnderlinesStopAtTheText(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(0) // TrueColor, without importing termenv
+	defer lipgloss.SetColorProfile(prev)
+
+	m := newTestModel(t, []fileItem{{change: git.FileChange{Path: "a.go", Status: git.StatusModified}}})
+	m.styles = NewStyles(theme.Themes["dark"])
+	m.mode = modeDiff
+
+	if row := m.helpRows()[0]; !strings.HasPrefix(row, " "+m.styles.HelpKey.Render("j/k")+" ") {
+		t.Errorf("the key's underline is not confined to the key: %q", row)
+	}
+	title := strings.Split(m.fitOverlay(" keys · diff", nil, "close", 40, 6), "\n")[0]
+	if !strings.HasPrefix(title, " "+m.styles.HelpKey.Render("keys · diff")) {
+		t.Errorf("the title underlines its leading space: %q", title)
 	}
 }
