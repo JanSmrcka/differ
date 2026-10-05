@@ -49,7 +49,7 @@ main.go → cmd/root.go (cobra commands)
              ├── internal/editor   — decides and performs "open this file in an editor"
              ├── internal/testutil — temp git repos, diff fixtures, golden files (tests only)
              └── internal/ui
-                   ├── model.go    — Model state (5 modes: file list / diff / commit / branch / review)
+                   ├── model.go    — Model state (4 modes: file list / diff / commit / branch)
                    ├── update_dispatch.go — Update dispatcher only
                    ├── mode_*.go   — per-mode key handling
                    ├── keymap.go   — the keymap: one table, read by bar/overlay/tests
@@ -134,17 +134,36 @@ expressions that disagreed handed `fitOverlay` more rows than the box would
 show, and it replaced the overflow with a count — the picker's highlighted
 row among them.
 
-The **three modals** — the comment editor, the agent picker and the branch
-picker — all go through `modal.go`. The branch picker used to be drawn into
-the file list's panel, which meant choosing a branch cost you sight of the
-changeset, and its new-branch prompt was a footer bar: three shapes for the
-same kind of question. `modeBranchPicker` stays, because key routing needs a
-mode and `keymap_test.go`'s checks are keyed on one; only where it is drawn
-changed. `boxRows` applies its half-area cap **only when the box has a row to
-avoid** — that cap exists so the box can move out of the cursor's way, and a
-picker is not judged against a particular line, so capping it cost the branch
-picker half its rows: at fourteen it had room for the filter and not one
-branch.
+**Every question is a modal** — the comment editor, the agent picker, the
+branch picker and its new-branch prompt, the commit message, and the help,
+history and problem overlays — and all go through `Model.modal()` in
+`modal.go`, one at a time. Help, history and the problem used to replace the
+whole panel area and the commit message was a footer bar; the branch picker
+was drawn into the file list's panel, which meant choosing a branch cost you
+sight of the changeset: four shapes for the same kind of question. The theme
+picker is the one exception, and deliberately: it takes the file list's panel
+so the diff it is repainting stays unobstructed beside it.
+`TestVisual_EveryQuestionIsABox` holds the rest to it. `modeBranchPicker`
+stays, because key routing needs a mode and `keymap_test.go`'s checks are
+keyed on one; only where it is drawn changed. `boxRows` applies its half-area
+cap **only when the box has a row to avoid** — that cap exists so the box can
+move out of the cursor's way, and a picker is not judged against a particular
+line, so capping it cost the branch picker half its rows: at fourteen it had
+room for the filter and not one branch.
+
+**One selection treatment.** A selected row in any list — files, commits,
+branches, agents, themes — starts with `cursorMarker` (`▌`) and is drawn in
+`styles.Selected`. `focusBar` (`▍`) marks the focused panel and nothing else;
+the pickers used it for their selection, which made one glyph mean two things.
+
+**Review is the diff, not a mode.** `c`, `C`, `x`, `s`, `S` and `R` work in
+the diff; there was a `modeReview`, which put a keypress between reading a
+line and commenting on it and made `r` mean three things. The session exists
+from startup. What the old mode gated — holding the diff when the agent
+rewrites it — is now `holdsTheDiff`: held while the file on screen has a
+comment against it or one is being written, live otherwise. Holding every
+open diff would freeze the pane differ is left running in; holding none
+would swap code out from under a comment.
 
 **A covered row is composited, not cut.** `overlayRow` keeps what is left and
 right of the box, and the cut is made by `dropColumns`, which walks the row's
@@ -165,7 +184,7 @@ the cursor and comments refer to) from **display rows** (what is printed).
 Split view pairs two lines onto one row and inline comments insert rows, so the
 two diverge — use `RowFor` to map between them, never assume they are equal.
 
-Two Bubble Tea models: `Model` (main diff viewer with file list/diff/commit/branch-picker modes) and `LogModel` (log browser). Both follow `Init()/Update()/View()`. All async work (git calls, AI commit messages) returned as `tea.Cmd` — never block in `Update`.
+Two Bubble Tea models: `Model` (main diff viewer with file list/diff/commit/branch-picker modes; reviewing happens in the diff) and `LogModel` (log browser). Both follow `Init()/Update()/View()`. All async work (git calls, AI commit messages) returned as `tea.Cmd` — never block in `Update`.
 
 Version injected via ldflags at build (`-X .../cmd.version`), falls back to `debug.ReadBuildInfo()` for `go install`.
 
@@ -217,12 +236,17 @@ github.com/spf13/cobra                # CLI
 ### Adding a new keybinding
 
 1. Add it to the table in `internal/ui/keymap.go` — that is the single source
-   of truth for the command bar, the `?` overlay and the README.
-2. Add the handler to the mode's `update*Mode` method.
+   of truth for the command bar, the `?` overlay and the README. A mode's keys
+   are in `keymapFor`; an overlay, an input inside a mode or the log browser
+   is a `surface`, in `surfaceKeymap`.
+2. Add the handler to the mode's `update*Mode` method, or the surface's
+   handler (`surfaceHandlers` in the test names each one).
 3. Run the tests. `keymap_test.go` parses the handlers out of the source and
    fails if a key is handled but undocumented, documented but unhandled, bound
-   twice in one mode, marked `Confirm` without actually asking twice, or
-   missing from the README table.
+   twice, marked `Confirm` without actually asking twice, or missing from the
+   README table. `Confirm` means *always* asks twice; an action that asks only
+   sometimes (a dirty branch switch, sending a stale comment) says so in its
+   `Help` instead.
 
 ### Adding a new git operation
 
