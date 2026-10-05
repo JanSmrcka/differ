@@ -1,19 +1,52 @@
-# differ
+<p align="center">
+  <img src="./assets/logo.svg" alt="differ" width="110" />
+</p>
 
-Review Git changes in the terminal — especially changes a coding agent made
-while you were doing something else.
+<h1 align="center">differ</h1>
 
-You read the changes file by file, comment on the lines that need it, and send
-those comments to the agent's pane in one keystroke. differ tracks what you
-have read and carries the result; it does not review anything for you. No
-model reads your diff.
+<p align="center">
+  <b>Review what your coding agent changed — without leaving the terminal.</b>
+</p>
 
-It is also an ordinary diff viewer: syntax highlighting, split view, staging,
-committing, branch switching, commit log.
+<p align="center">
+  <a href="#install">install</a> · <a href="#the-review-loop">review loop</a> · <a href="#sending-to-an-agent">agents</a> · <a href="#keyboard-shortcuts">keys</a> · <a href="#configuration">config</a> · <a href="#contributing">contributing</a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/JanSmrcka/differ/releases/latest"><img src="https://img.shields.io/github/v/release/JanSmrcka/differ?label=release&labelColor=333333&color=666666" alt="latest release" /></a>
+  <a href="https://github.com/JanSmrcka/differ/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/JanSmrcka/differ/ci.yml?branch=master&label=ci&labelColor=333333" alt="CI status" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/JanSmrcka/differ?labelColor=333333&color=666666" alt="MIT license" /></a>
+  <a href="go.mod"><img src="https://img.shields.io/github/go-mod/go-version/JanSmrcka/differ?labelColor=333333&color=666666" alt="Go version" /></a>
+  <a href="https://herdr.dev"><img src="https://img.shields.io/badge/works%20with-herdr-666666?labelColor=333333" alt="works with herdr" /></a>
+  <a href="https://github.com/JanSmrcka/differ/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22"><img src="https://img.shields.io/github/issues/JanSmrcka/differ/good%20first%20issue?label=good%20first%20issues&labelColor=333333&color=7057ff" alt="good first issues" /></a>
+</p>
+
+---
 
 <p align="center">
   <img src="./assets/demo.gif" alt="differ: reading an agent's changes, commenting on a line and sending it to the agent's pane" width="900" />
 </p>
+
+You read the changes file by file, comment on the lines that need it, and send
+those comments to the agent's pane in one keystroke. differ tracks what you
+have read and carries the result; it does not review anything for you.
+
+- **comment on the line, send in one key** — comments sit inline under the
+  line they are about; `S` sends them as references the agent can open.
+  [review loop →](#the-review-loop)
+- **works with [herdr](https://herdr.dev) and tmux** — finds the agents running
+  beside you, sends the review to the one you pick, and under herdr follows it
+  until it answers. Nothing to configure. [agents →](#sending-to-an-agent)
+- **remembers where you got to** — every file is `read`, `commented`, `sent` or
+  `changed`, and the review survives a crash or a quit.
+- **the diff does not move under your comments** — it follows the agent live
+  until you comment, then holds your place and tells you it moved.
+- **opens your editor at the line** — reusing an nvim already open in the same
+  tmux session or herdr workspace. [editor →](#editor)
+- **an ordinary diff viewer too** — syntax highlighting, split view, staging,
+  committing, branches, commit log. [keys →](#keyboard-shortcuts)
+- **one Go binary** — no model reads your diff; nothing leaves your machine
+  except what you send.
 
 ## Install
 
@@ -390,10 +423,20 @@ GUI editors reuse their own window already, so give them `detach`:
 An `editor_cmd` starting with `tmux` runs exactly as written and ignores
 `editor_strategy`.
 
-## tmux
+## tmux and herdr
 
 The layout differ is built for is an agent in one pane and differ in another.
-To open it as a popup:
+It works the same inside [tmux](https://github.com/tmux/tmux) or
+[herdr](https://herdr.dev), and detects which from the environment:
+
+| | tmux | herdr |
+|---|---|---|
+| finding agents | walks each pane's process tree | asks `herdr agent list`, with each agent's state |
+| sending | pasted, never submitted | submitted with `herdr agent prompt` |
+| after a send | — | follows the agent: `working` → `answered` |
+| `e` | reuses nvim in the session, else a new window | reuses nvim in the workspace, else a pane beside differ |
+
+To open differ as a tmux popup:
 
 ```tmux
 bind g display-popup -E -w 90% -h 90% "cd #{pane_current_path} && differ"
@@ -413,11 +456,17 @@ written.
 
 ## Contributing
 
-`internal/git` shells out to git; `internal/review` holds the session and
-never imports the UI; `internal/feedback` delivers it; `internal/editor`
-decides and performs "open this file"; `internal/ui` is the Bubble Tea models,
-the diff parser and the renderer.
+**Contributions are very welcome** — bug reports, ideas, docs, a new theme,
+support for another agent, or code. You do not need to ask first: open an
+issue or a pull request.
 
-`CLAUDE.md` has the rules that are not obvious from the code, including a long
-list of things that looked right and were not. Read it before changing
-anything.
+- New here? Pick a [good first issue](https://github.com/JanSmrcka/differ/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)
+  or one marked [help wanted](https://github.com/JanSmrcka/differ/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22).
+- Found a bug or want something? [Open an issue](https://github.com/JanSmrcka/differ/issues/new) — a
+  screenshot or the exact keys you pressed helps most.
+- Want to send code? [CONTRIBUTING.md](./CONTRIBUTING.md) takes you from fork
+  to pull request in a few commands.
+
+If you are an AI agent working on this repository, read
+[`CLAUDE.md`](./CLAUDE.md) first: it has the rules that are not obvious from
+the code.
