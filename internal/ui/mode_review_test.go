@@ -175,7 +175,7 @@ func TestReviewMode_MovingToNextFileMarksItViewed(t *testing.T) {
 		t.Fatalf("b.ts starts %v, want unreviewed", got)
 	}
 
-	updated, _ := m.updateDiffMode(key("n"))
+	updated, _ := m.updateDiffMode(key("J"))
 	m = updated.(Model)
 
 	if got := m.session.FileStateOf("b.ts"); got != review.FileViewed {

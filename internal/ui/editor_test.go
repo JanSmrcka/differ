@@ -208,7 +208,7 @@ func TestEditor_NoLineIsClaimedWhileTheRendererBelongsToAnotherFile(t *testing.T
 
 	// n moves to the next file; its diff has not arrived yet, so the renderer
 	// still describes the old one.
-	u, _ = m.updateDiffMode(key("n"))
+	u, _ = m.updateDiffMode(key("J"))
 	m = u.(Model)
 
 	if got := m.editorLine(); got != 0 {

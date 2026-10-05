@@ -48,7 +48,7 @@ ref), **2** a bad command line.
 differ review        # the agent's changes, opened on the first diff
 j / k                # move down the diff
 c                    # comment on this line — type, then ctrl+s
-n                    # next file; the one you left is marked read
+J                    # next file; the one you left is marked read
 S                    # send every pending comment to the agent
 ```
 
@@ -170,7 +170,7 @@ state instead — `read`, `2 comments`, `sent`, `changed`.
 | `enter` / `l` | view diff                                  |
 | `tab`         | stage/unstage file                         |
 | `a`           | stage all                                  |
-| `c`           | commit (AI-generated message via `claude`) |
+| `C`           | commit (AI-generated message via `claude`) |
 | `b`           | open branch picker                         |
 | `v`           | toggle split (side-by-side) diff           |
 | `e`           | open in editor — differ keeps running      |
@@ -190,7 +190,7 @@ Nothing here changes git state except `tab`.
 | `}` / `{`   | next/prev hunk                      |
 | `d/u`       | half page down/up                   |
 | `g/G`       | first/last line                     |
-| `n/p`       | next/prev file                      |
+| `J/K`       | next/prev file                      |
 | `c`         | comment on line (edit existing)     |
 | `C`         | comment on whole hunk               |
 | `x`         | delete comment under cursor         |
@@ -285,7 +285,7 @@ Config file: `~/.config/differ/config.json`
 `wl-copy`/`xclip`/`xsel`, so it does the right thing over SSH.
 
 `commit_msg_cmd` generates a commit message from the staged diff when you
-press `c`; it is pre-filled for you to edit. Any command that reads a diff on
+press `C`; it is pre-filled for you to edit. Any command that reads a diff on
 stdin works, and differ carries on without one.
 
 ## Editor

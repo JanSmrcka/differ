@@ -563,7 +563,7 @@ func TestPersist_ACommentIsKeyedToTheContentItsAuthorRead(t *testing.T) {
 
 	// Something else is saved, which used to rewrite a.ts's key as a side
 	// effect.
-	m = settle(t, m, key("n"))               // next file
+	m = settle(t, m, key("J"))               // next file
 	writeComment(t, m, "BETA", "about beta") // saved to disk; the model is done with
 
 	reopened := restart(t, tr)
@@ -703,7 +703,7 @@ func moveTo(t *testing.T, m Model, path string) Model {
 		if m.currentFilePath() == path {
 			return m
 		}
-		m = settle(t, m, key("n"))
+		m = settle(t, m, key("J"))
 	}
 	t.Fatalf("%s is not in the changeset", path)
 	return m

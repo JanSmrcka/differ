@@ -38,13 +38,20 @@ func (m Model) enterBranchMode() (tea.Model, tea.Cmd) {
 			return branchesLoadedMsg{err: err}
 		}
 		current := repo.BranchName()
-		return branchesLoadedMsg{branches: branches, current: current}
+		// A failure here only costs the warning; git still refuses a switch
+		// that would conflict.
+		dirty, _ := repo.HasTrackedChanges()
+		return branchesLoadedMsg{branches: branches, current: current, dirty: dirty}
 	}
 }
 
 func (m Model) updateBranchMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.branchCreating {
 		return m.updateBranchCreateMode(msg)
+	}
+	// The warning was about one branch: anything but enter disarms it.
+	if msg.String() != "enter" {
+		m.branchConfirm = ""
 	}
 	switch msg.String() {
 	case "ctrl+n":
@@ -88,6 +95,12 @@ func (m Model) updateBranchMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.mode = modeFileList
 			return m, nil
 		}
+		if m.branchDirty && m.branchConfirm != selected {
+			m.branchConfirm = selected
+			m.statusMsg = "uncommitted changes will move to " + selected + " — enter again to switch"
+			return m, nil
+		}
+		m.branchConfirm = ""
 		repo := m.repo
 		return m, func() tea.Msg {
 			return branchSwitchedMsg{err: repo.CheckoutBranch(selected)}

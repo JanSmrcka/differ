@@ -364,7 +364,7 @@ func TestNotify_MovingToAnotherFileClearsTheNotice(t *testing.T) {
 		t.Fatal("the diff was not held")
 	}
 
-	m = settle(t, m, key("n")) // next file
+	m = settle(t, m, key("J")) // next file
 
 	if m.diffStale() {
 		t.Error("the notice followed the cursor to a file it does not describe")
@@ -572,7 +572,7 @@ func TestNotify_NoNoticeWhileTheCursorAndTheDiffDisagree(t *testing.T) {
 	}
 
 	// Move the cursor without letting the new diff land.
-	updated, _ := m.updateDiffMode(key("n"))
+	updated, _ := m.updateDiffMode(key("J"))
 	m = updated.(Model)
 	if m.rendererPath == "" {
 		t.Fatal("no renderer path to compare against")
@@ -931,7 +931,7 @@ func TestNotify_ARefreshDoesNotUndoNavigation(t *testing.T) {
 	start := m.currentFilePath()
 
 	// n, without letting the new diff land.
-	updated, _ := m.updateDiffMode(key("n"))
+	updated, _ := m.updateDiffMode(key("J"))
 	m = updated.(Model)
 	asked := m.currentFilePath()
 	if asked == start {
@@ -1220,7 +1220,7 @@ func TestNotify_NavigatingStillLoadsTheFileAskedFor(t *testing.T) {
 	// Navigate, and let a refresh land in the window before the diff does —
 	// with the file we navigated *away* from having changed, which is what
 	// makes an ungated hold engage.
-	updated, nav := m.updateDiffMode(key("n"))
+	updated, nav := m.updateDiffMode(key("J"))
 	m = updated.(Model)
 	asked := m.currentFilePath()
 	tr.Modify(start, "one\nREWRITTEN\n")
@@ -1396,7 +1396,7 @@ func TestNotify_ALoadIsMatchedToItsFileNotItsIndex(t *testing.T) {
 
 	m := reviewing(t, tr)
 	for m.currentFilePath() != "b.ts" {
-		updated, _ := m.updateDiffMode(key("n"))
+		updated, _ := m.updateDiffMode(key("J"))
 		mm := updated.(Model)
 		if mm.currentFilePath() == m.currentFilePath() {
 			t.Fatal("could not reach b.ts")
@@ -1418,7 +1418,7 @@ func TestNotify_ALoadIsMatchedToItsFileNotItsIndex(t *testing.T) {
 		m.session.StaleCount(), m.cursor, m.currentFilePath(), m.rendererPath)
 
 	// n, keeping the load in flight.
-	updated, nav := m.updateDiffMode(key("n"))
+	updated, nav := m.updateDiffMode(key("J"))
 	m = updated.(Model)
 	pending := cmdMsg(nav)
 	t.Logf("after n:  stale=%d cursor=%d path=%q renderer=%q",
@@ -1501,7 +1501,7 @@ func TestNotify_MovingOnDoesNotClearAnUnreloadedChange(t *testing.T) {
 	m = settle(t, m, m.refreshFilesCmd()())
 
 	// n, without pressing R.
-	m = settle(t, m, key("n"))
+	m = settle(t, m, key("J"))
 	if m.currentFilePath() == read {
 		t.Fatal("n did not move off the file")
 	}

@@ -439,6 +439,8 @@ func (m Model) handleBranchesLoaded(msg branchesLoadedMsg) (tea.Model, tea.Cmd) 
 	m.mode = modeBranchPicker
 	m.branches = msg.branches
 	m.currentBranch = msg.current
+	m.branchDirty = msg.dirty
+	m.branchConfirm = ""
 	m.branchCursor = 0
 	m.branchOffset = 0
 	for i, b := range m.branches {

@@ -132,7 +132,10 @@ type commitMsgGeneratedMsg struct {
 type branchesLoadedMsg struct {
 	branches []string
 	current  string
-	err      error
+	// dirty is whether a tracked file has uncommitted changes, which a
+	// switch would carry to the other branch.
+	dirty bool
+	err   error
 }
 
 type branchSwitchedMsg struct{ err error }
@@ -319,6 +322,12 @@ type Model struct {
 	// reviewLock is this process's claim on the review file. Nil when there
 	// is nothing to claim, or when another differ holds it.
 	reviewLock *review.Lock
+	// branchDirty is whether the tree had tracked changes when the picker
+	// opened; branchConfirm is the branch an enter has already warned about.
+	// A switch carries such changes across silently when they do not
+	// conflict, so it takes a second enter on the same branch.
+	branchDirty   bool
+	branchConfirm string
 	// reviewAsked is set by `differ review`, so an empty changeset is
 	// described in the words the user asked in.
 	reviewAsked bool

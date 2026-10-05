@@ -397,7 +397,7 @@ func TestProblem_AnEmptyReviewIsStillAWorkingReview(t *testing.T) {
 	})
 	m = arrived.(Model)
 
-	moved, _ := m.updateDiffMode(key("n"))
+	moved, _ := m.updateDiffMode(key("J"))
 	m = moved.(Model)
 	if got := m.reviewSummary(); !strings.Contains(got, "/2") {
 		t.Errorf("progress = %q, want it to count the two files that arrived", got)

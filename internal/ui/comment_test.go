@@ -491,7 +491,7 @@ func TestComment_RefusesWhileTheRendererIsAnotherFile(t *testing.T) {
 
 	// Move the cursor without letting the reload land, which is what happens
 	// while git diff runs.
-	moved, _ := m.updateDiffMode(key("n"))
+	moved, _ := m.updateDiffMode(key("J"))
 	m = moved.(Model)
 	if m.rendererPath == m.currentFilePath() {
 		t.Skip("the diff loaded synchronously; there is no window to test")

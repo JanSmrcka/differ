@@ -230,7 +230,7 @@ func TestRenderHelpBar_DiffMode(t *testing.T) {
 	m := newTestModel(t, nil)
 	m.mode = modeDiff
 	bar := m.renderHintBar()
-	for _, key := range []string{"j/k", "esc", "n/p", "q"} {
+	for _, key := range []string{"j/k", "esc", "J/K", "q"} {
 		if !strings.Contains(bar, key) {
 			t.Errorf("diff help should contain %q", key)
 		}

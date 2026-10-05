@@ -83,7 +83,7 @@ func (m Model) updateFileListMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.toggleStage()
 	case "a":
 		return m.stageAll()
-	case "c":
+	case "C":
 		return m.enterCommitMode()
 	case "b":
 		return m.enterBranchMode()
@@ -93,13 +93,6 @@ func (m Model) updateFileListMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.prevCurs = -1
 		m.lastDiffContent = ""
 		return m, tea.Batch(m.loadDiffCmd(true), m.saveSplitPrefCmd())
-	case "F":
-		if m.upstream.Upstream == "" {
-			m.statusMsg = "no upstream configured"
-			return m, nil
-		}
-		m.statusMsg = "pulling..."
-		return m, m.pullCmd()
 	}
 	if m.cursor != m.prevCurs {
 		m.prevCurs = m.cursor

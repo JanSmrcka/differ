@@ -528,6 +528,28 @@ func TestCheckoutBranch_Dirty(t *testing.T) {
 	}
 }
 
+// A tracked change carries across a switch silently when it does not
+// conflict, so the picker has to know about it before it switches.
+func TestHasTrackedChanges(t *testing.T) {
+	t.Parallel()
+	repo := setupTestRepo(t)
+	addCommit(t, repo, "f.txt", "v1", "init")
+
+	if dirty, err := repo.HasTrackedChanges(); err != nil || dirty {
+		t.Fatalf("clean tree: dirty=%v err=%v", dirty, err)
+	}
+	// An untracked file stays where it is whatever branch is out, so it is
+	// not what the question is about.
+	writeFile(t, repo, "new.txt", "untracked")
+	if dirty, _ := repo.HasTrackedChanges(); dirty {
+		t.Error("an untracked file counted as a tracked change")
+	}
+	writeFile(t, repo, "f.txt", "edited")
+	if dirty, _ := repo.HasTrackedChanges(); !dirty {
+		t.Error("an edited tracked file was not reported")
+	}
+}
+
 func TestCommitDiffFiles(t *testing.T) {
 	t.Parallel()
 	repo := setupTestRepo(t)

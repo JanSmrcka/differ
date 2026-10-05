@@ -66,9 +66,9 @@ func (m Model) diffNavigation(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.nextHunk(), nil
 	case "{", "[":
 		return m.prevHunk(), nil
-	case "n":
+	case "J":
 		return m.nextFile()
-	case "p":
+	case "K":
 		return m.prevFile()
 	case "e":
 		return m.openFileInEditor()

@@ -75,10 +75,11 @@ func keymapFor(mode viewMode) []binding {
 		return []binding{
 			// No key of its own: any printable character goes to the filter.
 			{Label: "type", Desc: "filter", Help: "type to narrow the list", Bar: true},
-			// Not marked as asking twice: git refuses a checkout that would
-			// overwrite local changes, so there is nothing to lose to a
-			// single press. The overlay said it asked again, and it did not.
-			{Keys: []string{"enter"}, Desc: "switch", Help: "check out the selected branch", Bar: true},
+			// Not marked Confirm, because it asks only sometimes: git refuses
+			// a switch that would overwrite local changes, but carries ones
+			// that do not conflict across without a word — so with tracked
+			// changes in the tree it takes a second enter on the same branch.
+			{Keys: []string{"enter"}, Desc: "switch", Help: "check out the selected branch; asks again if uncommitted changes would move with you", Bar: true},
 			{Keys: []string{"up", "ctrl+k"}, Label: "↑/^k", Desc: "up", Help: "move up the list", Bar: true},
 			{Keys: []string{"down", "ctrl+j"}, Label: "↓/^j", Desc: "down", Help: "move down the list", Bar: true},
 			{Keys: []string{"ctrl+n"}, Label: "^n", Desc: "new", Help: "create a branch from the current HEAD", Bar: true},
@@ -96,7 +97,7 @@ func fileListBindings() []binding {
 		{Keys: []string{"enter", "l", "right"}, Label: "enter", Desc: "open", Help: "open this file's diff", Bar: true},
 		{Keys: []string{"tab"}, Desc: "stage", Help: "stage or unstage this file", Bar: true},
 		{Keys: []string{"a"}, Desc: "stage all", Help: "stage every change"},
-		{Keys: []string{"c"}, Desc: "commit", Help: "write a commit message for the staged changes", Bar: true},
+		{Keys: []string{"C"}, Desc: "commit", Help: "write a commit message for the staged changes", Bar: true},
 		{Keys: []string{"e"}, Desc: "edit", Help: "open this file in your editor"},
 		{Keys: []string{"b"}, Desc: "branch", Help: "switch branches"},
 		{Keys: []string{"v"}, Desc: "split", Help: "toggle the side-by-side diff"},
@@ -117,8 +118,8 @@ func diffBindings() []binding {
 		{Keys: []string{"{", "["}},
 		{Keys: []string{"d"}, Label: "d/u", Desc: "½ page", Help: "scroll half a page down or up"},
 		{Keys: []string{"u"}},
-		{Keys: []string{"n"}, Label: "n/p", Desc: "file", Help: "move to the next or previous file", Bar: true},
-		{Keys: []string{"p"}},
+		{Keys: []string{"J"}, Label: "J/K", Desc: "file", Help: "move to the next or previous file", Bar: true},
+		{Keys: []string{"K"}},
 		{Keys: []string{"g"}, Desc: "top", Help: "jump to the first line"},
 		{Keys: []string{"G"}, Desc: "bottom", Help: "jump to the last line"},
 		{Keys: []string{"c"}, Desc: "comment", Help: "comment on the line under the cursor", Bar: true},

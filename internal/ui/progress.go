@@ -170,7 +170,7 @@ func (m Model) diffStale() bool {
 	if m.rendererKey == "" || m.renderer == nil {
 		return false
 	}
-	// Only about the file actually on screen. After n or p the renderer is
+	// Only about the file actually on screen. After J or K the renderer is
 	// still the previous file's until its diff arrives.
 	if m.rendererPath != m.currentFilePath() {
 		return false
@@ -200,7 +200,7 @@ func (m Model) holdsTheDiff() bool {
 		return false
 	}
 	// The renderer has to be the cursor's file, not just any file: diffs load
-	// asynchronously, so right after n or p it is still the previous one.
+	// asynchronously, so right after J or K it is still the previous one.
 	//
 	// That last clause is defence in depth and deliberately untested. Removing
 	// it leaves the suite green, and I could not build a case where it changes

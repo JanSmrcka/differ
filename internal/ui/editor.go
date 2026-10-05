@@ -73,7 +73,7 @@ func (m Model) editorLine() int {
 		return 0
 	}
 	// Diffs load asynchronously, so the renderer on screen may still be the
-	// previous file's — after entering the diff, or after n/p, until
+	// previous file's — after entering the diff, or after J/K, until
 	// diffLoadedMsg arrives. A line taken from it would be about the wrong
 	// file, so claim none until the two agree.
 	// The same reason covers a held diff: it is knowingly older than the file,
