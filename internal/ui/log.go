@@ -312,21 +312,15 @@ func (m LogModel) viewDiff() string {
 // renderLogBar is the log browser's command bar, built the same way as the
 // main view's so the two read alike.
 func (m LogModel) renderLogBar() string {
-	items := []binding{
-		{Keys: []string{"j", "down"}, Label: "j/k", Desc: "navigate"},
-		{Keys: []string{"enter"}, Desc: "view diff"},
-	}
+	s := surfaceLogList
 	if m.mode == logModeDiff {
-		items = []binding{
-			{Keys: []string{"j", "down"}, Label: "j/k", Desc: "scroll"},
-			{Keys: []string{"d"}, Label: "d/u", Desc: "½ page"},
-			{Keys: []string{"esc"}, Desc: "back"},
-		}
+		s = surfaceLogDiff
 	}
-	items = append(items, binding{Keys: []string{"q"}, Desc: "quit"})
-
 	var parts []string
-	for _, b := range items {
+	for _, b := range surfaceKeymap(s) {
+		if !b.Bar {
+			continue
+		}
 		parts = append(parts, m.styles.HelpKey.Render(b.label())+" "+m.styles.HelpDesc.Render(b.Desc))
 	}
 	return lipgloss.NewStyle().Width(m.width).MaxHeight(1).

@@ -98,28 +98,7 @@ func (m Model) routeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	if m.showHelp || m.showHistory || m.showProblem {
-		switch msg.String() {
-		case "?":
-			m.showHelp, m.showHistory, m.showProblem = !m.showHelp, false, false
-			return m, nil
-		case "!":
-			m.showProblem, m.showHelp, m.showHistory = !m.showProblem, false, false
-			return m, nil
-		case "t":
-			return m.openThemePicker()
-		case agentKey:
-			mm, cmd := m.openAgentPicker()
-			return mm, cmd
-		case "H":
-			m.showHistory, m.showHelp, m.showProblem = !m.showHistory, false, false
-			return m, nil
-		case "esc", "q":
-			m.showHelp, m.showHistory, m.showProblem = false, false, false
-			return m, nil
-		}
-		// Everything else is swallowed, so a stray j does not scroll a diff
-		// the user cannot see.
-		return m, nil
+		return m.readingOverlayKey(msg.String())
 	}
 
 	if !m.typing() {
@@ -154,6 +133,28 @@ func (m Model) routeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.updateCommitMode(msg)
 	case modeBranchPicker:
 		return m.updateBranchMode(msg)
+	}
+	return m, nil
+}
+
+// readingOverlayKey answers keys while help, history or the problem is open.
+// The three switch between each other, and everything else is swallowed, so
+// a stray j does not scroll a diff the user cannot see.
+func (m Model) readingOverlayKey(key string) (tea.Model, tea.Cmd) {
+	switch key {
+	case "?":
+		m.showHelp, m.showHistory, m.showProblem = !m.showHelp, false, false
+	case "!":
+		m.showProblem, m.showHelp, m.showHistory = !m.showProblem, false, false
+	case "H":
+		m.showHistory, m.showHelp, m.showProblem = !m.showHistory, false, false
+	case "t":
+		return m.openThemePicker()
+	case agentKey:
+		mm, cmd := m.openAgentPicker()
+		return mm, cmd
+	case "esc", "q":
+		m.showHelp, m.showHistory, m.showProblem = false, false, false
 	}
 	return m, nil
 }

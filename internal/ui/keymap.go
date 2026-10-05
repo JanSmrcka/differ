@@ -90,6 +90,83 @@ func keymapFor(mode viewMode) []binding {
 	}
 }
 
+// surface is something with keys of its own that is not a mode: an overlay,
+// an input inside a mode, or the log browser. Each owns the keyboard while it
+// is up, so each has a table here and keymap_test.go holds it to its handler.
+type surface string
+
+const (
+	surfaceThemes    surface = "theme picker"
+	surfaceAgents    surface = "agent picker"
+	surfaceReading   surface = "help, history and problem"
+	surfaceNewBranch surface = "new branch"
+	surfaceComment   surface = "comment editor"
+	surfaceLogList   surface = "log"
+	surfaceLogDiff   surface = "log diff"
+)
+
+var allSurfaces = []surface{
+	surfaceThemes, surfaceAgents, surfaceReading, surfaceNewBranch,
+	surfaceComment, surfaceLogList, surfaceLogDiff,
+}
+
+// surfaceKeymap is every key a surface answers.
+func surfaceKeymap(s surface) []binding {
+	switch s {
+	case surfaceThemes:
+		return []binding{
+			{Keys: []string{"j", "down"}, Label: "j/k", Desc: "move", Help: "try the next or previous theme", Bar: true},
+			{Keys: []string{"k", "up"}},
+			{Keys: []string{"enter"}, Desc: "keep", Help: "keep this theme and save it", Bar: true},
+			{Keys: []string{"esc", "q", "t"}, Label: "esc", Desc: "cancel", Help: "go back to the theme you had", Bar: true},
+		}
+	case surfaceAgents:
+		return []binding{
+			{Keys: []string{"j", "down"}, Label: "j/k", Desc: "move", Help: "move through the agents", Bar: true},
+			{Keys: []string{"k", "up"}},
+			{Keys: []string{"enter"}, Desc: "choose", Help: "send reviews to this agent", Bar: true},
+			{Keys: []string{"esc", "q", agentKey}, Label: "esc", Desc: "cancel", Help: "keep the agent you had", Bar: true},
+		}
+	case surfaceReading:
+		return []binding{
+			{Keys: []string{"?"}, Desc: "help", Help: "switch to the keys, or close them"},
+			{Keys: []string{"H"}, Desc: "history", Help: "switch to what was sent, or close it"},
+			{Keys: []string{"!"}, Desc: "problem", Help: "switch to the last failure, or close it"},
+			{Keys: []string{"t"}, Desc: "theme", Help: "open the theme picker instead"},
+			{Keys: []string{agentKey}, Desc: "agent", Help: "open the agent picker instead"},
+			{Keys: []string{"esc", "q"}, Label: "esc", Desc: "close", Help: "close it", Bar: true},
+		}
+	case surfaceNewBranch:
+		return []binding{
+			{Keys: []string{"enter"}, Desc: "create", Help: "create the branch and switch to it", Bar: true},
+			{Keys: []string{"esc"}, Desc: "cancel", Help: "back to the branch list", Bar: true},
+		}
+	case surfaceComment:
+		return []binding{
+			{Keys: []string{"ctrl+s"}, Desc: "save", Help: "save the comment", Bar: true},
+			{Keys: []string{"esc"}, Desc: "cancel", Help: "discard what you typed", Bar: true},
+		}
+	case surfaceLogList:
+		return []binding{
+			{Keys: []string{"j", "down"}, Label: "j/k", Desc: "navigate", Help: "move through the commits", Bar: true},
+			{Keys: []string{"k", "up"}},
+			{Keys: []string{"g"}, Desc: "first", Help: "jump to the newest commit"},
+			{Keys: []string{"G"}, Desc: "last", Help: "jump to the oldest commit shown"},
+			{Keys: []string{"enter"}, Desc: "view diff", Help: "show this commit's diff", Bar: true},
+			{Keys: []string{"q", "ctrl+c"}, Label: "q", Desc: "quit", Help: "quit", Bar: true},
+		}
+	case surfaceLogDiff:
+		return []binding{
+			// The viewport's own keys: no handler case of their own.
+			{Label: "j/k", Desc: "scroll", Help: "scroll a line", Bar: true},
+			{Label: "d/u", Desc: "½ page", Help: "scroll half a page", Bar: true},
+			{Keys: []string{"esc"}, Desc: "back", Help: "back to the commit list", Bar: true},
+			{Keys: []string{"q", "ctrl+c"}, Label: "q", Desc: "quit", Help: "quit", Bar: true},
+		}
+	}
+	return nil
+}
+
 func fileListBindings() []binding {
 	return []binding{
 		{Keys: []string{"j", "down"}, Label: "j/k", Desc: "navigate", Help: "move through the changed files", Bar: true},
@@ -125,7 +202,9 @@ func diffBindings() []binding {
 		{Keys: []string{"c"}, Desc: "comment", Help: "comment on the line under the cursor", Bar: true},
 		{Keys: []string{"C"}, Desc: "hunk comment", Help: "comment on the whole hunk"},
 		{Keys: []string{"x"}, Desc: "delete", Help: "delete the comment under the cursor"},
-		{Keys: []string{"s"}, Label: "s/S", Desc: "send", Help: "send the comment under the cursor, or S for all of them", Bar: true},
+		// Not marked Confirm, because it asks only sometimes: a stale comment
+		// describes code that has moved, so sending one takes a second press.
+		{Keys: []string{"s"}, Label: "s/S", Desc: "send", Help: "send the comment under the cursor, or S for all of them; a stale one asks again", Bar: true},
 		{Keys: []string{"S"}},
 		{Keys: []string{"R"}, Desc: "reload", Help: "re-read this file after it changed underneath you"},
 		{Keys: []string{"esc", "h", "left"}, Label: "esc", Desc: "back", Help: "back to the file list", Bar: true},

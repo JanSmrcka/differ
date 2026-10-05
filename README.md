@@ -149,8 +149,22 @@ misconfigured target cannot execute anything.
 ## Keyboard shortcuts
 
 `?` lists the current view's keys. The bar along the bottom shows the common
-ones and hides what would do nothing. The tables below are checked against the
-code — a test fails if a key here has no handler, or a handler is missing here.
+ones and hides what would do nothing; a picker or input shows its own. The
+tables below are checked against the code — a test fails if a key here has no
+handler, or a handler is missing here.
+
+### Everywhere
+
+Except while typing.
+
+| Key      | Action                                       |
+| -------- | -------------------------------------------- |
+| `?`      | every key for this view                      |
+| `H`      | what has been sent, and whether it got there |
+| `!`      | the last failure, in full                    |
+| `t`      | theme picker                                 |
+| `A`      | choose the agent reviews go to               |
+| `ctrl+c` | quit immediately                             |
 
 ### File List
 
@@ -235,13 +249,27 @@ the panel is too narrow for two columns.
 ╰───────────────────────────────────────────────────────╯
 ```
 
-| Key             | Action               |
-| --------------- | -------------------- |
-| type            | filter branches      |
-| `↑/↓` / `^j/^k` | navigate             |
-| `enter`         | switch branch        |
-| `ctrl+n`        | create new branch    |
-| `esc`           | clear filter / close |
+| Key             | Action                                                       |
+| --------------- | ------------------------------------------------------------ |
+| type            | filter branches                                              |
+| `up/down`       | navigate                                                     |
+| `ctrl+k/ctrl+j` | navigate                                                     |
+| `enter`         | switch branch (asks again if uncommitted changes would move) |
+| `ctrl+n`        | create new branch                                            |
+| `esc`           | clear filter / close                                         |
+
+### Log
+
+`differ log` browses recent commits; `enter` shows one through the same diff
+renderer.
+
+| Key     | Action                        |
+| ------- | ----------------------------- |
+| `j/k`   | move through commits          |
+| `g/G`   | newest/oldest                 |
+| `enter` | view the commit's diff        |
+| `esc`   | back to the list, from a diff |
+| `q`     | quit                          |
 
 ## Themes
 
