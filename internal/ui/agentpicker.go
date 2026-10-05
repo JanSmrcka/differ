@@ -190,7 +190,7 @@ func (m Model) agentRows(room int) []string {
 		}
 		label := "  " + name
 		if i == m.agentCursor {
-			label = m.styles.Accent.Render(focusBar) + m.styles.PanelLabelFocus.Render(" "+name)
+			label = m.styles.Selected.Render(cursorMarker + " " + name)
 		}
 		if a.Pane == m.cfg.TmuxTarget {
 			label += m.styles.HelpDesc.Render("  ·  in use")

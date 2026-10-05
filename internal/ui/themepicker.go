@@ -99,7 +99,7 @@ func (m Model) renderThemeOverlay(width, height int) string {
 	for i, name := range names {
 		label := "  " + name
 		if i == m.themeCursor {
-			label = m.styles.Accent.Render(focusBar) + m.styles.PanelLabelFocus.Render(" "+name)
+			label = m.styles.Selected.Render(cursorMarker + " " + name)
 		}
 		// By palette, not by name: the config can say "dark", which is an
 		// alias and not in ThemeNames, and --theme overrides the config

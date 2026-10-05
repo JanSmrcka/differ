@@ -278,8 +278,10 @@ func digits(n int) int {
 	return d
 }
 
-// cursorMarker flags the current line. The gutter it lives in is always
-// reserved, so lines do not shift horizontally as the cursor moves.
+// cursorMarker flags the current line, and the selected row in every list —
+// files, commits, branches, agents, themes — drawn in styles.Selected. The
+// gutter it lives in is always reserved, so rows do not shift horizontally as
+// the cursor moves.
 const cursorMarker = "▌"
 
 const gutterWidth = 2

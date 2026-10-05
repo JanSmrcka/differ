@@ -298,9 +298,9 @@ func (m LogModel) renderCommitLine(c git.Commit, selected bool) string {
 		// The same marker the changed-file list and the diff use. Bold and a
 		// foreground were the only difference before, so stripped of colour
 		// the selected row was byte-identical to the others — and the one
-		// column of padding on FileSelected made the list jitter as the cursor
+		// column of padding on Selected made the list jitter as the cursor
 		// moved, because the unselected rows had none.
-		return m.styles.FileSelected.Width(m.width).Render(cursorMarker + line)
+		return m.styles.Selected.Width(m.width).Render(cursorMarker + line)
 	}
 	return lipgloss.NewStyle().Width(m.width).Render(" " + line)
 }

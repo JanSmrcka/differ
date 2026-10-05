@@ -20,8 +20,10 @@ const (
 
 	verticalDivider = "│"
 	horizontalRule  = "─"
-	focusBar        = "▍"
-	panelGap        = 1 // one space either side of the divider
+	// focusBar marks the focused panel and nothing else; a selected row in
+	// any list carries cursorMarker.
+	focusBar = "▍"
+	panelGap = 1 // one space either side of the divider
 
 	verticalDividerWidth = 1
 )

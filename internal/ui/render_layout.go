@@ -70,7 +70,7 @@ func (m Model) renderFileItem(f fileItem, selected bool, short map[string]string
 	name := padTo(truncatePath(m.displayName(f, short), nameW), nameW)
 
 	if selected {
-		return m.styles.FileSelected.Width(m.listWidth()).Render(fmt.Sprintf("%s%s%s %s %s", cursorMarker, stagedRaw, status, name, right.text))
+		return m.styles.Selected.Width(m.listWidth()).Render(fmt.Sprintf("%s%s%s %s %s", cursorMarker, stagedRaw, status, name, right.text))
 	}
 
 	staged := stagedRaw

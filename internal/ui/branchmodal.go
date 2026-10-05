@@ -95,7 +95,7 @@ func (m Model) branchRow(name string, selected, current bool) string {
 	room := max(m.modalBodyWidth()-5, 1)
 	name = mark + truncatePath(name, room)
 	if selected {
-		return m.styles.Accent.Render(focusBar) + m.styles.PanelLabelFocus.Render(" "+name)
+		return m.styles.Selected.Render(cursorMarker + " " + name)
 	}
 	return "  " + name
 }

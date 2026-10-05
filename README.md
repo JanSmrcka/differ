@@ -82,7 +82,7 @@ you pick.
 ```
  agent
 
-▍ differ:2  claude  /Users/you/git/private/differ
+▌ differ:2  claude  /Users/you/git/private/differ
   ELI-panda:2  claude  /Users/you/git/work/ELI-panda
   personal-web:2 %5  opencode  /Users/you/git/private/personal-web
   personal-web:2 %6  claude  /Users/you/git/private/personal-web
@@ -241,7 +241,7 @@ the panel is too narrow for two columns.
 │                                                       │
 │  > feat/                                        12/34 │
 │                                                       │
-│ ▍*  feat/roadmap-59                                   │
+│ ▌*  feat/roadmap-59                                   │
 │     feat/payload-90                                   │
 │     feat/agent-picker-84                              │
 │                                                       │

@@ -6,7 +6,6 @@ import (
 
 	"github.com/alecthomas/chroma/v2"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/jansmrcka/differ/internal/review"
 	"github.com/jansmrcka/differ/internal/theme"
 )
@@ -286,7 +285,7 @@ func (r *DiffRenderer) renderRow(row splitRow, leftGutter, rightGutter string) s
 	oldSpan, newSpan := r.changedSpans(l, rr)
 	left := renderSplitSide(l, r.filename, r.styles, r.theme, leftG, true, oldSpan, r.chroma)
 	right := renderSplitSide(rr, r.filename, r.styles, r.theme, rightG, false, newSpan, r.chroma)
-	sep := lipgloss.NewStyle().Foreground(lipgloss.Color(r.theme.BorderFg)).Render(verticalDivider)
+	sep := r.styles.Chrome.Render(verticalDivider)
 	return clipRow(leftGutter+left+sep+rightGutter+right, r.width)
 }
 

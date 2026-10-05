@@ -13,9 +13,9 @@ type Styles struct {
 	// the rest of the screen is not taking input.
 	Modal lipgloss.Style
 
-	FileItem     lipgloss.Style
-	FileSelected lipgloss.Style
-	StagedIcon   lipgloss.Style
+	FileItem   lipgloss.Style
+	Selected   lipgloss.Style
+	StagedIcon lipgloss.Style
 
 	// File status colors
 	StatusModified  lipgloss.Style
@@ -97,7 +97,7 @@ func NewStyles(t theme.Theme) Styles {
 
 		FileItem: lipgloss.NewStyle().
 			Foreground(lipgloss.Color(t.Fg)),
-		FileSelected: lipgloss.NewStyle().
+		Selected: lipgloss.NewStyle().
 			Foreground(lipgloss.Color(t.SelectedFg)).
 			Bold(true),
 		StagedIcon: lipgloss.NewStyle().

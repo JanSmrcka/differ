@@ -3,6 +3,9 @@ package ui
 import (
 	"strings"
 	"testing"
+
+	"github.com/jansmrcka/differ/internal/feedback"
+	"github.com/jansmrcka/differ/internal/theme"
 )
 
 // #48: every question is the same shape. Help, history and the problem used
@@ -60,5 +63,43 @@ func TestVisual_TheViewShowsAroundTheHelp(t *testing.T) {
 	m.showHelp = true
 	if view := stripANSI(m.View()); !strings.Contains(view, "Files") {
 		t.Errorf("the help box hid the whole view:\n%s", view)
+	}
+}
+
+// One selection treatment in every list: the cursor marker the file list, the
+// log and the diff use. The pickers drew ▍, which is the panel-focus mark —
+// the same glyph meaning two things.
+func TestVisual_EveryListSelectsTheSameWay(t *testing.T) {
+	m := branchModel(t, 120, 30, "master", "other")
+	m.styles = NewStyles(theme.NoColorTheme())
+
+	rows := map[string]string{
+		"branch": stripANSI(m.branchRow("other", true, false)),
+	}
+	m.showThemes = true
+	for _, r := range strings.Split(stripANSI(m.renderThemeOverlay(40, 20)), "\n") {
+		if strings.Contains(r, cursorMarker) || strings.Contains(r, focusBar) {
+			rows["theme"] = r
+		}
+	}
+	m.showThemes = false
+	m.agents = []feedback.Agent{{Pane: "%1", Session: "work", Window: "2", Tool: "claude"}}
+	m.agentsScanned = true
+	for _, r := range m.agentRows(10) {
+		if r := stripANSI(r); strings.Contains(r, cursorMarker) || strings.Contains(r, focusBar) {
+			rows["agent"] = r
+		}
+	}
+
+	for name, row := range rows {
+		if !strings.HasPrefix(strings.TrimLeft(row, " "), cursorMarker) {
+			t.Errorf("%s: the selected row does not start with %s: %q", name, cursorMarker, row)
+		}
+		if strings.Contains(row, focusBar) {
+			t.Errorf("%s: the selected row uses the focus mark %s: %q", name, focusBar, row)
+		}
+	}
+	if len(rows) != 3 {
+		t.Errorf("found selected rows for %d lists, want 3: %v", len(rows), rows)
 	}
 }
