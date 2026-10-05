@@ -167,7 +167,7 @@ func (m Model) helpRows() []string {
 		if !m.bindingApplies(b) {
 			continue
 		}
-		key := m.styles.HelpKey.Render(padTo(" "+b.label(), 14))
+		key := " " + m.keyLabel(b.label()) + strings.Repeat(" ", max(13-lipgloss.Width(b.label()), 1))
 		text := b.help()
 		if b.Confirm {
 			text += m.styles.HelpDesc.Render("  (asks again)")
@@ -175,6 +175,19 @@ func (m Model) helpRows() []string {
 		rows = append(rows, key+m.styles.HelpDesc.Render(text))
 	}
 	return rows
+}
+
+// keyLabel draws text in the key style with any surrounding spaces left
+// outside it. The style is underlined, and applied to padded text it
+// underlined the padding too — a rule running from each key to its
+// description, and under every title's leading space.
+func (m Model) keyLabel(text string) string {
+	core := strings.TrimSpace(text)
+	if core == "" {
+		return text
+	}
+	i := strings.Index(text, core)
+	return text[:i] + m.styles.HelpKey.Render(core) + text[i+len(core):]
 }
 
 // fitOverlay lays a title, a body and a closing line into exactly the panel
@@ -210,7 +223,7 @@ func (m Model) fitOverlay(title string, body []string, closing string, width, he
 			m.styles.HelpDesc.Render(fmt.Sprintf(" … %d more", hidden)))
 	}
 
-	rows := append([]string{m.styles.HelpKey.Render(title), ""}, body...)
+	rows := append([]string{m.keyLabel(title), ""}, body...)
 	rows = append(rows, "", footer)
 
 	for i, r := range rows {
