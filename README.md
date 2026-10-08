@@ -112,9 +112,9 @@ Nothing here touches git. Staging and committing stay explicit.
 
 ## Sending to an agent
 
-`A` lists the coding agents running in tmux or [herdr](https://herdr.dev) and
-sends the review to the one you pick. Which of the two is detected from the
-environment, nothing to configure; inside neither, the review goes to the
+`A` lists the coding agents running in tmux, [herdr](https://herdr.dev) or [zellij](https://zellij.dev) and
+sends the review to the one you pick. Which of them is detected from the
+environment, nothing to configure; inside none, the review goes to the
 clipboard or stdout.
 
 ### Choosing the agent
@@ -367,12 +367,13 @@ Config file: `~/.config/differ/config.json`
   "feedback_target": "clipboard",
   "tmux_target": "",
   "herdr_target": "",
-  "herdr_pane": ""
+  "herdr_pane": "",
+  "zellij_target": ""
 }
 ```
 
 `feedback_target` is where a review goes: `clipboard` (default), `stdout`,
-`tmux` or `herdr`. `A` sets it for you, along with `tmux_target` or the herdr
+`tmux`, `herdr` or `zellij`. `A` sets it for you, along with `tmux_target`, `zellij_target` or the herdr
 agent's session id (`herdr_target`) and the pane it was in (`herdr_pane`). The clipboard target shells out to `pbcopy` or
 `wl-copy`/`xclip`/`xsel`, so it does the right thing over SSH.
 
@@ -435,6 +436,11 @@ It works the same inside [tmux](https://github.com/tmux/tmux) or
 | sending | pasted, never submitted | submitted with `herdr agent prompt` |
 | after a send | — | follows the agent: `working` → `answered` |
 | `e` | reuses nvim in the session, else a new window | reuses nvim in the workspace, else a pane beside differ |
+
+**Zellij** is supported for sending reviews: `A` lists the panes whose
+foreground command is an agent (`zellij action list-panes`), and the review is
+pasted with `zellij action paste` and never submitted, as in tmux. The choice
+is stored as `zellij_target`. `e` does not know Zellij yet.
 
 To open differ as a tmux popup:
 
