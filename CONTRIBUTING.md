@@ -46,7 +46,7 @@ same tests and lint; a review follows.
 |---|---|
 | `internal/git` | every git call |
 | `internal/review` | the review session, its comments and its persistence |
-| `internal/feedback` | delivering a review: clipboard, stdout, tmux, herdr |
+| `internal/feedback` | delivering a review: clipboard, stdout, tmux, herdr, zellij |
 | `internal/editor` | opening a file in an editor |
 | `internal/ui` | the Bubble Tea models, the diff parser and renderer |
 
