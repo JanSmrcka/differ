@@ -406,6 +406,11 @@ Where it opens — `editor_strategy`:
 | `inline` | take over differ's terminal, resume when the editor exits |
 | `detach` | run it in the background and carry on |
 
+Started from nvim's own `:terminal` (`$NVIM` is set, e.g. differ in a float
+over your editor), `auto` and `reuse` open the file in that nvim instead: a
+float closes, a split hands focus back, and differ keeps running in the hidden
+terminal buffer.
+
 Outside tmux and herdr, `reuse` and `window` are refused with a message
 rather than silently downgraded. Reuse needs nvim's RPC socket and sends
 `:drop`, so nothing unsaved is ever at risk, then focuses that pane. In herdr
