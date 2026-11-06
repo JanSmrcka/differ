@@ -31,7 +31,7 @@ type Target interface {
 
 // Config selects and configures a target.
 type Config struct {
-	// Target names the delivery mechanism: clipboard, stdout, tmux or herdr.
+	// Target names the delivery mechanism: clipboard, stdout, tmux, herdr or zellij.
 	Target string
 	// TmuxTarget is the pane tmux feedback goes to. See the tmux target.
 	TmuxTarget string
@@ -41,13 +41,15 @@ type Config struct {
 	// that is wrong rather than unset.
 	HerdrTarget string
 	HerdrPane   string
+	// ZellijTarget is the pane zellij feedback goes to, as "terminal_N".
+	ZellijTarget string
 	// Env is the environment the target reads; the zero value is the
 	// process's own.
 	Env Env
 }
 
 // Available lists the target names a user may configure.
-func Available() []string { return []string{"clipboard", "stdout", "tmux", "herdr"} }
+func Available() []string { return []string{"clipboard", "stdout", "tmux", "herdr", "zellij"} }
 
 // Watcher is a target that can tell when the agent it last delivered to has
 // finished with it: idle, done or blocked. Asserted like Flusher, because
@@ -73,6 +75,8 @@ func Resolve(cfg Config) (Target, error) {
 		return newTmuxTarget(cfg.TmuxTarget)
 	case "herdr":
 		return newHerdrTarget(cfg)
+	case "zellij":
+		return newZellijTarget(cfg)
 	default:
 		return nil, fmt.Errorf("unknown feedback target %q — set feedback_target to one of: %s",
 			cfg.Target, strings.Join(Available(), ", "))

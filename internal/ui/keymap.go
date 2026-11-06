@@ -55,7 +55,7 @@ func globalBindings() []binding {
 		{Keys: []string{"H"}, Desc: "history", Help: "what has been sent, and whether it arrived"},
 		{Keys: []string{"!"}, Desc: "problem", Help: "show the last failure in full, including what the tool said"},
 		{Keys: []string{"t"}, Desc: "theme", Help: "try the themes; the screen changes as you move"},
-		{Keys: []string{agentKey}, Desc: "agent", Help: "choose which agent, in tmux or herdr, the review is sent to"},
+		{Keys: []string{agentKey}, Desc: "agent", Help: "choose which agent, in tmux, herdr or zellij, the review is sent to"},
 		{Keys: []string{"ctrl+c"}, Desc: "quit", Help: "quit immediately"},
 	}
 }

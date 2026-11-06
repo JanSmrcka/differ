@@ -69,11 +69,12 @@ func (m Model) scanAgentsCmd() tea.Cmd {
 // feedbackConfigOf is the target configuration the config file describes.
 func feedbackConfigOf(cfg config.Config, env feedback.Env) feedback.Config {
 	return feedback.Config{
-		Target:      cfg.FeedbackTarget,
-		TmuxTarget:  cfg.TmuxTarget,
-		HerdrTarget: cfg.HerdrTarget,
-		HerdrPane:   cfg.HerdrPane,
-		Env:         env,
+		Target:       cfg.FeedbackTarget,
+		TmuxTarget:   cfg.TmuxTarget,
+		HerdrTarget:  cfg.HerdrTarget,
+		HerdrPane:    cfg.HerdrPane,
+		ZellijTarget: cfg.ZellijTarget,
+		Env:          env,
 	}
 }
 
@@ -84,6 +85,9 @@ func applyChoice(cfg *config.Config, fc feedback.Config) {
 	cfg.FeedbackTarget = fc.Target
 	if fc.TmuxTarget != "" {
 		cfg.TmuxTarget = fc.TmuxTarget
+	}
+	if fc.ZellijTarget != "" {
+		cfg.ZellijTarget = fc.ZellijTarget
 	}
 	if fc.HerdrPane != "" || fc.HerdrTarget != "" {
 		cfg.HerdrTarget, cfg.HerdrPane = fc.HerdrTarget, fc.HerdrPane
@@ -283,7 +287,7 @@ func (m Model) agentRows(room int) []string {
 // "differ is broken". The multiplexer says it, so the picker does not need to
 // know which one it asked.
 func (m Model) noAgentRows() []string {
-	name, searched := "tmux or herdr", []string(nil)
+	name, searched := "tmux, herdr or zellij", []string(nil)
 	if m.mux != nil {
 		name, searched = m.mux.Name(), m.mux.Searched()
 	}
