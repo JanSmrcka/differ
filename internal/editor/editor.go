@@ -41,6 +41,8 @@ type Env struct {
 	HerdrWorkspace string // $HERDR_WORKSPACE_ID — differ's own workspace
 	HerdrBin       string // $HERDR_BIN_PATH — the herdr differ runs in
 	HerdrSocket    string // $HERDR_SOCKET_PATH — its API socket
+
+	NvimHost string // $NVIM — the nvim whose :terminal differ runs in
 }
 
 // NewEnv reads the environment. This is the only place in the package that
@@ -61,6 +63,8 @@ func NewEnv() Env {
 		HerdrWorkspace: os.Getenv("HERDR_WORKSPACE_ID"),
 		HerdrBin:       os.Getenv("HERDR_BIN_PATH"),
 		HerdrSocket:    os.Getenv("HERDR_SOCKET_PATH"),
+
+		NvimHost: os.Getenv("NVIM"),
 	}
 }
 
@@ -268,6 +272,11 @@ func planFor(ctx context.Context, cfg Config, want Strategy, argv []string, req 
 		return inlinePlan(argv, req), nil
 	case StrategyDetach:
 		return detachPlan(argv, req, cfg.Grace), nil
+	}
+	// Inside nvim's own :terminal the editor is already here, and it is the
+	// innermost thing differ runs in — closer than any multiplexer around it.
+	if req.Env.NvimHost != "" && (want == StrategyAuto || want == StrategyReuse) {
+		return hostPlan(cfg, req), nil
 	}
 	reuse, window := reusePlan, windowPlan
 	switch req.Env.mux() {

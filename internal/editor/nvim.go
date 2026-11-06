@@ -239,6 +239,28 @@ func reusePlan(ctx context.Context, cfg Config, req Request) (Plan, error) {
 		scopeLabel(session, cfg.Target))
 }
 
+// stepAside moves focus off differ's own window in the host nvim: a float
+// closes, a split hands focus back to the window before it. differ keeps
+// running in its now hidden terminal buffer, ready to be shown again.
+const stepAside = `execute('stopinsert | if nvim_win_get_config(0).relative !=# "" | close | else | wincmd p | endif')`
+
+// hostPlan opens the file in the nvim differ was started from ($NVIM), in an
+// ordinary window rather than in place of differ's terminal.
+func hostPlan(cfg Config, req Request) Plan {
+	socket := req.Env.NvimHost
+	return Plan{
+		Kind:     KindDetached,
+		Strategy: StrategyReuse,
+		Desc:     "opened " + req.File + " in nvim",
+		run: func(ctx context.Context) error {
+			if _, err := queryNvim(ctx, cfg.act(), socket, stepAside); err != nil {
+				return err
+			}
+			return openInNvim(ctx, cfg.act(), socket, req.abs(), req.Line)
+		},
+	}
+}
+
 // scopeLabel names where reuse looked, for an error the user can act on.
 func scopeLabel(own, target string) string {
 	switch target {

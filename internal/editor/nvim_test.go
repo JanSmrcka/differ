@@ -380,3 +380,71 @@ func TestNewEnv_FallsBackToTheRealUserName(t *testing.T) {
 		t.Errorf("currentUser(%q) = %q, should prefer the environment", want, os.Getenv("USER"))
 	}
 }
+
+// differ in a float over nvim: the float goes away and the file opens at the
+// line in the window underneath, not inside differ's window.
+func TestHostPlan_ClosesTheFloatAndOpensBeneath(t *testing.T) {
+	t.Parallel()
+	sock := headlessNvim(t, nil)
+	dir := filepath.Dir(sock)
+	target := filepath.Join(dir, "target.txt")
+	if err := os.WriteFile(target, []byte("a\nb\nc\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if _, err := queryNvim(ctx, 0, sock,
+		`nvim_open_win(nvim_create_buf(v:false, v:true), v:true, {'relative': 'editor', 'row': 1, 'col': 1, 'width': 10, 'height': 3})`); err != nil {
+		t.Fatal(err)
+	}
+
+	plan := hostPlan(Config{}, Request{File: "target.txt", Repo: dir, Line: 2, Env: Env{NvimHost: sock}})
+	if err := plan.Run(ctx); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	for expr, want := range map[string]string{
+		`winnr("$")`:                      "1",
+		`nvim_win_get_config(0).relative`: "",
+		`expand("%:p")`:                   target,
+		`line(".")`:                       "2",
+	} {
+		got, err := queryNvim(ctx, 0, sock, expr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Errorf("%s = %q, want %q", expr, got, want)
+		}
+	}
+}
+
+// differ in a split: its window stays, and the file opens in the one before.
+func TestHostPlan_LeavesASplitAndOpensInThePreviousWindow(t *testing.T) {
+	t.Parallel()
+	sock := headlessNvim(t, nil)
+	dir := filepath.Dir(sock)
+	target := filepath.Join(dir, "target.txt")
+	if err := os.WriteFile(target, []byte("a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if _, err := queryNvim(ctx, 0, sock, `execute('vnew')`); err != nil {
+		t.Fatal(err)
+	}
+	differWin, err := queryNvim(ctx, 0, sock, `win_getid()`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	plan := hostPlan(Config{}, Request{File: "target.txt", Repo: dir, Env: Env{NvimHost: sock}})
+	if err := plan.Run(ctx); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if got, _ := queryNvim(ctx, 0, sock, `winnr("$")`); got != "2" {
+		t.Errorf("windows = %q, want 2", got)
+	}
+	if got, _ := queryNvim(ctx, 0, sock, `win_getid()`); got == differWin {
+		t.Errorf("file opened in differ's own window %s", got)
+	}
+}

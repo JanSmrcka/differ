@@ -621,3 +621,26 @@ func TestConfig_TimeoutsFallBackToTheDefaults(t *testing.T) {
 		t.Errorf("probe = %v, want the configured 3s", got)
 	}
 }
+
+// Started from nvim's :terminal, auto and reuse go back to that nvim even
+// inside tmux; a strategy chosen explicitly is still honoured.
+func TestResolve_InsideNvimTheHostWinsOverTheMultiplexer(t *testing.T) {
+	t.Parallel()
+	root := repoWith(t, "src.ts")
+	ed := stubEditor(t, "myed")
+	env := Env{Editor: ed, InTmux: true, TmuxPane: "%1", NvimHost: "/tmp/nvim.sock"}
+
+	for strategy, want := range map[string]Strategy{
+		"":       StrategyReuse,
+		"reuse":  StrategyReuse,
+		"inline": StrategyInline,
+	} {
+		plan, err := Resolve(context.Background(), Config{Strategy: strategy}, Request{File: "src.ts", Repo: root, Env: env})
+		if err != nil {
+			t.Fatalf("%q: Resolve: %v", strategy, err)
+		}
+		if plan.Strategy != want {
+			t.Errorf("%q: Strategy = %q, want %q", strategy, plan.Strategy, want)
+		}
+	}
+}
