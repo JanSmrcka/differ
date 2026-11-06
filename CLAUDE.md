@@ -45,7 +45,7 @@ main.go → cmd/root.go (cobra commands)
              ├── internal/theme    — color hex values only (no lipgloss)
              ├── internal/review   — review session: comments, per-file state, feedback text,
              │                        and its persistence to .git/differ/review.json
-             ├── internal/feedback — Target + Mux interfaces; clipboard/stdout/tmux/herdr
+             ├── internal/feedback — Target + Mux interfaces; clipboard/stdout/tmux/herdr/zellij
              ├── internal/editor   — decides and performs "open this file in an editor"
              ├── internal/testutil — temp git repos, diff fixtures, golden files (tests only)
              └── internal/ui
@@ -109,8 +109,9 @@ the one that locks the reviewer out.
 **Agents live in a multiplexer, and the picker does not know which.**
 `feedback.Mux` is discovery (list agents, own pane, where it looked);
 `feedback.Target` is delivery. `DetectMux` reads the environment — `HERDR_ENV`
-+ `HERDR_PANE_ID`, `TMUX`, and `TERM_PROGRAM` when both are set — with no
-subprocess. The UI gets an `Agent` and asks it for its `FeedbackConfig()` and
++ `HERDR_PANE_ID`, `TMUX`, and `TERM_PROGRAM` when both are set, then `ZELLIJ`
++ `ZELLIJ_PANE_ID` last (it is set in every pane, so a tmux or herdr nested
+inside zellij wins) — with no subprocess. The UI gets an `Agent` and asks it for its `FeedbackConfig()` and
 whether a config `Matches()` it; branching on the mux name in `internal/ui` is
 the thing to avoid. Two delivery rules that look contradictory and are not:
 **tmux pastes and never presses Enter**, because tmux cannot tell an agent from
@@ -129,6 +130,11 @@ wait would match that at once and report an answer nobody gave. Its answer
 lands on the `review.Delivery` and the comments as `Agent`, and `Model.Close`
 cancels it. `working` is never written to `review.json`: no wait survives the
 process, so on disk it would claim forever that the agent is working.
+**zellij pastes like tmux** (`zellij action paste`, bracketed, no Enter) and
+discovers in one `list-panes --json --all`, matching `pane_command` with the
+same `agentTool` rules. zellij exits 0 for an unknown pane id, so `Send` checks
+the listing first and says "pane not found" — the wording `paneIsGone` matches.
+`e` does not know zellij.
 
 `internal/editor` must not import `internal/ui` either. It both decides how to
 open a file and does it — the one exception is handing the terminal to a child
